@@ -17,10 +17,9 @@ urlpatterns = [
     path("validate_otp", views.validate_otp),
     path("admin/user/delete", views.delete_account_by_admin),
     path("users", views.ListUser.as_view()),
-    path("admin/name-user", views.NamedAdminUser.as_view()),
     path("users/block/block", views.BlockUserViews.as_view()),
     path("users/block/deblock", views.BlockUserViews.as_view()),
     path("verify-user", views.verify_user),
     path("check-user-account-status", views.check_user_account_status),
-    path("user-to-partner", views.NamedUserPartner.as_view()),
+
 ]

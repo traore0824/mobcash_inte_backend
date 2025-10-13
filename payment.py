@@ -13,7 +13,6 @@ from dateutil.relativedelta import relativedelta
 import logging
 from django.db import transaction as db_transaction
 from django.db.models import Q
-from mobcash_inte.serializers import TransactionSerializer
 from mobcash_inte_backend.settings import BASE_URL
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
