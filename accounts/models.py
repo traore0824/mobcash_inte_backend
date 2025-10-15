@@ -42,7 +42,7 @@ class User(AbstractUser):
     is_delete = models.BooleanField(default=False)
     phone = models.CharField(
         max_length=256,
-        unique=True,
+        unique=False,
     )
     otp = models.CharField(max_length=100, null=True)
     otp_created_at = models.DateTimeField(blank=True, null=True)

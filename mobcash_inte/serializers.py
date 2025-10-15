@@ -111,6 +111,9 @@ class BonusSerializer(serializers.ModelSerializer):
 
 class TransactionDetailsSerializer(serializers.ModelSerializer):
     user = SmallUserSerializer()
+    class Meta:
+        model = Transaction
+        fields ="__all__"
 
 
 class DepositTransactionSerializer(serializers.ModelSerializer):
@@ -230,7 +233,6 @@ class BotWithdrawalTransactionSerializer(serializers.ModelSerializer):
 
 
 class BotDepositTransactionSerializer(serializers.ModelSerializer):
-    telegram_user = SmallBotUserSerializer(read_only=True)
 
     class Meta:
         model = Transaction
@@ -241,7 +243,7 @@ class BotDepositTransactionSerializer(serializers.ModelSerializer):
             "app",
             "user_app_id",
             "network",
-            "telegram_user",
+            
         ]
         extra_kwargs = {
             "amount": {"required": True},

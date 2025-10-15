@@ -113,7 +113,7 @@ def init_mobcash(app_name: AppName):
     return bet_app
 
 
-def generate_reference(prefix, rand_digits=6):
+def generate_reference(prefix, rand_digits=3):
     millis = int(time.time() * 1_000)
     rnd = secrets.randbelow(10**rand_digits)
     return f"{prefix}{millis:013d}{rnd:0{rand_digits}d}"

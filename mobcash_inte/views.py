@@ -96,6 +96,7 @@ class DetailsNetworkView(generics.RetrieveUpdateDestroyAPIView):
 class NotificationView(generics.ListCreateAPIView):
     serializer_class = NotificationSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class= CustomPagination
 
     def get_queryset(self):
         queryset = Notification.objects.filter(is_read=False)
@@ -324,25 +325,42 @@ class ChangeTransactionStatus(decorators.APIView):
 
 
 class BotWithdrawalTransactionViews(decorators.APIView):
-    permission_classes = [IsAuthenticated]
-    def post(self, request, *args, **kwargs):
-        return super().post(request, *args, **kwargs)
 
-class BotDepositTransactionViews(generics.CreateAPIView):
-    serializer_class = BotDepositTransactionSerializer
     def create(self, request, *args, **kwargs):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
         transaction = serializer.save(
-            generate_reference(prefix="depot-"),
-            user=self.request.user,
+            reference=generate_reference(prefix="depot-"),
             type_trans="deposit",
+            telegram_user=request.telegram_user,
+            source="bot",
         )
         payment_fonction(reference=transaction.reference)
         return Response(
             TransactionDetailsSerializer(transaction).data,
             status=status.HTTP_201_CREATED,
         )
+
+
+class BotDepositTransactionViews(generics.CreateAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = BotDepositTransactionSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        transaction = serializer.save(
+            reference=generate_reference(prefix="depot-"),
+            type_trans="deposit",
+            telegram_user=request.telegram_user,
+            source="bot",
+        )
+        payment_fonction(reference=transaction.reference)
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_201_CREATED,
+        )
+
 
 class WithdrawalTransactionViews(generics.CreateAPIView):
     serializer_class = BotDepositTransactionSerializer
@@ -379,4 +397,12 @@ class IDLinkViews(viewsets.ModelViewSet):
             serializer.save(telegram_user=self.request.telegram_user)
 
 
+class ReadAllNotificaation(decorators.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    def post(self, request, *args, **kwargs):
+        result= None 
+        notifications = Notification.objects.filter(is_read=False)
+        if notifications.exists():
+            result = notifications.update(is_read=True)
+        return Response({"result": result})
 # Create your views here.
