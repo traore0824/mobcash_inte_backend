@@ -25,7 +25,7 @@ def generate_referral_code(min_length=6):
 class UserRegistrationSerializer(serializers.ModelSerializer):
     re_password = serializers.CharField(min_length=6, write_only=True)
     password = serializers.CharField(write_only=True, min_length=6)
-    
+
     class Meta:
         model = User
         fields = [
@@ -53,6 +53,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             email=validated_data.get("email"),
             phone=validated_data.get("phone"),
             referral_code=generate_referral_code(),
+            username=validated_data.get("email"),
         )
         user.set_password(validated_data.get("password"))
         user.save()
@@ -164,4 +165,5 @@ class SmallBotUserSerializer(serializers.ModelSerializer):
 class TelegramUserSerializer(serializers.ModelSerializer):
     class Meta:
         model = TelegramUser
-        fields = "__all__"
+        # fields = "__all__"
+        exclude = ["is_block"]

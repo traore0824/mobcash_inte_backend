@@ -1,7 +1,7 @@
 import logging
 from django.shortcuts import render
 from rest_framework.permissions import BasePermission
-from rest_framework import generics, permissions, status, decorators
+from rest_framework import generics, permissions, status, decorators, viewsets
 from accounts.helpers import CustomPagination
 from accounts.models import AppName, TelegramUser, User
 from mobcash_inte.helpers import (
@@ -13,6 +13,7 @@ from mobcash_inte.models import (
     Bonus,
     Caisse,
     Deposit,
+    IDLink,
     Network,
     Notification,
     Setting,
@@ -21,6 +22,7 @@ from mobcash_inte.models import (
     UserPhone,
 )
 from django_filters.rest_framework import DjangoFilterBackend
+from mobcash_inte.permissions import IsAuthenticated
 from mobcash_inte.serializers import (
     BonusSerializer,
     BotDepositTransactionSerializer,
@@ -30,6 +32,7 @@ from mobcash_inte.serializers import (
     DepositSerializer,
     DepositTransactionSerializer,
     DisbursmentTransactionSerializer,
+    IDLinkSerializer,
     NetworkSerializer,
     NotificationSerializer,
     ReadAppNameSerializer,
@@ -58,7 +61,7 @@ class UploadFileView(generics.ListCreateAPIView):
 class CreateNetworkView(generics.ListCreateAPIView):
     serializer_class = NetworkSerializer
 
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsAuthenticated]
 
     def get_permissions(self):
         if self.request.method == "POST":
@@ -153,7 +156,7 @@ class CreateAppName(generics.ListCreateAPIView):
 
     def get_permissions(self):
         if self.request.method == "GET":
-            self.permission_classes = [permissions.IsAuthenticated]
+            self.permission_classes = [IsAuthenticated]
         return super().get_permissions()
 
     def get_serializer_class(self):
@@ -289,28 +292,20 @@ class DisbursmentTransactionView(decorators.APIView):
         )
 
 
-class RegisterOrGetUserPhone(decorators.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+class UserPhoneViewSet(viewsets.ModelViewSet):
+    serializer_class = UserPhoneSerializer
+    permission_classes = [IsAuthenticated]
 
-    def post(self, request):
-        serializer = UserPhoneSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    def get_queryset(self):
+        if self.request.user.is_authenticated:
+            return UserPhone.objects.filter(user=self.request.user)
+        return UserPhone.objects.filter(telegram_user=self.request.telegram_user)
 
-    def get(self, request, *args, **kwargs):
-        user_phone = UserPhone.objects.filter(user=self.request.user)
-        return Response(UserPhoneSerializer(user_phone).data, status=status.HTTP_200_OK)
-
-    def delete(self, request, *args, **kwargs):
-        phone = self.request.GET.get("phone")
-        user_phone = UserPhone.objects.filter(
-            user=self.request.user, phone=phone
-        ).first()
-        if not user_phone:
-            return Response(status=status.HTTP_404_NOT_FOUND)
-        user_phone.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+    def perform_create(self, serializer):
+        if self.request.user.is_authenticated:
+            serializer.save(user=self.request.user)
+        else:
+            serializer.save(telegram_user=self.request.telegram_user)
 
 
 class ChangeTransactionStatus(decorators.APIView):
@@ -328,20 +323,8 @@ class ChangeTransactionStatus(decorators.APIView):
         )
 
 
-class BotTransactionPermission(BasePermission):
-    def has_permission(self, request, view):
-        user_id = request.headers.get("USER_ID")
-        if not user_id:
-            return False
-        
-        user = TelegramUser.objects.filter(telegram_user_id=user_id, is_block=False).first()
-        if not user:
-            return False
-        
-        return True
-
 class BotWithdrawalTransactionViews(decorators.APIView):
-    permission_classes = [BotTransactionPermission]
+    permission_classes = [IsAuthenticated]
     def post(self, request, *args, **kwargs):
         return super().post(request, *args, **kwargs)
 
@@ -377,6 +360,23 @@ class WithdrawalTransactionViews(generics.CreateAPIView):
             TransactionDetailsSerializer(transaction).data,
             status=status.HTTP_201_CREATED,
         )
+
+class IDLinkViews(viewsets.ModelViewSet):
+    serializer_class = IDLinkSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["app_name"]
+
+    def get_queryset(self):
+        if self.request.user.is_authenticated:
+            return IDLink.objects.filter(user=self.request.user)
+        return IDLink.objects.filter(telegram_user=self.request.telegram_user)
+
+    def perform_create(self, serializer):
+        if self.request.user.is_authenticated:
+            serializer.save(user=self.request.user)
+        else:
+            serializer.save(telegram_user=self.request.telegram_user)
 
 
 # Create your views here.

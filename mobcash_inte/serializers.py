@@ -61,7 +61,7 @@ class SendNotificationSerializer(serializers.Serializer):
 class ReadAppNameSerializer(serializers.ModelSerializer):
     class Meta:
         model = AppName
-        excludes = [
+        exclude = [
             "hash",
             "cashdeskid",
             "cashierpass",
@@ -71,7 +71,7 @@ class ReadAppNameSerializer(serializers.ModelSerializer):
 class CreateAppNameSerializer(serializers.ModelSerializer):
     class Meta:
         model = AppName
-        excludes = [
+        exclude = [
             "hash",
             "cashdeskid",
             "cashierpass",

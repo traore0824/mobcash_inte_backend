@@ -63,8 +63,11 @@ class Deposit(models.Model):
 
 
 class IDLink(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
-    user_app_id = models.CharField(max_length=120)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, blank=True, null=True)
+    telegram_user = models.ForeignKey(
+        TelegramUser, models.CASCADE, blank=True, null=True
+    )
+    user_app_id = models.CharField(max_length=120, unique=True)
     app_name = models.ForeignKey(
         AppName, on_delete=models.CASCADE, blank=True, null=True
     )
@@ -266,7 +269,8 @@ class BotMessage(models.Model):
 
 class UserPhone(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
-    user = models.ForeignKey(User, models.CASCADE)
+    user = models.ForeignKey(User, models.CASCADE, blank=True, null=True)
+    telegram_user = models.ForeignKey(TelegramUser, models.CASCADE, blank=True, null=True)
     phone = models.CharField(max_length=120, unique=True)
     network = models.ForeignKey(
         Network, on_delete=models.CASCADE, blank=True, null=True

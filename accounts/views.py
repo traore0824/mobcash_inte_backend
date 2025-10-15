@@ -69,10 +69,7 @@ def registration(request):
     else:
         serializer = UserRegistrationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user = serializer.save(user_app_id=serializer.validated_data.get("user_app_id"))
-        otp = create_otp()
-        user.otp = otp
-        user.save()
+        user = serializer.save()
     return Response(
         UserRegistrationSerializer(user).data, status=status.HTTP_201_CREATED
     )
@@ -149,7 +146,7 @@ def login(request):
             {"details": "Votre compte est bloqué pour fraude "},
             status=status.HTTP_400_BAD_REQUEST,
         )
-    auth_user = authenticate(email=user.email, password=password)
+    auth_user = authenticate(username=user.username, password=password)
 
     if auth_user is None:
         return Response(
@@ -475,6 +472,17 @@ class RegisterOrGetTelegramUser(APIView):
                 "email": request.data.get("email"),
             },
         )
+
+        # 🔁 Si l'utilisateur existe, mettre à jour si les valeurs sont différentes
+        if not created:
+            updated = False
+            for field in ["first_name", "last_name", "email"]:
+                new_value = request.data.get(field)
+                if new_value is not None and getattr(user, field) != new_value:
+                    setattr(user, field, new_value)
+                    updated = True
+            if updated:
+                user.save()
 
         serializer = TelegramUserSerializer(user)
         return Response(
