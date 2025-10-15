@@ -1,6 +1,6 @@
 from django.db import models
 
-from accounts.models import AppName, User
+from accounts.models import AppName, TelegramUser, User
 
 
 class UploadFile(models.Model):
@@ -163,7 +163,7 @@ TYPE_TRANS = [
     ("deposit", "Dépôt"),
     ("withdrawal", "Retrait"),
     ("disbursements", "Disbursements"),
-    ("reward", "reward")
+    ("reward", "reward"),
 ]
 
 TRANS_STATUS = [
@@ -173,11 +173,19 @@ TRANS_STATUS = [
     ("pending", "Pendind"),
 ]
 
+
+SOURCE_CHOICE = [("mobile", "Mobile"), ("web", "Web"), ("bot", "bot")]
+
+
 class Transaction(models.Model):
     amount = models.PositiveIntegerField(blank=True, null=True)
     deposit_reward_amount = models.PositiveIntegerField(blank=True, null=True)
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    telegram_user = models.ForeignKey(
+        TelegramUser, on_delete=models.SET_NULL, null=True, blank=True
+    )
     reference = models.CharField(max_length=255, blank=True, null=True)
+
     type_trans = models.CharField(max_length=120, choices=TYPE_TRANS)
     status = models.CharField(max_length=120, choices=TRANS_STATUS, default="pending")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -193,10 +201,23 @@ class Transaction(models.Model):
     otp_code = models.CharField(max_length=20, blank=True, null=True)
     public_id = models.CharField(max_length=250, blank=True, null=True)
     already_process = models.BooleanField(default=False)
-    
+    source = models.CharField(
+        max_length=120, blank=True, null=True, choices=SOURCE_CHOICE
+    )
     network = models.ForeignKey(
         Network, on_delete=models.CASCADE, blank=True, null=True
     )
+    old_status  = models.CharField(
+        max_length=120, choices=TRANS_STATUS, default="pending"
+    )
+    old_public_id = models.CharField(
+        max_length=120, choices=TRANS_STATUS, default="pending"
+    )
+    success_webhook_send = models.BooleanField(default=False)
+    fail_webhook_send = models.BooleanField(default=False)
+    pending_webhook_send = models.BooleanField(default=False)
+    timeout_webhook_send = models.BooleanField(default=False)
+
     class Meta:
         verbose_name = "Transaction"
         verbose_name_plural = "Transactions"
@@ -212,7 +233,7 @@ class Bonus(models.Model):
     transaction = models.ForeignKey(Transaction, on_delete=models.CASCADE)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     reason_bonus = models.CharField(max_length=255)
-    bonus_with=models.BooleanField(default=False)
+    bonus_with = models.BooleanField(default=False)
     bonus_delete = models.BooleanField(default=False)
 
     class Meta:
@@ -237,8 +258,19 @@ class Reward(models.Model):
         verbose_name = "Recompense"
         verbose_name_plural = "Recompenses"
 
+
 class BotMessage(models.Model):
     content = models.CharField(max_length=250)
     chat = models.CharField(max_length=100)
+
+
+class UserPhone(models.Model):
+    created_at = models.DateTimeField(auto_now_add=True)
+    user = models.ForeignKey(User, models.CASCADE)
+    phone = models.CharField(max_length=120, unique=True)
+    network = models.ForeignKey(
+        Network, on_delete=models.CASCADE, blank=True, null=True
+    )
+
 
 # Create your models here.

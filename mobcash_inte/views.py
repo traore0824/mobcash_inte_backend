@@ -1,9 +1,14 @@
 import logging
 from django.shortcuts import render
+from rest_framework.permissions import BasePermission
 from rest_framework import generics, permissions, status, decorators
 from accounts.helpers import CustomPagination
-from accounts.models import AppName, User
-from mobcash_inte.helpers import generate_reference, send_admin_notification, send_notification
+from accounts.models import AppName, TelegramUser, User
+from mobcash_inte.helpers import (
+    generate_reference,
+    send_admin_notification,
+    send_notification,
+)
 from mobcash_inte.models import (
     Bonus,
     Caisse,
@@ -13,14 +18,18 @@ from mobcash_inte.models import (
     Setting,
     Transaction,
     UploadFile,
+    UserPhone,
 )
 from django_filters.rest_framework import DjangoFilterBackend
 from mobcash_inte.serializers import (
     BonusSerializer,
+    BotDepositTransactionSerializer,
+    ChangeTransactionStatusSerializer,
     CreateAppNameSerializer,
     CreateSettingSerializer,
     DepositSerializer,
     DepositTransactionSerializer,
+    DisbursmentTransactionSerializer,
     NetworkSerializer,
     NotificationSerializer,
     ReadAppNameSerializer,
@@ -29,12 +38,14 @@ from mobcash_inte.serializers import (
     SendNotificationSerializer,
     TransactionDetailsSerializer,
     UploadFileSerializer,
+    UserPhoneSerializer,
 )
 from django.db import transaction
 from rest_framework.response import Response
 from django.utils import timezone
-from payment import connect_pro_webhook, payment_fonction
+from payment import connect_pro_webhook, disbursment_process, payment_fonction
 from django.db.models import Sum
+
 connect_pro_logger = logging.getLogger("Connect pro Logger")
 
 
@@ -206,10 +217,15 @@ class CreateDepositTransactionViews(generics.CreateAPIView):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
         transaction = serializer.save(
-            generate_reference(prefix="depot-"), user=self.request.user, type_trans="deposit"
+            generate_reference(prefix="depot-"),
+            user=self.request.user,
+            type_trans="deposit",
         )
         payment_fonction(reference=transaction.reference)
-        return Response(TransactionDetailsSerializer(transaction).data, status=status.HTTP_201_CREATED)
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class RewardTransactionViews(generics.CreateAPIView):
@@ -222,9 +238,9 @@ class RewardTransactionViews(generics.CreateAPIView):
     def create(self, request, *args, **kwargs):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
-        bonus =  Bonus.objects.filter(bonus_with=False, bonus_delete=False)
+        bonus = Bonus.objects.filter(bonus_with=False, bonus_delete=False)
         bonus_amount = bonus.aggregate(total=Sum("amount"))["total"] or 0
-        if bonus_amount<serializer.validated_data.get("amount"):
+        if bonus_amount < serializer.validated_data.get("amount"):
             return Response(
                 {
                     "details": "Votre compte bonus ne dispose pas de suffisamment de fonds pour effectuer cette opération. "
@@ -257,6 +273,110 @@ class ConnectProWebhook(decorators.APIView):
 
 class DisbursmentTransactionView(decorators.APIView):
     def post(self, request, *args, **kwargs):
+        serializer = DisbursmentTransactionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reference = serializer.validated_data.get("reference")
+        transaction = Transaction.objects.filter(reference=reference).first()
+        if not transaction:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        transaction.old_status = transaction.status
+        transaction.old_public_id=transaction.public_id
+        transaction.save()
+        disbursment_process(transaction=transaction)
+        transaction.refresh_from_db()
+        return Response(
+            TransactionDetailsSerializer(transaction).data, status=status.HTTP_200_OK
+        )
+
+
+class RegisterOrGetUserPhone(decorators.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = UserPhoneSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def get(self, request, *args, **kwargs):
+        user_phone = UserPhone.objects.filter(user=self.request.user)
+        return Response(UserPhoneSerializer(user_phone).data, status=status.HTTP_200_OK)
+
+    def delete(self, request, *args, **kwargs):
+        phone = self.request.GET.get("phone")
+        user_phone = UserPhone.objects.filter(
+            user=self.request.user, phone=phone
+        ).first()
+        if not user_phone:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        user_phone.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ChangeTransactionStatus(decorators.APIView):
+    def post(self, request, *args, **kwargs):
+        serializer = ChangeTransactionStatusSerializer(request.data)
+        serializer.is_valid(raise_exception=True)
+        reference = serializer.validated_data.get("reference")
+        transaction = Transaction.objects.filter(reference=reference).first()
+        if not transaction:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        transaction.status = serializer.validated_data.get("status")
+        transaction.save()
+        return Response(
+            TransactionDetailsSerializer(transaction).data, status=status.HTTP_200_OK
+        )
+
+
+class BotTransactionPermission(BasePermission):
+    def has_permission(self, request, view):
+        user_id = request.headers.get("USER_ID")
+        if not user_id:
+            return False
+        
+        user = TelegramUser.objects.filter(telegram_user_id=user_id, is_block=False).first()
+        if not user:
+            return False
+        
+        return True
+
+class BotWithdrawalTransactionViews(decorators.APIView):
+    permission_classes = [BotTransactionPermission]
+    def post(self, request, *args, **kwargs):
         return super().post(request, *args, **kwargs)
+
+class BotDepositTransactionViews(generics.CreateAPIView):
+    serializer_class = BotDepositTransactionSerializer
+    def create(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        transaction = serializer.save(
+            generate_reference(prefix="depot-"),
+            user=self.request.user,
+            type_trans="deposit",
+        )
+        payment_fonction(reference=transaction.reference)
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+class WithdrawalTransactionViews(generics.CreateAPIView):
+    serializer_class = BotDepositTransactionSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        transaction = serializer.save(
+            generate_reference(prefix="retrait-"),
+            user=self.request.user,
+            type_trans="retrait",
+        )
+        payment_fonction(reference=transaction.reference)
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_201_CREATED,
+        )
+
 
 # Create your views here.

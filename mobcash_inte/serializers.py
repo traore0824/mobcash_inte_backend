@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from accounts.models import AppName
-from accounts.serializers import SmallUserSerializer
+from accounts.serializers import SmallBotUserSerializer, SmallUserSerializer
 from mobcash_inte.models import (
     Advertisement,
     Bonus,
@@ -12,6 +12,7 @@ from mobcash_inte.models import (
     Setting,
     Transaction,
     UploadFile,
+    UserPhone,
 )
 from dateutil.relativedelta import relativedelta
 from django.utils import timezone
@@ -113,6 +114,7 @@ class TransactionDetailsSerializer(serializers.ModelSerializer):
 
 
 class DepositTransactionSerializer(serializers.ModelSerializer):
+    user= SmallUserSerializer(read_only=True)
     class Meta:
         model = Transaction
         fields = [
@@ -122,6 +124,7 @@ class DepositTransactionSerializer(serializers.ModelSerializer):
             "app",
             "user_app_id",
             "network",
+            "user",
         ]
         extra_kwargs = {
             "amount": {"required": True},
@@ -129,6 +132,7 @@ class DepositTransactionSerializer(serializers.ModelSerializer):
             "app": {"required": True},
             "user_app_id": {"required": True},
             "network": {"required": True},
+            "source": {"required": True},
         }
 
     def validate(self, data):
@@ -152,6 +156,7 @@ class DepositTransactionSerializer(serializers.ModelSerializer):
         return data
 
 class WithdrawalTransactionSerializer(serializers.ModelSerializer):
+    user = SmallUserSerializer(read_only=True)
     class Meta:
         model = Transaction
         fields = [
@@ -162,6 +167,7 @@ class WithdrawalTransactionSerializer(serializers.ModelSerializer):
             "user_app_id",
             "network",
             "withdriwal_code",
+            "user",
         ]
         extra_kwargs = {
             "withdriwal_code": {"required": True},
@@ -169,13 +175,14 @@ class WithdrawalTransactionSerializer(serializers.ModelSerializer):
             "app": {"required": True},
             "user_app_id": {"required": True},
             "network": {"required": True},
+            "source": {"required": True},
         }
 
 
 class RewardTransactionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Transaction
-        fields = ["user_app_id", "app", "amount"]
+        fields = ["user_app_id", "app", "amount", "source"]
         extra_kwargs = {
             "user_app_id": {"required": True},
             "app": {"required": True},
@@ -185,4 +192,88 @@ class RewardTransactionSerializer(serializers.ModelSerializer):
 
 class DisbursmentTransactionSerializer(serializers.Serializer):
     reference = serializers.CharField()
-    
+
+
+class UserPhoneSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserPhone
+        fields = "__all__"
+
+
+class ChangeTransactionStatusSerializer(serializers.Serializer):
+    status = serializers.CharField()
+    reference = serializers.CharField()
+
+class BotWithdrawalTransactionSerializer(serializers.ModelSerializer):
+    telegram_user = SmallBotUserSerializer(read_only=True)
+
+    class Meta:
+        model = Transaction
+        fields = [
+            "id",
+            "amount",
+            "phone_number",
+            "app",
+            "user_app_id",
+            "network",
+            "withdriwal_code",
+            "telegram_user",
+        ]
+        extra_kwargs = {
+            "withdriwal_code": {"required": True},
+            "phone_number": {"required": True}, 
+            "app": {"required": True},
+            "user_app_id": {"required": True},
+            "network": {"required": True},
+            "source": {"required": True},
+        }
+
+
+class BotDepositTransactionSerializer(serializers.ModelSerializer):
+    telegram_user = SmallBotUserSerializer(read_only=True)
+
+    class Meta:
+        model = Transaction
+        fields = [
+            "id",
+            "amount",
+            "phone_number",
+            "app",
+            "user_app_id",
+            "network",
+            "telegram_user",
+        ]
+        extra_kwargs = {
+            "amount": {"required": True},
+            "phone_number": {"required": True},
+            "app": {"required": True},
+            "user_app_id": {"required": True},
+            "network": {"required": True},
+            "source": {"required": True},
+        }
+
+    def validate(self, data):
+        setting = Setting.objects.first()
+        transaction = Transaction.objects.filter(
+            user_app_id=data.get("user_app_id"),
+            status="accept",
+            validated_at__lt=timezone.now() + relativedelta(minutes=5),
+        ).first()
+        if transaction:
+            time_left = (
+                transaction.validated_at + relativedelta(minutes=5)
+            ) - timezone.now()
+            minutes_left = time_left.seconds // 60
+            seconds_left = time_left.seconds % 60
+            raise serializers.ValidationError(
+                {"error_time_message": f"{minutes_left} M:{seconds_left} S"}
+            )
+
+        MINIMUM_DEPOSIT = setting.minimum_deposit
+        if MINIMUM_DEPOSIT > data.get("amount"):
+            raise serializers.ValidationError(
+                {
+                    "amount": f"{MINIMUM_DEPOSIT} est le montant minimum de depot accepter"
+                }
+            )
+        return data

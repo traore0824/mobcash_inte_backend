@@ -13,6 +13,7 @@ from dateutil.relativedelta import relativedelta
 import logging
 from django.db import transaction as db_transaction
 from django.db.models import Q
+from mobcash_inte.serializers import TransactionDetailsSerializer
 from mobcash_inte_backend.settings import BASE_URL
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
@@ -323,16 +324,11 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
 
         if xbet_response_data.get("Success") == True:
             payment_logger.info(f"Transaction de {transaction.app.name} success ")
-            transaction.validated_at= timezone.now()
+            transaction.validated_at = timezone.now()
             transaction.status = "accept"
             transaction.save()
             if transaction.type_trans == "reward":
                 accept_bonus_transaction(transaction=transaction)
-            send_notification(
-                title="Opération reussit avec succès",
-                content=f"Vous avez effectué un dépôt de {transaction.amount} FCFA sur votre compte {transaction.app.name.upper()}",
-                user=transaction.user,
-            )
             if setting.referral_bonus:
                 user_referrer = User.objects.filter(
                     referral_code=transaction.user.referrer_code
@@ -390,7 +386,8 @@ def reward_failed_process(transaction: Transaction):
         return bonus
     return
 
-def accept_bonus_transaction(transaction:Transaction):
+
+def accept_bonus_transaction(transaction: Transaction):
     bonus = Bonus.objects.filter(transaction=transaction)
     if bonus.exists():
         bonus = bonus.update(bonus_with=True, bonus_delete=True)
@@ -424,6 +421,84 @@ def payment_fonction(reference):
     transaction = Transaction.objects.filter(reference=reference).first()
     if not transaction:
         logger.info(f"Transaction avec reference {reference} non trouver")
-    if transaction.type_trans == "deposit":
+    if transaction.type_trans == "deposit" or transaction.type_trans=="reward":
         if transaction.network.deposit_api == "connect":
             deposit_connect(transaction=transaction)
+    elif transaction.type_trans == "withdrawal":
+        xbet_withdrawal_process(transaction=transaction)
+
+
+def xbet_withdrawal_process(transaction: Transaction):
+    app_name = transaction.app
+    servculAPI = init_mobcash(app_name=app_name)
+    if transaction.type_trans == "withdrawal":
+        response = servculAPI.withdraw_from_account(
+            userid=transaction.user_app_id, code=transaction.withdriwal_code
+        )
+        xbet_response_data = response.get("data")
+        logger.info(f"La reponse de retrait de mobcash{response}")
+        print(f"xbet_response_data {xbet_response_data}")
+        if (
+            str(xbet_response_data.get("Success")).lower() == "false"
+            or xbet_response_data.get("status") == 401
+        ):
+            transaction.status = "error"
+            transaction.save()
+        elif str(xbet_response_data.get("Success")).lower() == "true":
+            logger.info("app BET step suvccess 11111111")
+            amount = float(xbet_response_data.get("Summa")) * (-1)
+            transaction.amount = amount - transaction.fee
+            transaction.status = "payment_init_success"
+            transaction.last_xbet_trans = timezone.now()
+            transaction.save()
+            return True
+    transaction.refresh_from_db()
+
+
+def send_event(channel_name, event_name, data):
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        channel_name,
+        {
+            "type": event_name,
+            "data": data,
+        },
+    )
+
+
+def send_transaction_event_once(transaction: Transaction):
+    """Envoie un événement de transaction une seule fois par statut"""
+
+    status = transaction.status.lower()
+    webhook_flags = {
+        "accept": "success_webhook_send",
+        "error": "fail_webhook_send",
+        "pending": "pending_webhook_send",
+        "timeout": "timeout_webhook_send",
+    }
+
+    flag_field = webhook_flags.get(status)
+    if not flag_field:
+        logging.info(f"Statut non reconnu pour les webhooks: {status}")
+        return False
+
+    # Si l'événement a déjà  été envoyé et qu'on ne force pas, ne pas renvoyer
+    if getattr(transaction, flag_field, False):
+        logging.info(
+            f"Événement déjà envoyé pour transaction {transaction.id} avec statut {status}"
+        )
+        return False
+    logging.info(f"Event envoyer avec le status {status}")
+    send_event(
+        channel_name=f"private-channel_{str(transaction.created_by.id)}",
+        event_name="transaction",
+        data=TransactionDetailsSerializer(transaction).data,
+    )
+    # Marquer comme envoyé
+    setattr(transaction, flag_field, True)
+    transaction.save(update_fields=[flag_field])
+    return True
+
+
+def disbursment_process(transaction: Transaction):
+    webhook_transaction_success(transaction=transaction)

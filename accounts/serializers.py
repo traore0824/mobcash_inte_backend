@@ -7,7 +7,7 @@ from rest_framework import serializers
 from accounts.helpers import validate_password
 import constant
 from django.utils.translation import gettext_lazy as _
-from .models import AppName, User
+from .models import AppName, TelegramUser, User
 import string, secrets
 
 
@@ -153,3 +153,15 @@ class  SmallUserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User 
         fields = ["id", "first_name", "last_name", "email"]
+
+
+class SmallBotUserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TelegramUser
+        fields = ["id", "first_name", "last_name", "email"]
+
+
+class TelegramUserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TelegramUser
+        fields = "__all__"

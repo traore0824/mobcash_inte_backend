@@ -13,9 +13,10 @@ from rest_framework.decorators import api_view, permission_classes, APIView
 from dateutil.relativedelta import relativedelta
 import constant
 
-from .models import User
+from .models import TelegramUser, User
 from .serializers import (
     RefreshObtainSerializer,
+    TelegramUserSerializer,
     UpdateUserSerializer,
     UserDetailSerializer,
     UserRegistrationSerializer,
@@ -455,3 +456,28 @@ def generate_api_keys() -> dict:
 #         data["secret_key"] = user.secret_key
 #         data["public_key"] =  user.public_key
 #         return Response(data)
+
+
+class RegisterOrGetTelegramUser(APIView):
+    def post(self, request):
+        telegram_user_id = request.data.get("telegram_user_id")
+        if not telegram_user_id:
+            return Response(
+                {"error": "telegram_user_id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user, created = TelegramUser.objects.get_or_create(
+            telegram_user_id=telegram_user_id,
+            defaults={
+                "first_name": request.data.get("first_name"),
+                "last_name": request.data.get("last_name"),
+                "email": request.data.get("email"),
+            },
+        )
+
+        serializer = TelegramUserSerializer(user)
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK if not created else status.HTTP_201_CREATED,
+        )
