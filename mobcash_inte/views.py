@@ -4,6 +4,7 @@ from rest_framework.permissions import BasePermission
 from rest_framework import generics, permissions, status, decorators, viewsets
 from accounts.helpers import CustomPagination
 from accounts.models import AppName, TelegramUser, User
+from rest_framework.filters import SearchFilter
 from mobcash_inte.helpers import (
     generate_reference,
     send_admin_notification,
@@ -93,18 +94,20 @@ class DetailsNetworkView(generics.RetrieveUpdateDestroyAPIView):
 class NotificationView(generics.ListCreateAPIView):
     serializer_class = NotificationSerializer
     permission_classes = [permissions.IsAuthenticated]
-    pagination_class= CustomPagination
+    pagination_class = CustomPagination
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["user"]
 
     def get_queryset(self):
-        queryset = Notification.objects.filter(is_read=False)
+        queryset = Notification.objects.all()
         if not self.request.user.is_staff:
-            queryset = queryset.filter(user=self.request.user)
+            queryset = queryset.filter(user=self.request.user, is_read=False)
         return queryset
 
     def create(self, request, *args, **kwargs):
         serializer = SendNotificationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user_id = self.request.GET.get("id")
+        user_id = self.request.GET.get("user_id")
         if user_id:
             user = User.objects.filter(id=user_id).first()
             if not user:
@@ -116,8 +119,8 @@ class NotificationView(generics.ListCreateAPIView):
             )
 
         else:
+            
             send_admin_notification.delay(
-                user=user,
                 title=serializer.validated_data.get("title"),
                 content=serializer.validated_data.get("content"),
             )
@@ -281,7 +284,7 @@ class DisbursmentTransactionView(decorators.APIView):
         if not transaction:
             return Response(status=status.HTTP_404_NOT_FOUND)
         transaction.old_status = transaction.status
-        transaction.old_public_id=transaction.public_id
+        transaction.old_public_id = transaction.public_id
         transaction.save()
         disbursment_process(transaction=transaction)
         transaction.refresh_from_db()
@@ -293,8 +296,13 @@ class DisbursmentTransactionView(decorators.APIView):
 class UserPhoneViewSet(viewsets.ModelViewSet):
     serializer_class = UserPhoneSerializer
     permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter]
+    filterset_fields = ["user", "telegram_user", "network"]
+    search_fields = ["phone"]
 
     def get_queryset(self):
+        if self.request.user.is_authenticated and self.request.user.is_staff:
+            return UserPhone.objects.all()
         if self.request.user.is_authenticated:
             return UserPhone.objects.filter(user=self.request.user)
         return UserPhone.objects.filter(telegram_user=self.request.telegram_user)
@@ -376,13 +384,21 @@ class WithdrawalTransactionViews(generics.CreateAPIView):
             status=status.HTTP_201_CREATED,
         )
 
+
 class IDLinkViews(viewsets.ModelViewSet):
     serializer_class = IDLinkSerializer
     permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ["app_name"]
+    filter_backends = [DjangoFilterBackend, SearchFilter]
+    filterset_fields = [
+        "app_name",
+        "user",
+        "telegram_user",
+    ]
+    search_fields = ["user_app_id"]
 
     def get_queryset(self):
+        if self.request.user.is_authenticated and self.request.user.is_staff:
+            return IDLink.objects.all()
         if self.request.user.is_authenticated:
             return IDLink.objects.filter(user=self.request.user)
         return IDLink.objects.filter(telegram_user=self.request.telegram_user)
@@ -396,10 +412,13 @@ class IDLinkViews(viewsets.ModelViewSet):
 
 class ReadAllNotificaation(decorators.APIView):
     permission_classes = [permissions.IsAuthenticated]
+
     def post(self, request, *args, **kwargs):
-        result= None 
+        result = None
         notifications = Notification.objects.filter(is_read=False)
         if notifications.exists():
             result = notifications.update(is_read=True)
         return Response({"result": result})
+
+
 # Create your views here.

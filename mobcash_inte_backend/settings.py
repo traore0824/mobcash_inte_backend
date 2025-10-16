@@ -38,9 +38,18 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
-    "django.contrib.staticfiles",
+    "daphne", "django.contrib.staticfiles",
     "mobcash_inte",
     "accounts",
+    "django_filters",
+    "rest_framework",
+    "rest_framework_simplejwt",
+    "rest_framework.authtoken",
+    "rest_framework_simplejwt.token_blacklist",
+    "django_celery_results",
+    "django_celery_beat",
+    "fcm_django",
+    "corsheaders",
 ]
 
 MIDDLEWARE = [
@@ -71,8 +80,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'mobcash_inte_backend.wsgi.application'
-
-
+ASGI_APPLICATION = "mobcash_inte_backend.asgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
@@ -451,3 +459,15 @@ EMAIL_HOST_USER = "blaffa7@gmail.com"
 EMAIL_HOST_PASSWORD = os.getenv("BETPAY_EMAIL_PASSWORD")
 EMAIL_USE_TLS = True
 EMAIL_USE_SSL = False
+
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [("localhost", 6379)],
+            "capacity": 1500,
+            "expiry": 10,
+        },
+    },
+}
