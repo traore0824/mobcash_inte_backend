@@ -119,7 +119,6 @@ class NotificationView(generics.ListCreateAPIView):
             )
 
         else:
-            
             send_admin_notification.delay(
                 title=serializer.validated_data.get("title"),
                 content=serializer.validated_data.get("content"),
