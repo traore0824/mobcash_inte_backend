@@ -118,13 +118,14 @@ class Network(models.Model):
     indication = models.CharField(max_length=100, blank=True, null=True)
     image = models.TextField(blank=True, null=True)
     withdrawal_message = models.CharField(max_length=150, blank=True, null=True)
-    deposit_api = models.CharField(max_length=100, choices=API_CHOICES, default="bizao")
+    deposit_api = models.CharField(
+        max_length=100, choices=API_CHOICES, default="connect"
+    )
     withdrawal_api = models.CharField(
-        max_length=100, choices=API_CHOICES, default="bizao"
+        max_length=100, choices=API_CHOICES, default="connect"
     )
     payment_by_link = models.BooleanField(default=False)
     otp_required = models.BooleanField(default=False)
-    enable = models.BooleanField(default=True)
     deposit_message = models.TextField(blank=True, null=True)
     active_for_deposit = models.BooleanField(default=True)
     active_for_with = models.BooleanField(default=True)
@@ -193,6 +194,7 @@ class Transaction(models.Model):
     status = models.CharField(max_length=120, choices=TRANS_STATUS, default="pending")
     created_at = models.DateTimeField(auto_now_add=True)
     validated_at = models.DateTimeField(blank=True, null=True)
+    webhook_data = models.TextField(blank=True, null=True)
     wehook_receive_at = models.DateTimeField(blank=True, null=True)
     phone_number = models.CharField(max_length=50, blank=True, null=True)
     app = models.ForeignKey(AppName, on_delete=models.CASCADE, blank=True, null=True)

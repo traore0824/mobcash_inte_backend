@@ -11,6 +11,7 @@ urlpatterns = [
     path("connect-pro-webhook", views.ConnectProWebhook.as_view()),
     path("", include(router.urls)),
     path("network", views.CreateNetworkView.as_view()),
+    path("network/<int:pk>", views.CreateNetworkView.as_view()),
     path("plateform", views.CreateAppName.as_view()),
     path("notification", views.NotificationView.as_view()),
     path("delete-notification", views.ReadAllNotificaation.as_view()),

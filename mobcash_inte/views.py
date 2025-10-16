@@ -69,11 +69,8 @@ class CreateNetworkView(generics.ListCreateAPIView):
         return super().get_permissions()
 
     def get_queryset(self):
-        filter_type = self.request.GET.get("type")
+        filter_type = self.request.GET.get("type", "deposit")
         queryset = Network.objects.all()
-        if not self.request.user.is_staff:
-            queryset = queryset.filter(enable=True)
-
         if filter_type == "deposit":
             queryset = queryset.filter(active_for_deposit=True)
         elif filter_type == "withdrawal":

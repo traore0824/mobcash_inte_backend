@@ -13,7 +13,6 @@ class NetworkAdmin(admin.ModelAdmin):
         "withdrawal_api",
         "payment_by_link",
         "otp_required",
-        "enable",
         "active_for_deposit",
         "active_for_with",
         "created_at",
@@ -21,7 +20,6 @@ class NetworkAdmin(admin.ModelAdmin):
     list_filter = (
         "deposit_api",
         "withdrawal_api",
-        "enable",
         "otp_required",
         "payment_by_link",
         "active_for_deposit",

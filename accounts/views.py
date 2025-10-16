@@ -9,6 +9,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework import status, permissions, generics
 from rest_framework.response import Response
+from rest_framework.filters import SearchFilter
+from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.decorators import api_view, permission_classes, APIView
 from dateutil.relativedelta import relativedelta
 import constant
@@ -489,3 +491,12 @@ class RegisterOrGetTelegramUser(APIView):
             serializer.data,
             status=status.HTTP_200_OK if not created else status.HTTP_201_CREATED,
         )
+
+
+class ListBotUser(generics.ListAPIView):
+    serializer_class = TelegramUserSerializer
+    permission_classes = [permissions.IsAdminUser]
+    filter_backends = [DjangoFilterBackend, SearchFilter]
+    filterset_fields = ["is_block"]
+    search_fields = ["telegram_user_id", "first_name", "last_name", "email"]
+    queryset = TelegramUser.objects.all()
