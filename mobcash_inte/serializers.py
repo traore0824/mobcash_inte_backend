@@ -3,8 +3,10 @@ from rest_framework import serializers
 from accounts.models import AppName
 from accounts.serializers import SmallBotUserSerializer, SmallUserSerializer
 from mobcash_inte.models import (
+    TRANS_STATUS,
     Advertisement,
     Bonus,
+    Caisse,
     Deposit,
     IDLink,
     Network,
@@ -47,12 +49,6 @@ class NetworkSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
-class DepositSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Deposit
-        fields = "__all__"
-
-
 class SendNotificationSerializer(serializers.Serializer):
     content = serializers.CharField()
     title = serializers.CharField()
@@ -88,7 +84,7 @@ class ReadSettingSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Setting
-        excludes = [
+        exclude = [
             "connect_pro_password",
             "connect_pro_email",
             "connect_pro_token",
@@ -100,13 +96,15 @@ class ReadSettingSerializer(serializers.ModelSerializer):
 class CreateSettingSerializer(serializers.ModelSerializer):
     class Meta:
         model = Setting
-        excludes = "__all__"
+        fields = "__all__"
 
 
 class BonusSerializer(serializers.ModelSerializer):
     class Meta:
         model = Bonus
-        fields = "__all__"
+        # fields = "__all__"
+        exclude = ["bonus_with",
+"bonus_delete",]
 
 
 class TransactionDetailsSerializer(serializers.ModelSerializer):
@@ -128,6 +126,7 @@ class DepositTransactionSerializer(serializers.ModelSerializer):
             "user_app_id",
             "network",
             "user",
+            "source",
         ]
         extra_kwargs = {
             "amount": {"required": True},
@@ -171,6 +170,7 @@ class WithdrawalTransactionSerializer(serializers.ModelSerializer):
             "network",
             "withdriwal_code",
             "user",
+            "source",
         ]
         extra_kwargs = {
             "withdriwal_code": {"required": True},
@@ -204,7 +204,7 @@ class UserPhoneSerializer(serializers.ModelSerializer):
 
 
 class ChangeTransactionStatusSerializer(serializers.Serializer):
-    status = serializers.CharField()
+    status = serializers.ChoiceField(choices=TRANS_STATUS)
     reference = serializers.CharField()
 
 class BotWithdrawalTransactionSerializer(serializers.ModelSerializer):
@@ -279,3 +279,18 @@ class BotDepositTransactionSerializer(serializers.ModelSerializer):
                 }
             )
         return data
+
+
+class CaisseSerializer(serializers.ModelSerializer):
+    bet_app = ReadAppNameSerializer(read_only=True)
+    class Meta:
+        model = Caisse 
+        fields = "__all__"
+
+
+class DepositSerializer(serializers.ModelSerializer):
+    bet_app = ReadAppNameSerializer(read_only=True)
+
+    class Meta:
+        model = Deposit
+        fields = "__all__"

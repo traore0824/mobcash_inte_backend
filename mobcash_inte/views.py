@@ -27,6 +27,7 @@ from mobcash_inte.permissions import IsAuthenticated
 from mobcash_inte.serializers import (
     BonusSerializer,
     BotDepositTransactionSerializer,
+    CaisseSerializer,
     ChangeTransactionStatusSerializer,
     CreateAppNameSerializer,
     CreateSettingSerializer,
@@ -43,6 +44,7 @@ from mobcash_inte.serializers import (
     TransactionDetailsSerializer,
     UploadFileSerializer,
     UserPhoneSerializer,
+    WithdrawalTransactionSerializer,
 )
 from django.db import transaction
 from rest_framework.response import Response
@@ -126,17 +128,54 @@ class NotificationView(generics.ListCreateAPIView):
         return Response(status=status.HTTP_200_OK)
 
 
-class CreateDeposit(generics.ListCreateAPIView):
+class ListDeposit(generics.ListAPIView):
     serializer_class = DepositSerializer
     permission_classes = [permissions.IsAdminUser]
     queryset = Deposit.objects.all()
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["bet_app"]
+    pagination_class = CustomPagination
 
+
+class ListCaisse(generics.ListAPIView):
+    serializer_class = CaisseSerializer
+    permission_classes = [permissions.IsAdminUser]
+    queryset = Caisse.objects.all()
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["bet_app"]
+    # pagination_class = CustomPagination
+
+
+class ListDeposit(generics.ListAPIView):
+    serializer_class = DepositSerializer
+    permission_classes = [permissions.IsAdminUser]
+    queryset = Deposit.objects.all()
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["bet_app"]
+    pagination_class = CustomPagination
+
+
+class CreateDeposit(generics.CreateAPIView):
+    
+    serializer_class = DepositSerializer
+    permission_classes = [permissions.IsAdminUser]
+    queryset = Deposit.objects.all()
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["bet_app"]
+
+
+    @transaction.atomic
     def create(self, request, *args, **kwargs):
         serializer = DepositSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         obj = serializer.save()
-        with transaction.atomic():
-            solde = Caisse.objects.get_or_create(bet_app=obj.bet_app)
+        caisse, created = Caisse.objects.select_for_update().get_or_create(
+            bet_app=obj.bet_app
+        )
+
+        caisse.solde += obj.amount
+        caisse.save()
+
         return Response(DepositSerializer(obj).data, status=status.HTTP_201_CREATED)
 
 
@@ -199,13 +238,18 @@ class SettingViews(decorators.APIView):
 
 
 class GetBonus(generics.ListAPIView):
+    pagination_class = CustomPagination
     serializer_class = BonusSerializer
     permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["user"]
 
     def get_queryset(self):
         queryset = Bonus.objects.all()
         if not self.request.user.is_staff:
-            queryset = queryset.filter(user=self.request.user)
+            queryset = queryset.filter(
+                user=self.request.user, bonus_with=False, bonus_delete=False
+            )
         return queryset
 
 
@@ -220,7 +264,7 @@ class CreateDepositTransactionViews(generics.CreateAPIView):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
         transaction = serializer.save(
-            generate_reference(prefix="depot-"),
+            reference=generate_reference(prefix="depot-"),
             user=self.request.user,
             type_trans="deposit",
         )
@@ -314,8 +358,10 @@ class UserPhoneViewSet(viewsets.ModelViewSet):
 
 
 class ChangeTransactionStatus(decorators.APIView):
+    permission_classes = [permissions.IsAdminUser]
+
     def post(self, request, *args, **kwargs):
-        serializer = ChangeTransactionStatusSerializer(request.data)
+        serializer = ChangeTransactionStatusSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         reference = serializer.validated_data.get("reference")
         transaction = Transaction.objects.filter(reference=reference).first()
@@ -367,15 +413,36 @@ class BotDepositTransactionViews(generics.CreateAPIView):
 
 
 class WithdrawalTransactionViews(generics.CreateAPIView):
-    serializer_class = BotDepositTransactionSerializer
+    serializer_class = WithdrawalTransactionSerializer
+    permission_classes = [permissions.IsAuthenticated]
 
     def create(self, request, *args, **kwargs):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
         transaction = serializer.save(
-            generate_reference(prefix="retrait-"),
-            user=self.request.user,
-            type_trans="retrait",
+            reference=generate_reference(prefix="retrait-"),
+            type_trans="withdrawal",
+            user=request.user,
+        )
+        payment_fonction(reference=transaction.reference)
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class DepositTransactionViews(generics.CreateAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = DepositTransactionSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        transaction = serializer.save(
+            reference=generate_reference(prefix="depot-"),
+            type_trans="deposit",
+            telegram_user=request.telegram_user,
+            source="bot",
         )
         payment_fonction(reference=transaction.reference)
         return Response(
@@ -418,6 +485,35 @@ class ReadAllNotificaation(decorators.APIView):
         if notifications.exists():
             result = notifications.update(is_read=True)
         return Response({"result": result})
+
+
+class HistoryTransactionViews(generics.ListAPIView):
+    serializer_class = TransactionDetailsSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = CustomPagination
+    filter_backends = [DjangoFilterBackend, SearchFilter]
+    filterset_fields = [
+        "user",
+        "telegram_user",
+        "type_trans",
+        "status",
+        "app",
+        "source",
+        "network",
+    ]
+    search_fields = [
+        "reference",
+        "phone_number",
+        "user_app_id",
+        "public_id",
+    ]
+
+    def get_queryset(self):
+        if self.request.user.is_authenticated and self.request.user.is_staff:
+            return Transaction.objects.all()
+        if self.request.user.is_authenticated:
+            return Transaction.objects.filter(user=self.request.user)
+        return Transaction.objects.filter(telegram_user=self.request.telegram_user)
 
 
 # Create your views here.

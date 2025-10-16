@@ -236,7 +236,7 @@ class Transaction(models.Model):
 class Bonus(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     amount = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
-    transaction = models.ForeignKey(Transaction, on_delete=models.CASCADE)
+    transaction = models.ForeignKey(Transaction, on_delete=models.CASCADE, blank=True, null=True)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     reason_bonus = models.CharField(max_length=255)
     bonus_with = models.BooleanField(default=False)

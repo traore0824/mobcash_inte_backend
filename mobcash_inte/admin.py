@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Network, Notification, Setting, UserPhone
+from .models import Bonus, Network, Notification, Setting, UserPhone
 
 
 @admin.register(Network)
@@ -217,3 +217,20 @@ class SettingAdmin(admin.ModelAdmin):
             },
         ),
     )
+
+
+@admin.register(Bonus)
+class BonusAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "user",
+        "amount",
+        "reason_bonus",
+        "bonus_with",
+        "bonus_delete",
+        "created_at",
+    )
+    list_filter = ("bonus_with", "bonus_delete", "created_at")
+    search_fields = ("user__username", "user__email", "reason_bonus")
+    date_hierarchy = "created_at"
+    ordering = ("-created_at",)

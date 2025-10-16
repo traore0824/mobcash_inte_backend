@@ -17,4 +17,13 @@ urlpatterns = [
     path("delete-notification", views.ReadAllNotificaation.as_view()),
     path("bot-transaction-deposit", views.BotDepositTransactionViews.as_view()),
     path("bot-transaction-withdrawal", views.BotWithdrawalTransactionViews.as_view()),
+    path("transaction-deposit", views.CreateDepositTransactionViews.as_view()),
+    path("transaction-withdrawal", views.WithdrawalTransactionViews.as_view()),
+    path("bonus", views.GetBonus.as_view()),
+    path("transaction-history", views.HistoryTransactionViews.as_view()),
+    path("change-transaction", views.ChangeTransactionStatus.as_view()),
+    path("setting", views.SettingViews.as_view()),
+    path("deposit", views.CreateDeposit.as_view()),
+    path("list-deposit", views.ListDeposit.as_view()),
+    path("caisses",views.ListCaisse.as_view())
 ]

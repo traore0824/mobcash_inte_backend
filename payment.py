@@ -430,28 +430,28 @@ def payment_fonction(reference):
 
 def xbet_withdrawal_process(transaction: Transaction):
     app_name = transaction.app
-    servculAPI = init_mobcash(app_name=app_name)
-    if transaction.type_trans == "withdrawal":
-        response = servculAPI.withdraw_from_account(
-            userid=transaction.user_app_id, code=transaction.withdriwal_code
-        )
-        xbet_response_data = response.get("data")
-        logger.info(f"La reponse de retrait de mobcash{response}")
-        print(f"xbet_response_data {xbet_response_data}")
-        if (
-            str(xbet_response_data.get("Success")).lower() == "false"
-            or xbet_response_data.get("status") == 401
-        ):
-            transaction.status = "error"
-            transaction.save()
-        elif str(xbet_response_data.get("Success")).lower() == "true":
-            logger.info("app BET step suvccess 11111111")
-            amount = float(xbet_response_data.get("Summa")) * (-1)
-            transaction.amount = amount - transaction.fee
-            transaction.status = "payment_init_success"
-            transaction.last_xbet_trans = timezone.now()
-            transaction.save()
-            return True
+    # servculAPI = init_mobcash(app_name=app_name)
+    # if transaction.type_trans == "withdrawal":
+    #     response = servculAPI.withdraw_from_account(
+    #         userid=transaction.user_app_id, code=transaction.withdriwal_code
+    #     )
+    #     xbet_response_data = response.get("data")
+    #     logger.info(f"La reponse de retrait de mobcash{response}")
+    #     print(f"xbet_response_data {xbet_response_data}")
+    #     if (
+    #         str(xbet_response_data.get("Success")).lower() == "false"
+    #         or xbet_response_data.get("status") == 401
+    #     ):
+    #         transaction.status = "error"
+    #         transaction.save()
+    #     elif str(xbet_response_data.get("Success")).lower() == "true":
+    #         logger.info("app BET step suvccess 11111111")
+    #         amount = float(xbet_response_data.get("Summa")) * (-1)
+    #         transaction.amount = amount - transaction.fee
+    #         transaction.status = "payment_init_success"
+    #         transaction.last_xbet_trans = timezone.now()
+    #         transaction.save()
+    #         return True
     transaction.refresh_from_db()
 
 
