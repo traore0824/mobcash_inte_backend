@@ -129,7 +129,6 @@ class Network(models.Model):
     deposit_message = models.TextField(blank=True, null=True)
     active_for_deposit = models.BooleanField(default=True)
     active_for_with = models.BooleanField(default=True)
-    
 
 
 class Setting(models.Model):
@@ -273,11 +272,21 @@ class BotMessage(models.Model):
 class UserPhone(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     user = models.ForeignKey(User, models.CASCADE, blank=True, null=True)
-    telegram_user = models.ForeignKey(TelegramUser, models.CASCADE, blank=True, null=True)
-    phone = models.CharField(max_length=120, unique=True)
+    telegram_user = models.ForeignKey(
+        TelegramUser, models.CASCADE, blank=True, null=True
+    )
+    phone = models.CharField(max_length=120)
     network = models.ForeignKey(
         Network, on_delete=models.CASCADE, blank=True, null=True
     )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user", "phone"], name="unique_user_phone"),
+            models.UniqueConstraint(
+                fields=["telegram_user", "phone"], name="unique_telegram_user_phone"
+            ),
+        ]
 
 
 # Create your models here.

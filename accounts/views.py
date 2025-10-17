@@ -500,3 +500,12 @@ class ListBotUser(generics.ListAPIView):
     filterset_fields = ["is_block"]
     search_fields = ["telegram_user_id", "first_name", "last_name", "email"]
     queryset = TelegramUser.objects.all()
+
+
+class VerifyTelegramUser(APIView):
+    def get(self, request, *args, **kwargs):
+        telegram_user_id = self.request.GET.get("telegram_user_id")
+        user = TelegramUser.objects.filter(telegram_user_id=telegram_user_id).first()
+        if user:
+            return Response({"user_exist": True})
+        return Response({"user_exist": False})
