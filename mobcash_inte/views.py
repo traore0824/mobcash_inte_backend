@@ -27,6 +27,7 @@ from mobcash_inte.permissions import IsAuthenticated
 from mobcash_inte.serializers import (
     BonusSerializer,
     BotDepositTransactionSerializer,
+    BotWithdrawalTransactionSerializer,
     CaisseSerializer,
     ChangeTransactionStatusSerializer,
     CreateAppNameSerializer,
@@ -374,16 +375,18 @@ class ChangeTransactionStatus(decorators.APIView):
         )
 
 
-class BotWithdrawalTransactionViews(decorators.APIView):
+class BotWithdrawalTransactionViews(generics.CreateAPIView):
+
+    serializer_class = BotWithdrawalTransactionSerializer
+    permission_classes = [IsAuthenticated]
 
     def create(self, request, *args, **kwargs):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
         transaction = serializer.save(
-            reference=generate_reference(prefix="depot-"),
-            type_trans="deposit",
-            telegram_user=request.telegram_user,
-            source="bot",
+            reference=generate_reference(prefix="retrait-"),
+            type_trans="withdrawal",
+            user=request.user,
         )
         payment_fonction(reference=transaction.reference)
         return Response(
@@ -514,7 +517,6 @@ class HistoryTransactionViews(generics.ListAPIView):
         if self.request.user.is_authenticated:
             return Transaction.objects.filter(user=self.request.user)
         return Transaction.objects.filter(telegram_user=self.request.telegram_user)
-
 
 
 # Create your views here.
