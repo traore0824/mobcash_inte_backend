@@ -386,7 +386,7 @@ class BotWithdrawalTransactionViews(generics.CreateAPIView):
         transaction = serializer.save(
             reference=generate_reference(prefix="retrait-"),
             type_trans="withdrawal",
-            user=request.user,
+            telegram_user=request.telegram_user,
         )
         payment_fonction(reference=transaction.reference)
         return Response(
