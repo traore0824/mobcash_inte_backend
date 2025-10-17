@@ -25,5 +25,5 @@ urlpatterns = [
     path("setting", views.SettingViews.as_view()),
     path("deposit", views.CreateDeposit.as_view()),
     path("list-deposit", views.ListDeposit.as_view()),
-    path("caisses",views.ListCaisse.as_view())
+    path("caisses",views.ListCaisse.as_view()),
 ]
