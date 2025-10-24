@@ -379,7 +379,7 @@ class BotWithdrawalTransactionViews(generics.CreateAPIView):
 
     serializer_class = BotWithdrawalTransactionSerializer
     permission_classes = [IsAuthenticated]
-
+    
     def create(self, request, *args, **kwargs):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)

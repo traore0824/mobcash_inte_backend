@@ -171,7 +171,7 @@ TYPE_TRANS = [
 ]
 
 TRANS_STATUS = [
-    ("init_payment", "En entente"),
+    ("init_payment", "Une etape sur 2"),
     ("accept", "Accept"),
     ("error", "Erreur"),
     ("pending", "Pendind"),
