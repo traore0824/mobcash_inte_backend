@@ -4,7 +4,6 @@ from accounts.models import AppName, TelegramUser, User
 
 
 class UploadFile(models.Model):
-    image = models.ImageField(upload_to="media", blank=True, null=True)
     file = models.FileField(upload_to="media", blank=True, null=True)
 
     class Meta:

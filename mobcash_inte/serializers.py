@@ -30,6 +30,10 @@ class UploadFileSerializer(serializers.ModelSerializer):
         model = UploadFile
         fields = "__all__"
 
+        extra_kwargs = {
+            "file": {"required": True}
+        }
+
 
 class IDLinkSerializer(serializers.ModelSerializer):
     class Meta:
@@ -201,8 +205,6 @@ class UserPhoneSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserPhone
         fields = "__all__"
-        
-    
 
 
 class ChangeTransactionStatusSerializer(serializers.Serializer):
