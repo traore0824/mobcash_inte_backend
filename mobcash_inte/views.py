@@ -1,5 +1,6 @@
 import logging
 from django.shortcuts import render
+from django.conf.urls import handler404
 from rest_framework.permissions import BasePermission
 from rest_framework import generics, permissions, status, decorators, viewsets
 from accounts.helpers import CustomPagination
@@ -531,5 +532,11 @@ class HistoryTransactionViews(generics.ListAPIView):
             return Transaction.objects.filter(user=self.request.user)
         return Transaction.objects.filter(telegram_user=self.request.telegram_user)
 
+
+def custom_404(request, exception):
+    return render(request, "404.html", status=404)
+
+
+handler404 = custom_404
 
 # Create your views here.

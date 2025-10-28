@@ -14,7 +14,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.decorators import api_view, permission_classes, APIView
 from dateutil.relativedelta import relativedelta
 import constant
-
+from django.conf.urls import handler404
 from .models import TelegramUser, User
 from .serializers import (
     RefreshObtainSerializer,
@@ -509,3 +509,10 @@ class VerifyTelegramUser(APIView):
         if user:
             return Response({"user_exist": True})
         return Response({"user_exist": False})
+
+
+def custom_404(request, exception):
+    return render(request, "404.html", status=404)
+
+
+handler404 = custom_404
