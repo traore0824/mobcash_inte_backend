@@ -532,7 +532,6 @@ class HistoryTransactionViews(generics.ListAPIView):
             return Transaction.objects.filter(user=self.request.user)
         return Transaction.objects.filter(telegram_user=self.request.telegram_user)
 
-
 def custom_404(request, exception):
     return render(request, "404.html", status=404)
 
