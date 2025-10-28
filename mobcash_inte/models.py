@@ -222,6 +222,7 @@ class Transaction(models.Model):
     fail_webhook_send = models.BooleanField(default=False)
     pending_webhook_send = models.BooleanField(default=False)
     timeout_webhook_send = models.BooleanField(default=False)
+    api = models.CharField(max_length=100, blank=True, null=True)
 
     class Meta:
         verbose_name = "Transaction"

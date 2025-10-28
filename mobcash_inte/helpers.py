@@ -87,7 +87,7 @@ def send_notification(user: User, title: str, content: str, data=None, reference
     )
 
 
-def send_telegram_message(content, chat_id=5475155671):
+def send_telegram_message(content, chat_id=917540842):
     bot_token = os.getenv("TOKEN_BOT")
     api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 

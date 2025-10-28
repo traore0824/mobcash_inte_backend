@@ -28,6 +28,8 @@ class AppName(models.Model):
     max_deposit = models.PositiveIntegerField(blank=True, null=True)
     minimun_with = models.PositiveIntegerField(blank=True, null=True)
     max_win = models.PositiveIntegerField(blank=True, null=True)
+    active_for_deposit = models.BooleanField(default=True)
+    active_for_with = models.BooleanField(default=True)
 
     def __str__(self):
         return self.name

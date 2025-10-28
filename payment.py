@@ -117,14 +117,24 @@ def get_network_id(name):
 
 
 def connect_pro_withd_process(transaction: Transaction, disbursements=False):
-    # if transaction.type_trans == "withdrawal" and not disbursements:
-    #     response = xbet_withdrawal_process(transaction=transaction)
-    #     TestModel.objects.create(name=f"le retour de xbet {response}")
-    # else:
-    #     response = True
-    # if response == True:
-    #     connect_withdrawal(transaction=transaction)
-    pass
+    logger.info("Demarrage dans la fonction de retrait")
+    if transaction.type_trans == "withdrawal" and not disbursements:
+        response = xbet_withdrawal_process(transaction=transaction)
+    else:
+        response = True
+    if response == True:
+        content = (
+            "💸 **Nouvelle demande de retrait** 💸\n\n"
+            f"**Référence :** {transaction.reference}\n"
+            f"**Nom de la plateforme :** {transaction.app.name if transaction.app else 'N/A'}\n"
+            f"**User ID :** {transaction.user_app_id}\n"
+            f"**Email :** {transaction.user.email if transaction.user and hasattr(transaction.user, 'email') else 'N/A'}\n"
+            f"**Téléphone :** {transaction.phone_number or 'N/A'}"
+            f"**Montant :** {transaction.amount } Franc"
+            f"**Reseau :** {transaction.network.name }"
+            f"**Date de confirmation :** {transaction.validated_at }"
+        )
+        send_telegram_message(content=content)
 
 
 def deposit_connect(transaction: Transaction):
@@ -404,7 +414,7 @@ def check_solde(transaction: Transaction):
                 .select_for_update()
                 .first()
             )
-            caisse.solde = caisse.solde + transaction.amount
+            caisse.solde = float(caisse.solde) + float(transaction.amount)
             caisse.save()
         else:
             caisse = (
@@ -412,7 +422,7 @@ def check_solde(transaction: Transaction):
                 .select_for_update()
                 .first()
             )
-            caisse.solde = caisse.solde - transaction.amount
+            caisse.solde = float(caisse.solde) - float(transaction.amount)
             caisse.save()
 
 
@@ -422,37 +432,38 @@ def payment_fonction(reference):
     if not transaction:
         logger.info(f"Transaction avec reference {reference} non trouver")
     if transaction.type_trans == "deposit" or transaction.type_trans=="reward":
-        if transaction.network.deposit_api == "connect":
+        if transaction.api == "connect":
             deposit_connect(transaction=transaction)
-    elif transaction.type_trans == "withdrawal":
-        xbet_withdrawal_process(transaction=transaction)
+    elif transaction == "withdrawal":
+        if transaction.api == "connect":
+            connect_pro_withd_process(transaction=transaction)
 
 
 def xbet_withdrawal_process(transaction: Transaction):
     app_name = transaction.app
-    # servculAPI = init_mobcash(app_name=app_name)
-    # if transaction.type_trans == "withdrawal":
-    #     response = servculAPI.withdraw_from_account(
-    #         userid=transaction.user_app_id, code=transaction.withdriwal_code
-    #     )
-    #     xbet_response_data = response.get("data")
-    #     logger.info(f"La reponse de retrait de mobcash{response}")
-    #     print(f"xbet_response_data {xbet_response_data}")
-    #     if (
-    #         str(xbet_response_data.get("Success")).lower() == "false"
-    #         or xbet_response_data.get("status") == 401
-    #     ):
-    #         transaction.status = "error"
-    #         transaction.save()
-    #     elif str(xbet_response_data.get("Success")).lower() == "true":
-    #         logger.info("app BET step suvccess 11111111")
-    #         amount = float(xbet_response_data.get("Summa")) * (-1)
-    #         transaction.amount = amount - transaction.fee
-    #         transaction.status = "payment_init_success"
-    #         transaction.last_xbet_trans = timezone.now()
-    #         transaction.save()
-    #         return True
-    transaction.refresh_from_db()
+    servculAPI = init_mobcash(app_name=app_name)
+    if transaction.type_trans == "withdrawal":
+        response = servculAPI.withdraw_from_account(
+            userid=transaction.user_app_id, code=transaction.withdriwal_code
+        )
+        xbet_response_data = response.get("data")
+        logger.info(f"La reponse de retrait de mobcash{response}")
+        if (
+            str(xbet_response_data.get("Success")).lower() == "false"
+            or xbet_response_data.get("status") == 401
+        ):
+            transaction.status = "error"
+            transaction.save()
+            transaction.refresh_from_db()
+        elif str(xbet_response_data.get("Success")).lower() == "true":
+            logger.info("app BET step suvccess 11111111")
+            amount = float(xbet_response_data.get("Summa")) * (-1)
+            transaction.amount = amount 
+            transaction.status = "init_payment"
+            transaction.validated_at = timezone.now()
+            transaction.save()
+            transaction.refresh_from_db()
+            return True
 
 
 def send_event(channel_name, event_name, data):

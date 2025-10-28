@@ -189,6 +189,11 @@ class CreateAppName(generics.ListCreateAPIView):
             queryset = AppName.objects.all().order_by("order")
         else:
             queryset = AppName.objects.filter(enable=True).order_by("order")
+        type = self.request.GET.get("type")
+        if type == "deposit":
+            queryset = queryset.filter(active_for_deposit=True)
+        elif type == "withdrawal":
+            queryset = queryset.filter(active_for_with=True)
         return queryset
 
     serializer_class = ReadAppNameSerializer
@@ -269,6 +274,8 @@ class CreateDepositTransactionViews(generics.CreateAPIView):
             user=self.request.user,
             type_trans="deposit",
         )
+        transaction.api = transaction.network.deposit_api
+        transaction.save()
         payment_fonction(reference=transaction.reference)
         return Response(
             TransactionDetailsSerializer(transaction).data,
@@ -379,7 +386,7 @@ class BotWithdrawalTransactionViews(generics.CreateAPIView):
 
     serializer_class = BotWithdrawalTransactionSerializer
     permission_classes = [IsAuthenticated]
-    
+
     def create(self, request, *args, **kwargs):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -388,6 +395,8 @@ class BotWithdrawalTransactionViews(generics.CreateAPIView):
             type_trans="withdrawal",
             telegram_user=request.telegram_user,
         )
+        transaction.api = transaction.network.withdrawal_api
+        transaction.save()
         payment_fonction(reference=transaction.reference)
         return Response(
             TransactionDetailsSerializer(transaction).data,
@@ -408,6 +417,8 @@ class BotDepositTransactionViews(generics.CreateAPIView):
             telegram_user=request.telegram_user,
             source="bot",
         )
+        transaction.api = transaction.network.deposit_api
+        transaction.save()
         payment_fonction(reference=transaction.reference)
         return Response(
             TransactionDetailsSerializer(transaction).data,
@@ -427,6 +438,8 @@ class WithdrawalTransactionViews(generics.CreateAPIView):
             type_trans="withdrawal",
             user=request.user,
         )
+        transaction.api = transaction.network.withdrawal_api
+        transaction.save()
         payment_fonction(reference=transaction.reference)
         return Response(
             TransactionDetailsSerializer(transaction).data,
