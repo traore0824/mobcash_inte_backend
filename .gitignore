@@ -104,6 +104,7 @@ celerybeat.pid
 
 # Environments
 .env
+
 .venv
 LearnTest/
 env/
@@ -149,4 +150,5 @@ minforeveal/settings.py
 **/migrations/**
 !**/migrations
 !**/migrations/__init__.py
+turaincash.json
 #**/migrations/*
