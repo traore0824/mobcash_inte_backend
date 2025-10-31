@@ -83,6 +83,9 @@ MIDDLEWARE = [
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "https://localhost",
+    "https://turaincash.net",
+    "https://admin.turaincash.net",
+    "https://turnaicash-mobile-app-1.vercel.app",
 ]
 
 
