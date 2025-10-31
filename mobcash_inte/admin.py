@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Bonus, Network, Notification, Setting, UserPhone
+from .models import Bonus, Caisse, Network, Notification, Setting, UserPhone
 
 
 @admin.register(Network)
@@ -234,3 +234,17 @@ class BonusAdmin(admin.ModelAdmin):
     search_fields = ("user__username", "user__email", "reason_bonus")
     date_hierarchy = "created_at"
     ordering = ("-created_at",)
+
+
+@admin.register(Caisse)
+class CaisseAdmin(admin.ModelAdmin):
+    list_display = ("bet_app", "solde", "updated_at")
+    list_filter = ("bet_app",)
+    search_fields = ("bet_app__name",)
+    readonly_fields = ("updated_at",)
+    autocomplete_fields = ("bet_app",)
+
+    fieldsets = (
+        (None, {"fields": ("bet_app", "solde")}),
+        ("Mise à jour", {"fields": ("updated_at",)}),
+    )

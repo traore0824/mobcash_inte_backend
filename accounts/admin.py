@@ -62,4 +62,34 @@ class UserAdmin(BaseUserAdmin):
 
 @admin.register(AppName)
 class AppNameAdmin(admin.ModelAdmin):
-    list_display = ["id", "name"]
+    list_display = (
+        "name",
+        "enable",
+        "city",
+        "active_for_deposit",
+        "active_for_with",
+        "order",
+    )
+    list_filter = ("enable", "active_for_deposit", "active_for_with", "city")
+    search_fields = ("name", "city", "street")
+    ordering = ("order",)
+    fieldsets = (
+        ("Informations principales", {"fields": ("name", "image", "enable", "order")}),
+        ("Localisation", {"fields": ("city", "street")}),
+        ("Paramètres de caisse", {"fields": ("cashdeskid", "cashierpass", "hash")}),
+        (
+            "Liens utiles",
+            {
+                "fields": (
+                    "deposit_tuto_link",
+                    "withdrawal_tuto_link",
+                    "why_withdrawal_fail",
+                )
+            },
+        ),
+        (
+            "Limites",
+            {"fields": ("minimun_deposit", "max_deposit", "minimun_with", "max_win")},
+        ),
+        ("Activations", {"fields": ("active_for_deposit", "active_for_with")}),
+    )
