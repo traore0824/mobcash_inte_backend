@@ -24,6 +24,17 @@ load_dotenv()
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv("SECRET_KEY")
 
+
+FCM_DJANGO_SETTINGS = {
+    "ONE_DEVICE_PER_USER": False,
+    "DELETE_INACTIVE_DEVICES": False,
+}
+from firebase_admin import credentials, initialize_app
+from google.oauth2 import service_account
+
+
+cred = credentials.Certificate(os.path.join(BASE_DIR, "turaincash.json"))
+initialize_app(cred)
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 

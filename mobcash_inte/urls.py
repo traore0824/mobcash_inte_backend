@@ -1,9 +1,10 @@
 from django.urls import path, include
 from . import views
 from rest_framework.routers import DefaultRouter
-
+from fcm_django.api.rest_framework import FCMDeviceAuthorizedViewSet
 
 router = DefaultRouter()
+router.register("devices", FCMDeviceAuthorizedViewSet)
 router.register(r"user-phone", views.UserPhoneViewSet, basename="user-phone")
 router.register(r"user-app-id", views.IDLinkViews, basename="user-app-id")
 
