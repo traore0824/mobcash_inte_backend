@@ -1,6 +1,8 @@
 from django.urls import reverse
 from rest_framework import status
-from .base import BaseAPITestCase  # ton BaseAPITestCase
+
+from test_mobcash.user.base_test import BaseAPITestCase
+
 
 
 class NetworkAPITestUserToken(BaseAPITestCase):
