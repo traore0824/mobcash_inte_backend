@@ -8,11 +8,6 @@ logger = logging.getLogger("mobcash_inte_backend.auth")
 
 
 class BaseAPITestCase(APITestCase):
-    """
-    Classe de base pour les tests des endpoints utilisateurs normaux :
-    - Crée un utilisateur une seule fois en DB (setUpTestData)
-    - Configure le client avec un token JWT pour chaque test
-    """
 
     @classmethod
     def setUpTestData(cls):
@@ -23,6 +18,7 @@ class BaseAPITestCase(APITestCase):
             "first_name": "John",
             "last_name": "Doe",
             "email": "john1.doe@example.com",
+            "username": "john1.doe@example.com",  # ⚡ obligatoire pour ton UserManager
             "phone": "2250700000003",
             "password": "securepassword123",
         }
@@ -31,6 +27,7 @@ class BaseAPITestCase(APITestCase):
 
         User = get_user_model()
         cls.user = User.objects.create_user(
+            username=cls.user_data["username"],
             email=cls.user_data["email"],
             phone=cls.user_data["phone"],
             first_name=cls.user_data["first_name"],
@@ -40,22 +37,17 @@ class BaseAPITestCase(APITestCase):
         logger.info("✅ Utilisateur créé en DB (setup unique)")
 
     def setUp(self):
-        """
-        Prépare le client pour chaque test avec token JWT
-        """
         self.login_data = {
             "email_or_phone": self.user.email,
             "password": self.password,
         }
 
-        logger.info("🔐 Connexion pour obtenir le token")
         login_resp = self.client.post(self.login_url, self.login_data, format="json")
         assert (
             login_resp.status_code == status.HTTP_200_OK
         ), f"Échec login : {login_resp.content}"
 
-        data = login_resp.json()
-        token = data.get("access")
+        token = login_resp.json().get("access")
         assert token, "Token d’accès manquant dans la réponse de login"
 
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
