@@ -1,12 +1,18 @@
 import logging
 from rest_framework.test import APITestCase
 from django.urls import reverse
-from rest_framework import status
+from mobcash_inte.models import TelegramUser  # Ajuste selon ton modèle
 
 logger = logging.getLogger("mobcash_inte_backend.auth")
 
 
 class BaseTelegramAPITestCase(APITestCase):
+    """
+    Classe de base pour les tests des endpoints Telegram :
+    - Crée un utilisateur Telegram une seule fois en DB
+    - Configure le client avec le header X-USER-ID pour chaque test
+    """
+
     @classmethod
     def setUpTestData(cls):
         cls.telegram_user_url = reverse("auth:telegram-user")
@@ -19,28 +25,14 @@ class BaseTelegramAPITestCase(APITestCase):
             "email": "john.doe@example.com",
         }
 
-        logger.info("⚙️ Initialisation du BaseTelegramAPITestCase (une seule fois)")
+        cls.telegram_user = TelegramUser.objects.create(**cls.telegram_user_data)
+        logger.info("✅ Telegram user créé en DB (setup unique)")
 
-        cls._create_telegram_user_and_attach_header()  # ✅ plus d'argument ici
-
-    @classmethod
-    def _create_telegram_user_and_attach_header(cls):
-        logger.info("🤖 Création d’un utilisateur Telegram (setup unique)")
-
-        response = cls().client.post(
-            cls.telegram_user_url, cls.telegram_user_data, format="json"
-        )
-        assert response.status_code in [
-            status.HTTP_200_OK,
-            status.HTTP_201_CREATED,
-        ], f"Échec création Telegram user : {response.content}"
-
-        data = response.json()
-        telegram_user_id = data["telegram_user_id"]
-
-        cls.client.credentials(HTTP_X_USER_ID=str(telegram_user_id))
-        cls.telegram_user_id = telegram_user_id
-
+    def setUp(self):
+        """
+        Attache le header X-USER-ID au client pour tous les tests
+        """
+        self.client.credentials(HTTP_X_USER_ID=str(self.telegram_user.telegram_user_id))
         logger.info(
-            "✅ Telegram user créé (%s) et header X-USER-ID attaché", telegram_user_id
+            f"✅ Header X-USER-ID attaché pour le test : {self.telegram_user.telegram_user_id}"
         )
