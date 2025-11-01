@@ -7,12 +7,6 @@ logger = logging.getLogger("mobcash_inte_backend.auth")
 
 
 class BaseAPITestCase(APITestCase):
-    """
-    Classe de base pour les tests :
-    - Gère la création de user
-    - Gère le login et le stockage du token
-    """
-
     @classmethod
     def setUpTestData(cls):
         cls.registration_url = reverse("auth:registration")
@@ -34,14 +28,10 @@ class BaseAPITestCase(APITestCase):
 
         logger.info("⚙️ Initialisation du BaseAPITestCase (une seule fois)")
 
-        # Création de l'utilisateur et login une seule fois
-        cls._create_user_and_login(cls)
+        cls._create_user_and_login()  # ✅ plus d'argument ici
 
     @classmethod
     def _create_user_and_login(cls):
-        """
-        Crée un utilisateur et récupère un token d'accès valide (exécuté une seule fois)
-        """
         logger.info("🧩 Création d’un utilisateur pour le test (setup unique)")
         reg_resp = cls().client.post(cls.registration_url, cls.user_data, format="json")
         assert reg_resp.status_code in [
@@ -49,7 +39,6 @@ class BaseAPITestCase(APITestCase):
             status.HTTP_201_CREATED,
         ], f"Échec création user : {reg_resp.content}"
 
-        logger.info("🔐 Connexion pour obtenir le token")
         login_resp = cls().client.post(cls.login_url, cls.login_data, format="json")
         assert (
             login_resp.status_code == status.HTTP_200_OK

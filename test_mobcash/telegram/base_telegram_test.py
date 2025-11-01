@@ -7,12 +7,6 @@ logger = logging.getLogger("mobcash_inte_backend.auth")
 
 
 class BaseTelegramAPITestCase(APITestCase):
-    """
-    Classe de base pour les tests des endpoints Telegram.
-    - Crée un utilisateur Telegram
-    - Configure le header X-USER-ID pour tous les appels suivants
-    """
-
     @classmethod
     def setUpTestData(cls):
         cls.telegram_user_url = reverse("auth:telegram-user")
@@ -27,8 +21,7 @@ class BaseTelegramAPITestCase(APITestCase):
 
         logger.info("⚙️ Initialisation du BaseTelegramAPITestCase (une seule fois)")
 
-        # Création Telegram user unique
-        cls._create_telegram_user_and_attach_header(cls)
+        cls._create_telegram_user_and_attach_header()  # ✅ plus d'argument ici
 
     @classmethod
     def _create_telegram_user_and_attach_header(cls):
@@ -45,7 +38,6 @@ class BaseTelegramAPITestCase(APITestCase):
         data = response.json()
         telegram_user_id = data["telegram_user_id"]
 
-        # Ajout automatique du header pour tous les prochains appels
         cls.client.credentials(HTTP_X_USER_ID=str(telegram_user_id))
         cls.telegram_user_id = telegram_user_id
 
