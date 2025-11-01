@@ -174,6 +174,7 @@ TRANS_STATUS = [
     ("accept", "Accept"),
     ("error", "Erreur"),
     ("pending", "Pendind"),
+    ("timeouf", "timeouf")
 ]
 
 

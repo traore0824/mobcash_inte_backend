@@ -341,7 +341,7 @@ LOGGING = {
     },
     # === LOGGERS ===
     "loggers": {
-        "connect_pro.payments": {
+        "mobcash_inte_backend.payments": {
             "handlers": ["console", "file_transactions", "file_general"],
             "level": "DEBUG" if DEBUG else "WARNING",
             "propagate": False,
@@ -395,42 +395,42 @@ LOGGING = {
             "propagate": False,
         },
         # ✅ CORRIGÉ: Logger pour votre application principale
-        "connect_pro": {
+        "mobcash_inte_backend": {
             "handlers": ["console", "file_general", "file_daily"],
             "level": "DEBUG" if DEBUG else "WARNING",  # ✅ Garder DEBUG pour votre app
             "propagate": False,
         },
         # Logger spécifique pour les transactions
-        "connect_pro.transactions": {
+        "mobcash_inte_backend.transactions": {
             "handlers": ["file_transactions", "console"],
             "level": "DEBUG" if DEBUG else "WARNING",
             "propagate": False,
         },
-        "connect_pro.payments.audit": {
+        "mobcash_inte_backend.payments.audit": {
             "handlers": ["audit_file", "console"],
             "level": "DEBUG" if DEBUG else "WARNING",
             "propagate": False,
         },
         # Logger pour la sécurité
-        "connect_pro.security": {
+        "mobcash_inte_backend.security": {
             "handlers": ["console", "file_security", "mail_admins"],
             "level": "DEBUG" if DEBUG else "WARNING",
             "propagate": False,
         },
         # Logger pour les APIs externes
-        "connect_pro.external_apis": {
+        "mobcash_inte_backend.external_apis": {
             "handlers": ["file_external_apis", "console"],
             "level": "DEBUG" if DEBUG else "WARNING",
             "propagate": False,
         },
         # Logger pour les wallets
-        "connect_pro.wallets": {
+        "mobcash_inte_backend.wallets": {
             "handlers": ["file_transactions", "console"],
             "level": "DEBUG" if DEBUG else "WARNING",
             "propagate": False,
         },
         # Logger pour KYC
-        "connect_pro.kyc": {
+        "mobcash_inte_backend.kyc": {
             "handlers": ["file_security", "file_general", "console"],
             "level": "DEBUG" if DEBUG else "WARNING",
             "propagate": False,
@@ -447,6 +447,11 @@ LOGGING = {
             "level": "INFO",
             "propagate": False,
         },
+        "mobcash_inte_backend.auth": {
+            "handlers": ["console", "file_general"],
+            "level": "DEBUG" if DEBUG else "INFO",
+            "propagate": False,
+        },
     },
     # ✅ CORRIGÉ: Logger root - niveau INFO pour réduire le bruit
     "root": {
@@ -454,6 +459,7 @@ LOGGING = {
         "handlers": ["console", "file_general"],
     },
 }
+
 
 BASE_URL = "https://api.blaffa.net/blaffa"
 
