@@ -19,8 +19,8 @@ class NetworkAPITestTelegramUser(BaseTelegramAPITestCase):
         # BaseTelegramAPITestCase gère déjà l'en-tête X-USER-ID dans self.client
 
     def test_network_list_telegram_user(self):
-        # Assure-toi que le header X-USER-ID est bien présent
-        self.client.credentials(HTTP_X_USER_ID=str(self.telegram_user.telegram_user_id))
+        # Crée un Telegram user et attache automatiquement le header
+        telegram_user_id = self.create_telegram_user_and_attach_header()
 
         response = self.client.get(self.url)
         content = response.content.decode()
@@ -40,4 +40,5 @@ class NetworkAPITestTelegramUser(BaseTelegramAPITestCase):
         logger.info(
             "✅ /network pour Telegram user renvoie au moins un élément avec 'id' et 'name'"
         )
+
 
