@@ -25,5 +25,5 @@ urlpatterns = [
         "telegram-user", views.RegisterOrGetTelegramUser.as_view(), name="telegram-user"
     ),
     path("telegram-users-list", views.ListBotUser.as_view()),
-    path("verify-bot-user", views.VerifyTelegramUser.as_view()),
+    path("verify-bot-user", views.VerifyTelegramUser.as_view(), name="verify-bot-user"),
 ]
