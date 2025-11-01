@@ -12,7 +12,7 @@ class AuthTests(BaseAPITestCase):
         response = self.client.post(
             self.registration_url, self.user_data, format="json"
         )
-        logger.debug("Réponse registration : %s", response.content)
+        logger.info("Réponse registration : %s", response.content)
 
         self.assertIn(
             response.status_code, [status.HTTP_200_OK, status.HTTP_201_CREATED]
