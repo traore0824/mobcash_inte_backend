@@ -1,6 +1,9 @@
+import logging
 from django.urls import reverse
 from rest_framework import status
-from .base import BaseTelegramAPITestCase  # ton BaseTelegramAPITestCase
+from test_mobcash.telegram.base_telegram_test import BaseTelegramAPITestCase
+
+logger = logging.getLogger("mobcash_inte_backend.network")
 
 
 class NetworkAPITestTelegramUser(BaseTelegramAPITestCase):
@@ -17,8 +20,20 @@ class NetworkAPITestTelegramUser(BaseTelegramAPITestCase):
 
     def test_network_list_telegram_user(self):
         response = self.client.get(self.url)
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIsInstance(response.json(), list)
-        if response.json():
-            self.assertIn("id", response.json()[0])
-            self.assertIn("name", response.json()[0])
+        content = response.content.decode()
+        logger.info("Réponse /network pour Telegram user : %s", content)
+
+        self.assertEqual(
+            response.status_code, status.HTTP_200_OK, f"Échec status : {content}"
+        )
+
+        data = response.json()
+        if not data:
+            self.fail(f"La liste est vide ! Contenu complet : {content}")
+
+        self.assertIsInstance(data, list)
+        self.assertIn("id", data[0])
+        self.assertIn("name", data[0])
+        logger.info(
+            "✅ /network pour Telegram user renvoie au moins un élément avec 'id' et 'name'"
+        )
