@@ -43,6 +43,7 @@ class BaseAPITestCase(APITestCase):
         }
 
         login_resp = self.client.post(self.login_url, self.login_data, format="json")
+        
         assert (
             login_resp.status_code == status.HTTP_200_OK
         ), f"Échec login : {login_resp.content}"
