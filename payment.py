@@ -357,7 +357,7 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                         reason_bonus="Bonus de parrainage de transaction",
                     )
                     reward, _ = Reward.objects.get_or_create(user=user_referrer)
-                    reward.amount = reward.amount + bonus_amount
+                    reward.amount = float(reward.amount) + float(bonus_amount)
                     reward.save()
 
                     send_notification(
