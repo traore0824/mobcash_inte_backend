@@ -197,6 +197,7 @@ def deposit_connect(transaction: Transaction):
             connect_pro_logger.critical(
                 f" Erreur de creation de transaction {transaction.network.name} pour connect pro {e}"
             )
+            
     # else:
     #     TestModel.objects.create(name=f" dans le else 11111111111111111")
     #     url = CONNECT_PRO_BASE_URL + "/api/payments/user/transactions/"
