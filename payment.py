@@ -170,7 +170,6 @@ def deposit_connect(transaction: Transaction):
         connect_pro_logger.info(
             f"debut de creatuion de transaction {transaction.network.name}"
         )
-
         url = CONNECT_PRO_BASE_URL + "/api/payments/momo-pay-transactions/"
         data = {
             "amount": transaction.amount,

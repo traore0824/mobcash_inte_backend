@@ -66,7 +66,7 @@ class NetworkAdmin(admin.ModelAdmin):
             "Activation",
             {
                 "fields": (
-                    "enable",
+                    
                     "active_for_deposit",
                     "active_for_with",
                 )
