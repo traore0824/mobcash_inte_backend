@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Bonus, Caisse, Network, Notification, Setting, UserPhone
+from .models import Bonus, Caisse, Network, Notification, Setting, Transaction, UserPhone
 
 
 @admin.register(Network)
@@ -248,3 +248,5 @@ class CaisseAdmin(admin.ModelAdmin):
         (None, {"fields": ("bet_app", "solde")}),
         ("Mise à jour", {"fields": ("updated_at",)}),
     )
+
+admin.site.register(Transaction)
