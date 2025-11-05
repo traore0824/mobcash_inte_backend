@@ -266,7 +266,8 @@ def transaction_process(reference):
         pass
 
 
-def connect_pro_webhook(data: dict):
+def connect_pro_webhook(data):
+    connect_pro_logger.info(f"le data recue est {data} aavec le public id {data.get('uid')}")
     with db_transaction.atomic():
         transaction = (
             Transaction.objects.filter(public_id=data.get("uid"))
