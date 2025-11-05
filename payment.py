@@ -196,7 +196,7 @@ def deposit_connect(transaction: Transaction):
             connect_pro_logger.critical(
                 f" Erreur de creation de transaction {transaction.network.name} pour connect pro {e}"
             )
-            
+
     # else:
     #     TestModel.objects.create(name=f" dans le else 11111111111111111")
     #     url = CONNECT_PRO_BASE_URL + "/api/payments/user/transactions/"
@@ -230,6 +230,7 @@ def deposit_connect(transaction: Transaction):
 
 def connect_pro_status(reference, is_wave=False, is_momo_pay=False):
     url = None
+    connect_pro_logger.info(f"la reference qui a ete transmi 1111 {reference}")
     if is_wave:
         url = (
             CONNECT_PRO_BASE_URL
@@ -279,6 +280,9 @@ def connect_pro_webhook(data: dict):
             )
             # data = None
         transaction.wehook_receive_at = timezone.now()
+        connect_pro_logger.info(
+            f"la reference qui a ete transmi {transaction.public_id}"
+        )
         if transaction.network.name == "wave":
             data = connect_pro_status(reference=transaction.public_id, is_wave=True)
         else:
