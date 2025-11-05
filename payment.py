@@ -280,10 +280,10 @@ def connect_pro_webhook(data: dict):
             # data = None
         transaction.wehook_receive_at = timezone.now()
         if transaction.network.name == "wave":
-            data = connect_pro_status(reference=data.get("uid"), is_wave=True)
+            data = connect_pro_status(reference=transaction.public_id, is_wave=True)
         else:
             data = connect_pro_status(
-                reference=data.get("uid"),
+                reference=transaction.public_id,
                 is_momo_pay=(
                     False
                     if (
