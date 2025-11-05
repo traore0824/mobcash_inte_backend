@@ -149,7 +149,7 @@ def deposit_connect(transaction: Transaction):
         connect_pro_logger.info("debut de creatuion de transaction wave")
         url = CONNECT_PRO_BASE_URL + "/api/payments/wave-business-transactions/"
         data = {
-            "amount": transaction.net_payable_amout,
+            "amount": transaction.amount,
             "recipient_phone": transaction.phone_number,
             "callback_url": f"{BASE_URL}/connect-pro-webhook",
         }
@@ -173,7 +173,7 @@ def deposit_connect(transaction: Transaction):
 
         url = CONNECT_PRO_BASE_URL + "/api/payments/momo-pay-transactions/"
         data = {
-            "amount": transaction.net_payable_amout,
+            "amount": transaction.amount,
             "recipient_phone": transaction.phone_number,
             "callback_url": f"{BASE_URL}/connect-pro-webhook",
             "payment_type": f"{transaction.network.name}-{transaction.network.country_code}",
