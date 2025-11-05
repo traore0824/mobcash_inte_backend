@@ -319,7 +319,7 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
         amount = transaction.amount
         if setting.deposit_reward:
             bonus = (
-                amount(setting.deposit_reward_percent * transaction.amount)
+                (setting.deposit_reward_percent * transaction.amount)
                 / constant.BONUS_PERCENT_MAX
             )
             amount = amount + bonus
