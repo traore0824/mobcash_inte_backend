@@ -19,11 +19,11 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from celery import shared_task
 
-connect_pro_logger = logging.getLogger("Connect pro Logger")
+connect_pro_logger = logging.getLogger("mobcash_inte_backend.transactions")
 payment_logger = logging.getLogger("Payment transaction process")
 logger = logging.getLogger(__name__)
 
-CONNECT_PRO_BASE_URL = "https://connect.api.blaffa.net"
+CONNECT_PRO_BASE_URL = "https://connect.turaincash.com"
 
 
 def connect_pro_token():
