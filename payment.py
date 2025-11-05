@@ -330,7 +330,7 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
         response = servculAPI.recharge_account(
             amount=float(amount), userid=transaction.user_app_id
         )
-        payment_logger.info(
+        connect_pro_logger.info(
             f"Reponse de l'api de {transaction.app.name} de l'api {response}"
         )
         xbet_response_data = response.get("data")
