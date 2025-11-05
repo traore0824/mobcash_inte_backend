@@ -54,7 +54,7 @@ from django.utils import timezone
 from payment import connect_pro_webhook, disbursment_process, payment_fonction
 from django.db.models import Sum
 
-connect_pro_logger = logging.getLogger("Connect pro Logger")
+connect_pro_logger = logging.getLogger("mobcash_inte_backend.transactions")
 
 
 class UploadFileView(generics.ListCreateAPIView):

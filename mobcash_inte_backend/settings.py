@@ -461,7 +461,7 @@ LOGGING = {
 }
 
 
-BASE_URL = "https://api.blaffa.net/blaffa"
+BASE_URL = "https://api.turaincash.com/mobcash"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
