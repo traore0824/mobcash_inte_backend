@@ -248,7 +248,7 @@ def connect_pro_status(reference, is_wave=False, is_momo_pay=False):
     }
     try:
         response = requests.get(url, headers=headers, timeout=30)
-        connect_pro_logger.info(" connect pro  response status {response.json()}")
+        connect_pro_logger.info(f" connect pro  response status {response.content} status {response.status_code}")
         return response.json()
     except Exception as e:
         connect_pro_logger.critical(f"Erreur de verification de status {e}")
