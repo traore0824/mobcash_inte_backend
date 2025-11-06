@@ -249,7 +249,7 @@ class CaisseAdmin(admin.ModelAdmin):
         ("Mise à jour", {"fields": ("updated_at",)}),
     )
 
-admin.site.register(Transaction)
+# admin.site.register(Transaction)
 
 
 @admin.register(WebhookLog)
