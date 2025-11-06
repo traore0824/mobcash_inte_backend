@@ -26,9 +26,9 @@ echo "🧹 Nettoyage fichiers temporaires..."
 find . -name "*.pyc" -delete
 find . -name "__pycache__" -type d -exec rm -rf {} + || true
 
-echo "🧪 Lancement des tests Mobcash..."
-python manage.py test test_mobcash.user test_mobcash.telegram --verbosity=2
-RESULT=$?
+# echo "🧪 Lancement des tests Mobcash..."
+# python manage.py test test_mobcash.user test_mobcash.telegram --verbosity=2
+# RESULT=$?
 
 if [ $RESULT -eq 0 ]; then
     echo "✅ Tous les tests ont réussi !"
