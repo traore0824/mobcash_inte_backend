@@ -260,3 +260,44 @@ class WebhookLogAdmin(admin.ModelAdmin):
     readonly_fields = ("created_at",)
     ordering = ("-created_at",)
 
+
+@admin.register(Transaction)
+class TransactionAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "user",
+        "telegram_user",
+        "amount",
+        "status",
+        "type_trans",
+        "api",
+        "reference",
+        "created_at",
+        "validated_at",
+    )
+    list_filter = (
+        "status",
+        "type_trans",
+        "api",
+        "source",
+        "network",
+        "created_at",
+    )
+    search_fields = (
+        "reference",
+        "phone_number",
+        "public_id",
+        "user__username",
+        "telegram_user__username",
+    )
+    readonly_fields = (
+        "created_at",
+        "validated_at",
+        "wehook_receive_at",
+        "webhook_data",
+        "error_message",
+        "transaction_link",
+    )
+    ordering = ("-created_at",)
+    date_hierarchy = "created_at"
+    autocomplete_fields = ("user", "telegram_user", "app", "network")
