@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Bonus, Caisse, Network, Notification, Setting, Transaction, UserPhone
+from .models import Bonus, Caisse, Network, Notification, Setting, Transaction, UserPhone, WebhookLog
 
 
 @admin.register(Network)
@@ -250,3 +250,12 @@ class CaisseAdmin(admin.ModelAdmin):
     )
 
 admin.site.register(Transaction)
+
+
+@admin.register(WebhookLog)
+class WebhookLogAdmin(admin.ModelAdmin):
+    list_display = ("id", "api", "reference", "created_at")
+    list_filter = ("api", "created_at")
+    search_fields = ("api", "reference")
+    readonly_fields = ("created_at",)
+    ordering = ("-created_at",)
