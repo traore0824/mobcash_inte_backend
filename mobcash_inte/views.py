@@ -331,7 +331,7 @@ class ConnectProWebhook(decorators.APIView):
         if webhook_log:
             connect_pro_logger.info("wEBHOOK RECU MAIS IL A DEJA ETE TRAITER")
             return Response(status=status.HTTP_200_OK)
-        connect_pro_webhook.delay(data=data)
+        connect_pro_webhook(data=data)
         WebhookLog.objects.create(reference=data.get("uid"), api="CONNECT PRO0", webhook_data=data)
         return Response(status=status.HTTP_200_OK)
 
