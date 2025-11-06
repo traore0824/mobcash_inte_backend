@@ -265,7 +265,7 @@ def transaction_process(reference):
     elif transaction.type_trans == "withdrawal":
         pass
 
-
+@shared_task
 def connect_pro_webhook(data):
     connect_pro_logger.info(f"le data recue est {data} aavec le public id {data.get('uid')}")
     with db_transaction.atomic():
@@ -407,7 +407,8 @@ def accept_bonus_transaction(transaction: Transaction):
 
 
 @shared_task
-def check_solde(transaction: Transaction):
+def check_solde(transaction_id):
+    transaction = Transaction.objects.filter(id=transaction_id).select_for_update().first()
     with db_transaction.atomic():
         if transaction.already_process:
             return
