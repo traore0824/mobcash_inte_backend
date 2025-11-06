@@ -22,6 +22,7 @@ from mobcash_inte.models import (
     Transaction,
     UploadFile,
     UserPhone,
+    WebhookLog,
 )
 from django_filters.rest_framework import DjangoFilterBackend
 from mobcash_inte.permissions import IsAuthenticated
@@ -323,6 +324,13 @@ class ConnectProWebhook(decorators.APIView):
             f"Connect pro webhookrecue le {timezone.now()} avec le body{request.data}"
         )
         data = request.data
+        if not data:
+            connect_pro_logger.info("Webhoo recu mais avec aucune donne")
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+        webhook_log = WebhookLog.objects.filter(reference=data.get("uid")).first()
+        if webhook_log:
+            connect_pro_logger.info("wEBHOOK RECU MAIS IL A DEJA ETE TRAITER")
+            return Response(status=status.HTTP_200_OK)
         connect_pro_webhook.delay(data=data)
         return Response(status=status.HTTP_200_OK)
 
