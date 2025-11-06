@@ -323,7 +323,7 @@ class ConnectProWebhook(decorators.APIView):
             f"Connect pro webhookrecue le {timezone.now()} avec le body{request.data}"
         )
         data = request.data
-        connect_pro_webhook(data=data)
+        connect_pro_webhook.delay(data=data)
         return Response(status=status.HTTP_200_OK)
 
 

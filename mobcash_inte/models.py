@@ -289,5 +289,9 @@ class UserPhone(models.Model):
             ),
         ]
 
-
+class WebhookLog(models.Model):
+    created_at = models.DateTimeField(auto_now_add=True)
+    webhook_data = models.JSONField(default=dict)
+    api = models.CharField(max_length=100)
+    reference = models.CharField(max_length=255, blank=True, null=True)
 # Create your models here.

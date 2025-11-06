@@ -281,6 +281,7 @@ def connect_pro_webhook(data):
             )
             # data = None
         transaction.wehook_receive_at = timezone.now()
+        transaction.webhook_data = data
         connect_pro_logger.info(f"la reference qui a ete transmi {data.get('uid')}")
         if transaction.network.name == "wave":
             data = connect_pro_status(reference=transaction.public_id, is_wave=True)
