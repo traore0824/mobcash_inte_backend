@@ -22,7 +22,7 @@ load_dotenv()
 
 def get_access_token():
     credentials = service_account.Credentials.from_service_account_file(
-        "turaincash.json", scopes=["https://www.googleapis.com/auth/firebase.messaging"]
+        "mobcash.json", scopes=["https://www.googleapis.com/auth/firebase.messaging"]
     )
     request = google.auth.transport.requests.Request()
     credentials.refresh(request)

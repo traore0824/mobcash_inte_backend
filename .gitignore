@@ -150,5 +150,5 @@ minforeveal/settings.py
 **/migrations/**
 !**/migrations
 !**/migrations/__init__.py
-turaincash.json
+mobcash.json
 #**/migrations/*
