@@ -300,4 +300,4 @@ class TransactionAdmin(admin.ModelAdmin):
     )
     ordering = ("-created_at",)
     date_hierarchy = "created_at"
-    autocomplete_fields = ("user", "telegram_user", "app", "network")
+    autocomplete_fields = ("user", "app", "network")
