@@ -81,39 +81,35 @@ def get_network_id(name):
         connect_pro_logger.critical(f"Erreur de recuperation de resaeu {e}")
 
 
-# def connect_withdrawal(transaction: Transaction):
-#     token = connect_pro_token()
-#     if not token:
-#         return None
-#     headers = {
-#         "Authorization": f"Bearer {token}",
-#         "Content-Type": "application/json",
-#     }
-#     url = CONNECT_PRO_BASE_URL + "/api/payments/user/transactions/"
-#     transaction.save()
+def connect_withdrawal(transaction: Transaction):
+    token = connect_pro_token()
+    if not token:
+        return None
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    url = CONNECT_PRO_BASE_URL + "/api/payments/user/transactions/"
+    transaction.save()
 
-#     data = {
-#         "type": "deposit",
-#         "amount": f"{transaction.amount}",
-#         "recipient_phone": transaction.phone_number,
-#         "recipient_name": transaction.user.full_name(),
-#         "objet": "Yapson deposit",
-#         "network": get_network_id(
-#             name=f"{transaction.network.name}-{transaction.network.country_code}"
-#         ),
-#         "callback_url": "https://api.blaffa.net/blaffa/connect-pro-webhook",
-#     }
-#     try:
-#         response = requests.post(url, json=data, headers=headers, timeout=30)
-#         TestModel.objects.create(name=f"response connect pro with {response.json()}")
-#         transaction.public_id = response.json().get("data").get("uid")
-#         send_telegram_message(
-#             chat_id="5475155671",
-#             content=f"{transaction.user.first_name.upper()} {transaction.user.last_name.capitalize()} a lancé une demande de retrait de {transaction.app.name.upper()}. Montant : {transaction.amount} F CFA | Numéro de référence : {transaction.reference} | Réseau : {transaction.network.name.upper()} Mobile Money | User AP ID : {transaction.user_app_id} | Telephone : +{transaction.network.indication} {transaction.phone_number}",
-#         )
-#         transaction.save()
-#     except Exception as e:
-#         TestModel.objects.create(name=f"response connect pro with errer {e}")
+    data = {
+        "type": "deposit",
+        "amount": f"{transaction.amount}",
+        "recipient_phone": transaction.phone_number[3:],
+        "recipient_name": transaction.user.full_name(),
+        "objet": "Turnaincash deposit",
+        "network": get_network_id(
+            name=f"{transaction.network.name}-{transaction.network.country_code}"
+        ),
+        "callback_url": f"{BASE_URL}/connect-pro-webhook",
+    }
+    try:
+        response = requests.post(url, json=data, headers=headers, timeout=30)
+        connect_pro_logger.info(f"response connect pro with {response.json()}")
+        transaction.public_id = response.json().get("data").get("uid")
+        transaction.save()
+    except Exception as e:
+        connect_pro_logger.info(f"response connect pro with errer {e}")
 
 
 def connect_pro_withd_process(transaction: Transaction, disbursements=False):
@@ -123,18 +119,20 @@ def connect_pro_withd_process(transaction: Transaction, disbursements=False):
     else:
         response = True
     if response == True:
-        content = (
-            "💸 **Nouvelle demande de retrait** 💸\n\n"
-            f"**Référence :** {transaction.reference}\n"
-            f"**Nom de la plateforme :** {transaction.app.name if transaction.app else 'N/A'}\n"
-            f"**User ID :** {transaction.user_app_id}\n"
-            f"**Email :** {transaction.user.email if transaction.user and hasattr(transaction.user, 'email') else 'N/A'}\n"
-            f"**Téléphone :** {transaction.phone_number or 'N/A'}"
-            f"**Montant :** {transaction.amount } Franc"
-            f"**Reseau :** {transaction.network.name }"
-            f"**Date de confirmation :** {transaction.validated_at }"
-        )
-        send_telegram_message(content=content)
+        connect_withdrawal(transaction=transaction)
+        # content = (
+        #     "💸 **Nouvelle demande de retrait** 💸\n\n"
+        #     f"**Référence :** {transaction.reference}\n"
+        #     f"**Nom de la plateforme :** {transaction.app.name if transaction.app else 'N/A'}\n"
+        #     f"**User ID :** {transaction.user_app_id}\n"
+        #     f"**Email :** {transaction.user.email if transaction.user and hasattr(transaction.user, 'email') else 'N/A'}\n"
+        #     f"**Téléphone :** {transaction.phone_number or 'N/A'}"
+        #     f"**Montant :** {transaction.amount } Franc"
+        #     f"**Reseau :** {transaction.network.name }"
+        #     f"**Date de confirmation :** {transaction.validated_at }"
+        # )
+        # send_telegram_message(content=content)
+
 
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -446,11 +444,12 @@ def payment_fonction(reference):
         if transaction.api == "connect":
             deposit_connect(transaction=transaction)
     elif transaction == "withdrawal":
-        if transaction.api == "connect":
+        if transaction.api == "connect" :
             connect_pro_withd_process(transaction=transaction)
 
 
 def xbet_withdrawal_process(transaction: Transaction):
+    connect_pro_logger.info("Demarraage de retrait avec l'app de mobcash ")
     app_name = transaction.app
     servculAPI = init_mobcash(app_name=app_name)
     if transaction.type_trans == "withdrawal":
@@ -458,7 +457,7 @@ def xbet_withdrawal_process(transaction: Transaction):
             userid=transaction.user_app_id, code=transaction.withdriwal_code
         )
         xbet_response_data = response.get("data")
-        logger.info(f"La reponse de retrait de mobcash{response}")
+        connect_pro_logger.info(f"La reponse de retrait de mobcash{response}")
         if (
             str(xbet_response_data.get("Success")).lower() == "false"
             or xbet_response_data.get("status") == 401
@@ -466,14 +465,16 @@ def xbet_withdrawal_process(transaction: Transaction):
             transaction.status = "error"
             transaction.save()
             transaction.refresh_from_db()
+            connect_pro_logger.info("L'appelle a ete success")
         elif str(xbet_response_data.get("Success")).lower() == "true":
-            logger.info("app BET step suvccess 11111111")
+            connect_pro_logger.info("app BET step suvccess 11111111")
             amount = float(xbet_response_data.get("Summa")) * (-1)
             transaction.amount = amount 
             transaction.status = "init_payment"
             transaction.validated_at = timezone.now()
             transaction.save()
             transaction.refresh_from_db()
+            connect_pro_logger.info("L'appelle a ete echec")
             return True
 
 
