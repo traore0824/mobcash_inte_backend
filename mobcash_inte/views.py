@@ -323,20 +323,91 @@ class RewardTransactionViews(generics.CreateAPIView):
 
 class ConnectProWebhook(decorators.APIView):
     def post(self, request, *args, **kwargs):
-        connect_pro_logger.info(
-            f"Connect pro webhookrecue le {timezone.now()} avec le body{request.data}"
-        )
-        data = request.data
-        if not data:
-            connect_pro_logger.info("Webhoo recu mais avec aucune donne")
-            return Response(status=status.HTTP_400_BAD_REQUEST)
-        webhook_log = WebhookLog.objects.filter(reference=data.get("uid")).first()
-        if webhook_log:
-            connect_pro_logger.info("wEBHOOK RECU MAIS IL A DEJA ETE TRAITER")
-            return Response(status=status.HTTP_200_OK)
-        connect_pro_webhook.delay(data=data)
-        WebhookLog.objects.create(reference=data.get("uid"), api="CONNECT PRO0", webhook_data=data)
-        return Response(status=status.HTTP_200_OK)
+        try:
+            # Log de la réception du webhook
+            connect_pro_logger.info(
+                f"Connect pro webhook reçu le {timezone.now()} avec le body: {request.data}"
+            )
+
+            data = request.data
+
+            # Vérification des données
+            if not data:
+                connect_pro_logger.warning("Webhook reçu mais avec aucune donnée")
+                return Response(
+                    {"error": "Aucune donnée fournie"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Vérification de l'UID
+            uid = data.get("uid")
+            if not uid:
+                connect_pro_logger.warning("Webhook reçu sans UID")
+                return Response(
+                    {"error": "UID manquant dans les données"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Vérification de duplication
+            try:
+                webhook_log = WebhookLog.objects.filter(reference=uid).first()
+                if webhook_log:
+                    connect_pro_logger.info(
+                        f"Webhook avec UID {uid} déjà traité - Duplication évitée"
+                    )
+                    return Response(
+                        {"message": "Webhook déjà traité"}, status=status.HTTP_200_OK
+                    )
+            except Exception as e:
+                connect_pro_logger.error(
+                    f"Erreur lors de la vérification du webhook log: {str(e)}",
+                    exc_info=True,
+                )
+                # On continue le traitement même si la vérification échoue
+
+            # Lancement de la tâche asynchrone
+            try:
+                connect_pro_webhook.delay(data=data)
+                connect_pro_logger.info(f"Tâche asynchrone lancée pour UID {uid}")
+            except Exception as e:
+                connect_pro_logger.error(
+                    f"Erreur lors du lancement de la tâche asynchrone: {str(e)}",
+                    exc_info=True,
+                )
+                return Response(
+                    {"error": "Erreur lors du traitement asynchrone"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+
+            # Création du log
+            try:
+                WebhookLog.objects.create(
+                    reference=uid,
+                    api="CONNECT PRO",
+                    webhook_data=data,
+                    header=str(request.headers),
+                )
+                connect_pro_logger.info(f"WebhookLog créé avec succès pour UID {uid}")
+            except Exception as e:
+                connect_pro_logger.error(
+                    f"Erreur lors de la création du WebhookLog pour UID {uid}: {str(e)}",
+                    exc_info=True,
+                )
+                # On ne retourne pas d'erreur car la tâche a déjà été lancée
+
+            return Response(
+                {"message": "Webhook traité avec succès"}, status=status.HTTP_200_OK
+            )
+
+        except Exception as e:
+            # Catch-all pour toute erreur non prévue
+            connect_pro_logger.error(
+                f"Erreur inattendue dans ConnectProWebhook: {str(e)}", exc_info=True
+            )
+            return Response(
+                {"error": "Erreur interne du serveur"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 class DisbursmentTransactionView(decorators.APIView):

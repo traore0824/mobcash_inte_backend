@@ -286,4 +286,4 @@ class WebhookLog(models.Model):
     webhook_data = models.JSONField(default=dict)
     api = models.CharField(max_length=100)
     reference = models.CharField(max_length=255, blank=True, null=True)
-# Create your models here.
+    header = models.TextField(blank=True, null=True)    # Create your models here.
