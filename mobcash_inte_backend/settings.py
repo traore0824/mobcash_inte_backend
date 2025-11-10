@@ -33,7 +33,7 @@ from firebase_admin import credentials, initialize_app
 from google.oauth2 import service_account
 
 
-cred = credentials.Certificate(os.path.join(BASE_DIR, "turaincash.json"))
+cred = credentials.Certificate(os.path.join(BASE_DIR, "mobcash.json"))
 initialize_app(cred)
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
