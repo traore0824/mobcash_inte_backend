@@ -439,11 +439,11 @@ def check_solde(transaction_id):
 def payment_fonction(reference):
     transaction = Transaction.objects.filter(reference=reference).first()
     if not transaction:
-        logger.info(f"Transaction avec reference {reference} non trouver")
+        connect_pro_logger.info(f"Transaction avec reference {reference} non trouver")
     if transaction.type_trans == "deposit" or transaction.type_trans=="reward":
         if transaction.api == "connect":
             deposit_connect(transaction=transaction)
-    elif transaction == "withdrawal":
+    elif transaction.type_trans == "withdrawal":
         if transaction.api == "connect" :
             connect_pro_withd_process(transaction=transaction)
 
