@@ -282,6 +282,7 @@ class CreateDepositTransactionViews(generics.CreateAPIView):
         transaction.api = transaction.network.deposit_api
         transaction.save()
         payment_fonction(reference=transaction.reference)
+        transaction.refresh_from_db()
         return Response(
             TransactionDetailsSerializer(transaction).data,
             status=status.HTTP_201_CREATED,
@@ -513,6 +514,7 @@ class BotDepositTransactionViews(generics.CreateAPIView):
         transaction.api = transaction.network.deposit_api
         transaction.save()
         payment_fonction(reference=transaction.reference)
+        transaction.refresh_from_db()
         return Response(
             TransactionDetailsSerializer(transaction).data,
             status=status.HTTP_201_CREATED,
