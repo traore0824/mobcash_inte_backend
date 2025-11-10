@@ -457,7 +457,6 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                     exc_info=True,
                 )
                 raise
-
     except Exception as e:
         connect_pro_logger.error(
             f"Erreur globale webhook_transaction_success transaction {transaction.id}: {str(e)}"
