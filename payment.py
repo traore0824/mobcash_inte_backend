@@ -253,7 +253,9 @@ def connect_pro_status(reference, is_wave=False, is_momo_pay=False):
     }
     try:
         response = requests.get(url, headers=headers, timeout=30)
-        connect_pro_logger.info(f" connect pro  response status {response.content} status {response.status_code}")
+        connect_pro_logger.info(
+            f" connect pro  response status {response.content} status {response.status_code}"
+        )
         return response.json()
     except Exception as e:
         connect_pro_logger.critical(f"Erreur de verification de status {e}")
@@ -269,9 +271,12 @@ def transaction_process(reference):
     elif transaction.type_trans == "withdrawal":
         pass
 
+
 @shared_task
 def connect_pro_webhook(data):
-    connect_pro_logger.info(f"le data recue est {data} aavec le public id {data.get('uid')}")
+    connect_pro_logger.info(
+        f"le data recue est {data} aavec le public id {data.get('uid')}"
+    )
     with db_transaction.atomic():
         transaction = (
             Transaction.objects.filter(public_id=data.get("uid"))
@@ -305,10 +310,10 @@ def connect_pro_webhook(data):
         if (
             data.get("status") == "failed" or data.get("status") == "cancelled"
         ) or data.get("status") == "timeout":
-            print("payment initier 9999999999999")
+            connect_pro_logger.info("Transaction is fail")
             webhook_transaction_failled(transaction=transaction)
         elif data.get("status") == "success" or data.get("status") == "confirmed":
-            print("payment initier 100000000000")
+            connect_pro_logger.info("Transaction is success")
             webhook_transaction_success(transaction=transaction, setting=setting)
 
 
@@ -324,9 +329,8 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
         amount = transaction.amount
         if setting.deposit_reward:
             bonus = (
-                (setting.deposit_reward_percent * transaction.amount)
-                / constant.BONUS_PERCENT_MAX
-            )
+                setting.deposit_reward_percent * transaction.amount
+            ) / constant.BONUS_PERCENT_MAX
             amount = amount + bonus
             transaction.deposit_reward_amount = bonus
             transaction.net_payable_amout = amount
@@ -339,7 +343,6 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
             f"Reponse de l'api de {transaction.app.name} de l'api {response}"
         )
         xbet_response_data = response.get("data")
-
         if xbet_response_data.get("Success") == True:
             payment_logger.info(f"Transaction de {transaction.app.name} success ")
             transaction.validated_at = timezone.now()
@@ -383,6 +386,15 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
             send_telegram_message(
                 content=f"{transaction.user.first_name.upper()} {transaction.user.last_name.capitalize()} a lancé une demande de depot de {transaction.app.name.upper()}. Montant : {transaction.amount} F CFA | Numéro de référence : {transaction.reference} | Réseau : {transaction.network.name.upper()} Mobile Money | User AP ID : {transaction.user_app_id} | Telephone : +{transaction.network.indication} {transaction.phone_number}. ",
             )
+    else:
+        connect_pro_logger.info(f"Operation success ")
+        transaction.status = "accept"
+        transaction.save()
+        send_notification(
+            title="Opération réussie",
+            content=f"Vous avez effectué un retrait de {transaction.amount} FCFA sur {transaction.app.public_name}",
+            user=transaction.user,
+        )
 
 
 def webhook_transaction_failled(transaction: Transaction):
@@ -413,7 +425,9 @@ def accept_bonus_transaction(transaction: Transaction):
 
 @shared_task
 def check_solde(transaction_id):
-    transaction = Transaction.objects.filter(id=transaction_id).select_for_update().first()
+    transaction = (
+        Transaction.objects.filter(id=transaction_id).select_for_update().first()
+    )
     with db_transaction.atomic():
         if transaction.already_process:
             return
@@ -440,11 +454,11 @@ def payment_fonction(reference):
     transaction = Transaction.objects.filter(reference=reference).first()
     if not transaction:
         connect_pro_logger.info(f"Transaction avec reference {reference} non trouver")
-    if transaction.type_trans == "deposit" or transaction.type_trans=="reward":
+    if transaction.type_trans == "deposit" or transaction.type_trans == "reward":
         if transaction.api == "connect":
             deposit_connect(transaction=transaction)
     elif transaction.type_trans == "withdrawal":
-        if transaction.api == "connect" :
+        if transaction.api == "connect":
             connect_pro_withd_process(transaction=transaction)
 
 
@@ -469,7 +483,7 @@ def xbet_withdrawal_process(transaction: Transaction):
         elif str(xbet_response_data.get("Success")).lower() == "true":
             connect_pro_logger.info("app BET step suvccess 11111111")
             amount = float(xbet_response_data.get("Summa")) * (-1)
-            transaction.amount = amount 
+            transaction.amount = amount
             transaction.status = "init_payment"
             transaction.validated_at = timezone.now()
             transaction.save()
