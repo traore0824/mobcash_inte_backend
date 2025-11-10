@@ -221,7 +221,7 @@ def deposit_connect(transaction: Transaction):
             "recipient_name": transaction.user.full_name(),
             "objet": "Blaffa deposit",
             "network": get_network_id(
-                name=f"{transaction.network.name}-{transaction.network.country_code}"
+                name=f"{transaction.network.name.upper()}-{transaction.network.country_code.upper()}"
             ),
             "callback_url": f"{BASE_URL}/connect-pro-webhook",
         }
