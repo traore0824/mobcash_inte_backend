@@ -156,7 +156,7 @@ def deposit_connect(transaction: Transaction):
         url = CONNECT_PRO_BASE_URL + "/api/payments/wave-business-transactions/"
         data = {
             "amount": transaction.amount,
-            "recipient_phone": transaction.phone_number,
+            "recipient_phone": transaction.phone_number[3:],
             "callback_url": f"{BASE_URL}/connect-pro-webhook",
         }
         try:
@@ -179,7 +179,7 @@ def deposit_connect(transaction: Transaction):
         url = CONNECT_PRO_BASE_URL + "/api/payments/momo-pay-transactions/"
         data = {
             "amount": transaction.amount,
-            "recipient_phone": transaction.phone_number,
+            "recipient_phone": transaction.phone_number[3:],
             "callback_url": f"{BASE_URL}/connect-pro-webhook",
             "payment_type": f"{transaction.network.name}-{transaction.network.country_code}",
         }
@@ -217,7 +217,7 @@ def deposit_connect(transaction: Transaction):
         data = {
             "type": "withdrawal",
             "amount": amount,
-            "recipient_phone": transaction.phone_number,
+            "recipient_phone": transaction.phone_number[3:],
             "recipient_name": transaction.user.full_name(),
             "objet": "Blaffa deposit",
             "network": get_network_id(
