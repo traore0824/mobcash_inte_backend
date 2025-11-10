@@ -313,3 +313,29 @@ class DepositSerializer(serializers.ModelSerializer):
     class Meta:
         model = Deposit
         fields = "__all__"
+
+
+class SearchUserBetSerializer(serializers.Serializer):
+    app_id = serializers.IntegerField(required=False)
+    app_name = serializers.CharField(required=False)
+    userid = serializers.CharField(required=True)
+
+    def validate(self, data):
+        app_id = data.get("app_id")
+        app_name = data.get("app_name")
+
+        if not app_id and not app_name:
+            raise serializers.ValidationError(
+                {"details": "Veuillez fournir soit app_id soit app_name."}
+            )
+        app = None
+        if app_id:
+            app = AppName.objects.filter(id=app_id).first()
+        elif app_name:
+            app = AppName.objects.filter(name=app_name).first()
+
+        if not app:
+            raise serializers.ValidationError({"details": "App not found."})
+
+        data["app"] = app  
+        return data

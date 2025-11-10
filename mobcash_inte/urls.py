@@ -29,4 +29,5 @@ urlpatterns = [
     path("list-deposit", views.ListDeposit.as_view()),
     path("caisses", views.ListCaisse.as_view()),
     path("upload", views.UploadFileView.as_view()),
+    path("search-user", views.SearchUserBet.as_view()),
 ]

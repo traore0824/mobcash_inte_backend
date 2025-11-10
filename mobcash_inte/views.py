@@ -6,8 +6,10 @@ from rest_framework import generics, permissions, status, decorators, viewsets
 from accounts.helpers import CustomPagination
 from accounts.models import AppName, TelegramUser, User
 from rest_framework.filters import SearchFilter
+import constant
 from mobcash_inte.helpers import (
     generate_reference,
+    init_mobcash,
     send_admin_notification,
     send_notification,
 )
@@ -43,6 +45,7 @@ from mobcash_inte.serializers import (
     ReadAppNameSerializer,
     ReadSettingSerializer,
     RewardTransactionSerializer,
+    SearchUserBetSerializer,
     SendNotificationSerializer,
     TransactionDetailsSerializer,
     UploadFileSerializer,
@@ -546,5 +549,49 @@ def custom_404(request, exception):
 
 
 handler404 = custom_404
+
+
+class SearchUserBet(decorators.APIView):
+    def get(self, request, *args, **kwargs):
+        app_id = self.request.GET.get("app_id")
+        app_name = self.request.GET.get("app_name")
+        userid = self.request.GET.get("userid")
+        if app_id:
+            app = AppName.objects.filter(id=app_id).first()
+        elif app_name:
+            # TestModel.objects.create(name=f"app name {app_name}")
+            app = AppName.objects.filter(name=app_name).first()
+        if not app:
+            return Response(
+                {"details": "App not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+        init_app = init_mobcash(app_name=app)
+        response = init_app.search_user(userid=userid)
+        if response.get("code") != constant.CODE_EXEPTION:
+            response = response.get("data")
+        else:
+            response = {}
+        return Response(response)
+
+
+class SearchUserBet(decorators.APIView):
+    def get(self, request, *args, **kwargs):
+        serializer = SearchUserBetSerializer(data=request.GET)
+        serializer.is_valid(raise_exception=True)
+
+        app = serializer.validated_data["app"]
+        app_name = app.name
+        userid = serializer.validated_data["userid"]
+
+        init_app = init_mobcash(app_name=app)
+        response = init_app.search_user(userid=userid)
+
+        if response.get("code") != constant.CODE_EXEPTION:
+            response = response.get("data")
+        else:
+            response = {}
+
+        return Response(response)
+
 
 # Create your views here.
