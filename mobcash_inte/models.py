@@ -281,14 +281,6 @@ class UserPhone(models.Model):
         Network, on_delete=models.CASCADE, blank=True, null=True
     )
 
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(fields=["user", "phone"], name="unique_user_phone"),
-            models.UniqueConstraint(
-                fields=["telegram_user", "phone"], name="unique_telegram_user_phone"
-            ),
-        ]
-
 class WebhookLog(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     webhook_data = models.JSONField(default=dict)

@@ -371,6 +371,15 @@ class UserPhoneViewSet(viewsets.ModelViewSet):
             return UserPhone.objects.filter(user=self.request.user)
         return UserPhone.objects.filter(telegram_user=self.request.telegram_user)
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        # Ajoute les infos utiles au serializer
+        context["user"] = (
+            self.request.user if self.request.user.is_authenticated else None
+        )
+        context["telegram_user"] = getattr(self.request, "telegram_user", None)
+        return context
+
     def perform_create(self, serializer):
         if self.request.user.is_authenticated:
             serializer.save(user=self.request.user)
