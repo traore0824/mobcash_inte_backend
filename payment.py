@@ -318,82 +318,149 @@ def connect_pro_webhook(data):
 
 
 def webhook_transaction_success(transaction: Transaction, setting: Setting):
-
-    if (
-        transaction.type_trans == "deposit" or transaction.type_trans == "reward"
-    ) and transaction.status != "accept":
-        transaction.status = "init_payment"
-        transaction.save()
-        app = transaction.app
-        servculAPI = init_mobcash(app_name=app)
-        amount = transaction.amount
-        if setting.deposit_reward:
-            bonus = (
-                setting.deposit_reward_percent * transaction.amount
-            ) / constant.BONUS_PERCENT_MAX
-            amount = amount + bonus
-            transaction.deposit_reward_amount = bonus
-            transaction.net_payable_amout = amount
-            transaction.save()
-
-        response = servculAPI.recharge_account(
-            amount=float(amount), userid=transaction.user_app_id
-        )
+    try:
         connect_pro_logger.info(
-            f"Reponse de l'api de {transaction.app.name} de l'api {response}"
+            f"Début traitement transaction {transaction.id} - Type: {transaction.type_trans}, Status: {transaction.status}"
         )
-        xbet_response_data = response.get("data")
-        if xbet_response_data.get("Success") == True:
-            payment_logger.info(f"Transaction de {transaction.app.name} success ")
-            transaction.validated_at = timezone.now()
-            transaction.status = "accept"
-            transaction.save()
-            if transaction.type_trans == "reward":
-                accept_bonus_transaction(transaction=transaction)
-            if setting.referral_bonus:
-                user_referrer = User.objects.filter(
-                    referral_code=transaction.user.referrer_code
-                ).first()
-                if user_referrer:
-                    bonus_amount = (
-                        setting.bonus_percent * transaction.amount
+
+        if (
+            transaction.type_trans == "deposit" or transaction.type_trans == "reward"
+        ) and transaction.status != "accept":
+
+            try:
+                transaction.status = "init_payment"
+                transaction.save()
+                app = transaction.app
+                servculAPI = init_mobcash(app_name=app)
+                amount = transaction.amount
+
+                if setting.deposit_reward:
+                    bonus = (
+                        setting.deposit_reward_percent * transaction.amount
                     ) / constant.BONUS_PERCENT_MAX
-                    Bonus.objects.create(
-                        transaction=transaction,
-                        user=user_referrer,
-                        amount=bonus_amount,
-                        reason_bonus="Bonus de parrainage de transaction",
-                    )
-                    reward, _ = Reward.objects.get_or_create(user=user_referrer)
-                    reward.amount = float(reward.amount) + float(bonus_amount)
-                    reward.save()
+                    amount = amount + bonus
+                    transaction.deposit_reward_amount = bonus
+                    transaction.net_payable_amout = amount
+                    transaction.save()
 
-                    send_notification(
-                        title="Félicitations, vous avez un bonus !",
-                        content=f" Vous venez de recevoir un bonus grâce à une opération de {transaction.amount} FCFA effectuée par {transaction.user.email}.",
-                        user=user_referrer,
-                    )
+                response = servculAPI.recharge_account(
+                    amount=float(amount), userid=transaction.user_app_id
+                )
+                connect_pro_logger.info(
+                    f"Reponse de l'api de {transaction.app.name}: {response}"
+                )
 
-            check_solde.delay(transaction_id=transaction.id)
+                xbet_response_data = response.get("data")
+
+                if xbet_response_data.get("Success") == True:
+                    payment_logger.info(
+                        f"Transaction de {transaction.app.name} success"
+                    )
+                    transaction.validated_at = timezone.now()
+                    transaction.status = "accept"
+                    transaction.save()
+
+                    if transaction.type_trans == "reward":
+                        try:
+                            accept_bonus_transaction(transaction=transaction)
+                        except Exception as e:
+                            connect_pro_logger.error(
+                                f"Erreur accept_bonus_transaction pour transaction {transaction.id}: {str(e)}",
+                                exc_info=True,
+                            )
+
+                    if setting.referral_bonus:
+                        try:
+                            user_referrer = User.objects.filter(
+                                referral_code=transaction.user.referrer_code
+                            ).first()
+                            if user_referrer:
+                                bonus_amount = (
+                                    setting.bonus_percent * transaction.amount
+                                ) / constant.BONUS_PERCENT_MAX
+                                Bonus.objects.create(
+                                    transaction=transaction,
+                                    user=user_referrer,
+                                    amount=bonus_amount,
+                                    reason_bonus="Bonus de parrainage de transaction",
+                                )
+                                reward, _ = Reward.objects.get_or_create(
+                                    user=user_referrer
+                                )
+                                reward.amount = float(reward.amount) + float(
+                                    bonus_amount
+                                )
+                                reward.save()
+
+                                send_notification(
+                                    title="Félicitations, vous avez un bonus !",
+                                    content=f" Vous venez de recevoir un bonus grâce à une opération de {transaction.amount} FCFA effectuée par {transaction.user.email}.",
+                                    user=user_referrer,
+                                )
+                        except Exception as e:
+                            connect_pro_logger.error(
+                                f"Erreur bonus parrainage pour transaction {transaction.id}: {str(e)}",
+                                exc_info=True,
+                            )
+
+                    try:
+                        check_solde.delay(transaction_id=transaction.id)
+                    except Exception as e:
+                        connect_pro_logger.error(
+                            f"Erreur check_solde.delay pour transaction {transaction.id}: {str(e)}",
+                            exc_info=True,
+                        )
+                else:
+                    # Handle transaction failure
+                    try:
+                        send_notification(
+                            title="Erreur de transaction",
+                            content=f"Une erreur est survenue lors de votre dépôt de {transaction.amount} FCFA sur {transaction.app.name.upper()}. {transaction.app.name.upper()} Message: {xbet_response_data.get('Message')}. Référence de la transaction {transaction.reference}",
+                            user=transaction.user,
+                            reference=transaction.reference,
+                        )
+                    except Exception as e:
+                        connect_pro_logger.error(
+                            f"Erreur send_notification échec transaction {transaction.id}: {str(e)}",
+                            exc_info=True,
+                        )
+
+                    try:
+                        send_telegram_message(
+                            content=f"{transaction.user.first_name.upper()} {transaction.user.last_name.capitalize()} a lancé une demande de depot de {transaction.app.name.upper()}. Montant : {transaction.amount} F CFA | Numéro de référence : {transaction.reference} | Réseau : {transaction.network.name.upper()} Mobile Money | User AP ID : {transaction.user_app_id} | Telephone : +{transaction.network.indication} {transaction.phone_number}. ",
+                        )
+                    except Exception as e:
+                        connect_pro_logger.error(
+                            f"Erreur send_telegram_message pour transaction {transaction.id}: {str(e)}",
+                            exc_info=True,
+                        )
+
+            except Exception as e:
+                connect_pro_logger.error(
+                    f"Erreur traitement deposit/reward transaction {transaction.id}: {str(e)}",
+                    exc_info=True,
+                )
+                raise
         else:
-            # Handle transaction failure
-            send_notification(
-                title="Erreur de transaction",
-                content=f"Une erreur est survenue lors de votre dépôt de {transaction.amount} FCFA sur {transaction.app.name.upper()}. {transaction.app.name.upper()} Message: {xbet_response_data.get('Message')}. Référence de la transaction {transaction.reference}",
-                user=transaction.user,
-                reference=transaction.reference,
-            )
-            send_telegram_message(
-                content=f"{transaction.user.first_name.upper()} {transaction.user.last_name.capitalize()} a lancé une demande de depot de {transaction.app.name.upper()}. Montant : {transaction.amount} F CFA | Numéro de référence : {transaction.reference} | Réseau : {transaction.network.name.upper()} Mobile Money | User AP ID : {transaction.user_app_id} | Telephone : +{transaction.network.indication} {transaction.phone_number}. ",
-            )
-    else:
-        connect_pro_logger.info(f"Operation success ")
-        transaction.status = "accept"
-        transaction.save()
-        send_notification(
-            title="Opération réussie",
-            content=f"Vous avez effectué un retrait de {transaction.amount} FCFA sur {transaction.app.public_name}",
-            user=transaction.user,
+            try:
+                connect_pro_logger.info(f"Operation success")
+                transaction.status = "accept"
+                transaction.save()
+                send_notification(
+                    title="Opération réussie",
+                    content=f"Vous avez effectué un retrait de {transaction.amount} FCFA sur {transaction.app.public_name}",
+                    user=transaction.user,
+                )
+            except Exception as e:
+                connect_pro_logger.error(
+                    f"Erreur traitement retrait transaction {transaction.id}: {str(e)}",
+                    exc_info=True,
+                )
+                raise
+
+    except Exception as e:
+        connect_pro_logger.error(
+            f"Erreur globale webhook_transaction_success transaction {transaction.id}: {str(e)}"
         )
 
 
