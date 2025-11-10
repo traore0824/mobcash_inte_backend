@@ -316,7 +316,7 @@ class DepositSerializer(serializers.ModelSerializer):
 
 
 class SearchUserBetSerializer(serializers.Serializer):
-    app_id = serializers.IntegerField(required=False)
+    app_id = serializers.CharField(required=False)
     app_name = serializers.CharField(required=False)
     userid = serializers.CharField(required=True)
 
