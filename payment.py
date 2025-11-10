@@ -448,7 +448,7 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                 transaction.save()
                 send_notification(
                     title="Opération réussie",
-                    content=f"Vous avez effectué un retrait de {transaction.amount} FCFA sur {transaction.app.public_name}",
+                    content=f"Vous avez effectué un retrait de {transaction.amount} FCFA sur {transaction.app.name}",
                     user=transaction.user,
                 )
             except Exception as e:
