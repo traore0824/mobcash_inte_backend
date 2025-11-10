@@ -136,6 +136,12 @@ def connect_pro_withd_process(transaction: Transaction, disbursements=False):
         )
         send_telegram_message(content=content)
 
+from decimal import Decimal, ROUND_HALF_UP
+
+
+def round_up_half(n):
+    return int(Decimal(n).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
 
 def deposit_connect(transaction: Transaction):
     token = connect_pro_token()
@@ -197,35 +203,35 @@ def deposit_connect(transaction: Transaction):
                 f" Erreur de creation de transaction {transaction.network.name} pour connect pro {e}"
             )
 
-    # else:
-    #     TestModel.objects.create(name=f" dans le else 11111111111111111")
-    #     url = CONNECT_PRO_BASE_URL + "/api/payments/user/transactions/"
-    #     amount = 0
-    #     if (
-    #         transaction.network.name == "moov" or transaction.network.name == "mtn"
-    #     ) or transaction.network.name == "orange":
-    #         amount = round_up_half(transaction.amount - (transaction.amount / 100))
-    #     else:
-    #         amount = transaction.amount
-    #     transaction.net_payable_amout = amount
-    #     data = {
-    #         "type": "withdrawal",
-    #         "amount": amount,
-    #         "recipient_phone": transaction.phone_number,
-    #         "recipient_name": transaction.user.full_name(),
-    #         "objet": "Blaffa deposit",
-    #         "network": get_network_id(
-    #             name=f"{transaction.network.name}-{transaction.network.country_code}"
-    #         ),
-    #         "callback_url": "https://api.blaffa.net/blaffa/connect-pro-webhook",
-    #     }
-    #     try:
-    #         response = requests.post(url, json=data, headers=headers, timeout=30)
-    #         TestModel.objects.create(name=f" connect pro  response {response.json()}")
-    #         transaction.public_id = response.json().get("data").get("uid")
-    #         transaction.save()
-    #     except Exception as e:
-    #         TestModel.objects.create(name=f" connect pro  response exep {e}")
+    else:
+        connect_pro_logger.info(" Test de transaction par USSD")
+        url = CONNECT_PRO_BASE_URL + "/api/payments/user/transactions/"
+        amount = 0
+        if (
+            transaction.network.name == "moov" or transaction.network.name == "mtn"
+        ) or transaction.network.name == "orange":
+            amount = round_up_half(transaction.amount - (transaction.amount / 100))
+        else:
+            amount = transaction.amount
+        transaction.net_payable_amout = amount
+        data = {
+            "type": "withdrawal",
+            "amount": amount,
+            "recipient_phone": transaction.phone_number,
+            "recipient_name": transaction.user.full_name(),
+            "objet": "Blaffa deposit",
+            "network": get_network_id(
+                name=f"{transaction.network.name}-{transaction.network.country_code}"
+            ),
+            "callback_url": f"{BASE_URL}/connect-pro-webhook",
+        }
+        try:
+            response = requests.post(url, json=data, headers=headers, timeout=30)
+            connect_pro_logger.info(f" connect pro  response {response.json()}")
+            transaction.public_id = response.json().get("data").get("uid")
+            transaction.save()
+        except Exception as e:
+            connect_pro_logger.info(f" connect pro  response exep {e}")
 
 
 def connect_pro_status(reference, is_wave=False, is_momo_pay=False):
