@@ -66,7 +66,7 @@ class IDLink(models.Model):
     telegram_user = models.ForeignKey(
         TelegramUser, models.CASCADE, blank=True, null=True
     )
-    user_app_id = models.CharField(max_length=120, unique=True)
+    user_app_id = models.CharField(max_length=120)
     app_name = models.ForeignKey(
         AppName, on_delete=models.CASCADE, blank=True, null=True
     )
