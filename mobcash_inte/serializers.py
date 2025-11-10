@@ -221,28 +221,36 @@ class UserPhoneSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserPhone
         fields = "__all__"
-        read_only_fields = ["user", "telegram_user"]  
+        read_only_fields = ["user", "telegram_user"]
 
     def validate(self, data):
         user = self.context.get("user")
         telegram_user = self.context.get("telegram_user")
-        phone = data.get("phone")
 
-        # Vérification d’unicité
+        phone = data.get("phone")
+        network = data.get("network")
+
+        # Vérification d’unicité selon le type d’utilisateur
         if user:
-            exists = UserPhone.objects.filter(user=user, phone=phone).exists()
+            exists = UserPhone.objects.filter(
+                user=user, phone=phone, network=network
+            ).exists()
             if exists:
                 raise serializers.ValidationError(
-                    {"phone": "Ce numéro existe déjà pour cet utilisateur."}
+                    {
+                        "phone": "Ce numéro existe déjà pour ce réseau et cet utilisateur."
+                    }
                 )
 
         elif telegram_user:
             exists = UserPhone.objects.filter(
-                telegram_user=telegram_user, phone=phone
+                telegram_user=telegram_user, phone=phone, network=network
             ).exists()
             if exists:
                 raise serializers.ValidationError(
-                    {"phone": "Ce numéro existe déjà pour cet utilisateur Telegram."}
+                    {
+                        "phone": "Ce numéro existe déjà pour ce réseau et cet utilisateur Telegram."
+                    }
                 )
 
         return data
