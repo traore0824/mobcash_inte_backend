@@ -212,11 +212,16 @@ def deposit_connect(transaction: Transaction):
         else:
             amount = transaction.amount
         transaction.net_payable_amout = amount
+        full_name = (
+            transaction.user.full_name()
+            if transaction.user
+            else transaction.telegram_user.full_name()
+        )
         data = {
             "type": "withdrawal",
             "amount": amount,
             "recipient_phone": transaction.phone_number[3:],
-            "recipient_name": transaction.user.full_name(),
+            "recipient_name": full_name,
             "objet": "Blaffa deposit",
             "network": get_network_id(
                 name=f"{transaction.network.name.upper()}-{transaction.network.country_code.upper()}"

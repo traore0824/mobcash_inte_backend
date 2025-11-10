@@ -86,6 +86,9 @@ class TelegramUser(models.Model):
     email = models.EmailField(blank=True, null=True)
     is_block = models.BooleanField(default=False)
 
+    def full_name(self):
+        return f"{self.last_name} {self.first_name}"
+
     @property
     def fullname(self):
         return f"{self.last_name} {self.first_name}"
