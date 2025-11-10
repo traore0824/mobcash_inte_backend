@@ -553,7 +553,7 @@ handler404 = custom_404
 
 class SearchUserBet(decorators.APIView):
     def post(self, request, *args, **kwargs):
-        serializer = SearchUserBetSerializer(data=request.GET)
+        serializer = SearchUserBetSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         app = serializer.validated_data["app"]
