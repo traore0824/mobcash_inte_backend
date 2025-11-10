@@ -119,7 +119,8 @@ class TransactionDetailsSerializer(serializers.ModelSerializer):
 
 
 class DepositTransactionSerializer(serializers.ModelSerializer):
-    user= SmallUserSerializer(read_only=True)
+    user = SmallUserSerializer(read_only=True)
+
     class Meta:
         model = Transaction
         fields = [
@@ -143,15 +144,19 @@ class DepositTransactionSerializer(serializers.ModelSerializer):
 
     def validate(self, data):
         setting = Setting.objects.first()
+
+        # Vérifie s'il y a une transaction acceptée dans les 5 dernières minutes
         transaction = Transaction.objects.filter(
             user_app_id=data.get("user_app_id"),
             status="accept",
-            validated_at__lt=timezone.now() + relativedelta(minutes=5)
+            validated_at__gte=timezone.now() - relativedelta(minutes=5),
         ).first()
 
         if transaction:
-            time_left = (transaction.validated_at + relativedelta(minutes=5)) - timezone.now()
-            total_seconds = int(time_left.total_seconds())
+            time_left = (
+                transaction.validated_at + relativedelta(minutes=5)
+            ) - timezone.now()
+            total_seconds = max(int(time_left.total_seconds()), 0)
             minutes_left = total_seconds // 60
             seconds_left = total_seconds % 60
 
@@ -159,11 +164,15 @@ class DepositTransactionSerializer(serializers.ModelSerializer):
                 {"error_time_message": f"{minutes_left} M:{seconds_left} S"}
             )
 
-        MINIMUM_DEPOSIT = setting.minimum_deposit 
+        # Vérifie le montant minimum
+        MINIMUM_DEPOSIT = setting.minimum_deposit
         if MINIMUM_DEPOSIT > data.get("amount"):
             raise serializers.ValidationError(
-                {"amount": f"{MINIMUM_DEPOSIT} est le montant minimum de depot accepter"}
+                {
+                    "amount": f"{MINIMUM_DEPOSIT} est le montant minimum de depot accepter"
+                }
             )
+
         return data
 
 
