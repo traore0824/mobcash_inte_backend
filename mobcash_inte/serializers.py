@@ -150,6 +150,7 @@ class DepositTransactionSerializer(serializers.ModelSerializer):
             user_app_id=data.get("user_app_id"),
             status="accept",
             validated_at__gte=timezone.now() - relativedelta(minutes=5),
+            amount=data.get("amount"),
         ).first()
 
         if transaction:
@@ -304,6 +305,7 @@ class BotDepositTransactionSerializer(serializers.ModelSerializer):
             user_app_id=data.get("user_app_id"),
             status="accept",
             validated_at__lt=timezone.now() + relativedelta(minutes=5),
+            amount=data.get("amount"),
         ).first()
         if transaction:
             time_left = (
