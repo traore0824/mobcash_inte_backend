@@ -89,6 +89,9 @@ CORS_ALLOWED_ORIGINS = [
     "https://admin.zefast.net",
     "https://zefast.net",
     "https://zefast-mobile-app.vercel.app",
+    "https://admin.zefast.net",
+    "https://zefast.net",
+    "https://zefast-mobile-app.vercel.app",
 ]
 
 
