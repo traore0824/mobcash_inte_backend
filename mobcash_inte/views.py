@@ -691,7 +691,7 @@ class CouponDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
             self.permission_classes = [permissions.IsAuthenticated]
         return super().get_permissions()
 
-class CreateAdvertisement(generics.ListCreateAPIView):
+class CreateAdvertisementViews(generics.ListCreateAPIView):
     pagination_class = CustomPagination
     permission_classes = [permissions.IsAdminUser]
     serializer_class = AdvertisementSerializer
@@ -700,6 +700,20 @@ class CreateAdvertisement(generics.ListCreateAPIView):
         if self.request.method == "GET":
             self.permission_classes = [permissions.IsAuthenticated]
         return super().get_permissions()
+
+    def get_queryset(self):
+        if self.request.user.is_staff:
+            objs = Advertisement.objects.all()
+        else:
+            objs = Advertisement.objects.filter(enable=True)
+        return objs
+
+
+class DetailsAdvertisementViews(generics.RetrieveUpdateDestroyAPIView):
+    pagination_class = CustomPagination
+    permission_classes = [permissions.IsAdminUser]
+    serializer_class = AdvertisementSerializer
+
 
     def get_queryset(self):
         if self.request.user.is_staff:

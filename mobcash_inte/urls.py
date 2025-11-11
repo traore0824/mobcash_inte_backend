@@ -32,5 +32,6 @@ urlpatterns = [
     path("search-user", views.SearchUserBet.as_view()),
     path("coupon", views.CreateCoupon.as_view()),
     path("coupon/<int:pk>", views.CouponDetailAPIView.as_view()),
-    path("ann", views.CreateAdvertisement.as_view()),
+    path("ann", views.CreateAdvertisementViews.as_view()),
+    path("ann/<int:pk>", views.DetailsAdvertisementViews.as_view()),
 ]
