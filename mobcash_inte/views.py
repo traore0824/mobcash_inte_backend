@@ -673,21 +673,6 @@ class CreateCoupon(generics.ListCreateAPIView):
         last_24h = now - timedelta(hours=24)
         return Coupon.objects.filter(created_at__gte=last_24h)
 
-    def create(self, request, *args, **kwargs):
-        serializer = self.serializer_class(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        bet_app = AppName.objects.filter(
-            id=serializer.validated_data.get("bet_app_id")
-        ).first()
-
-        if not bet_app:
-            return Response(
-                {"details": "bet_app not found"}, status=status.HTTP_404_NOT_FOUND
-            )
-
-        obj = serializer.save(bet_app=bet_app)
-        return Response(CouponSerializer(obj).data, status=status.HTTP_201_CREATED)
-
 
 class CouponDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
     """
