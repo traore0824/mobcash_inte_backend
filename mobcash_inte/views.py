@@ -60,7 +60,7 @@ from mobcash_inte.serializers import (
 from django.db import transaction
 from rest_framework.response import Response
 from django.utils import timezone
-from payment import connect_pro_webhook, disbursment_process, payment_fonction
+from payment import connect_pro_webhook, disbursment_process, payment_fonction, webhook_transaction_success
 from django.db.models import Sum
 
 connect_pro_logger = logging.getLogger("mobcash_inte_backend.transactions")
@@ -310,7 +310,7 @@ class CreateBonusDepositTransactionViews(generics.CreateAPIView):
         )
         transaction.api = transaction.network.deposit_api
         transaction.save()
-        payment_fonction(reference=transaction.reference)
+        webhook_transaction_success(reference=transaction.reference)
         transaction.refresh_from_db()
         return Response(
             TransactionDetailsSerializer(transaction).data,
