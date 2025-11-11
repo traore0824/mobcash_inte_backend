@@ -210,8 +210,8 @@ def send_otp(request):
         response = send_mails(
             subject="Réinitialisation de mot de passe",
             to_email=user.email,
-            otp=otp,
             template_name="reset_password.html",
+            context={"otp": otp},
         )
         print(f"{response}")
     return Response(status=status.HTTP_200_OK)

@@ -255,7 +255,7 @@ class Reward(models.Model):
         return self.user.referral_code
 
     def share_link(self):
-        return f"Utilisez le code {self.user.referral_code} pour bénéficier d'avantages exclusifs sur Coobet. Effectuez vos dépôts et retraits 1xbet de façon instantanée et bénéficiez de 2'%' sur chaque dépôt effectué par votre filiale. Téléchargez l'application maintenant et partagez le plaisir avec vos proches ! 📲 Lien pour télécharger l'application :\n 👉 {Setting.objects.first().app_link}"
+        return f"Utilisez le code {self.user.referral_code} pour bénéficier d'avantages exclusifs sur Coobet. Effectuez vos dépôts et retraits 1xbet de façon instantanée et bénéficiez de 2'%' sur chaque dépôt effectué par votre filiale. Téléchargez l'application maintenant et partagez le plaisir avec vos proches ! 📲 Lien pour télécharger l'application :\n 👉 {Setting.objects.first().dowload_apk_link}"
 
     def __str__(self):
         return str(self.id)
