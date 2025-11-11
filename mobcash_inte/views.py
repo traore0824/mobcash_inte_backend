@@ -4,7 +4,7 @@ from django.conf.urls import handler404
 from rest_framework.permissions import BasePermission
 from rest_framework import generics, permissions, status, decorators, viewsets
 from accounts.helpers import CustomPagination
-from accounts.models import AppName, TelegramUser, User
+from accounts.models import Advertisement, AppName, TelegramUser, User
 from rest_framework.filters import SearchFilter
 import constant
 from mobcash_inte.helpers import (
@@ -29,6 +29,7 @@ from mobcash_inte.models import (
 from django_filters.rest_framework import DjangoFilterBackend
 from mobcash_inte.permissions import IsAuthenticated
 from mobcash_inte.serializers import (
+    AdvertisementSerializer,
     BonusSerializer,
     BotDepositTransactionSerializer,
     BotWithdrawalTransactionSerializer,
@@ -163,13 +164,12 @@ class ListDeposit(generics.ListAPIView):
 
 
 class CreateDeposit(generics.CreateAPIView):
-    
+
     serializer_class = DepositSerializer
     permission_classes = [permissions.IsAdminUser]
     queryset = Deposit.objects.all()
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["bet_app"]
-
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
@@ -627,6 +627,7 @@ class HistoryTransactionViews(generics.ListAPIView):
             return Transaction.objects.filter(user=self.request.user)
         return Transaction.objects.filter(telegram_user=self.request.telegram_user)
 
+
 def custom_404(request, exception):
     return render(request, "404.html", status=404)
 
@@ -676,6 +677,24 @@ class CreateCoupon(generics.ListCreateAPIView):
             )
         obj = serializer.save(bet_app=bet_app)
         return Response(CouponSerializer(obj).data, status=status.HTTP_201_CREATED)
+
+
+class CreateAdvertisement(generics.ListCreateAPIView):
+    pagination_class = CustomPagination
+    permission_classes = [permissions.IsAdminUser]
+    serializer_class = AdvertisementSerializer
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            self.permission_classes = [permissions.IsAuthenticated]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        if self.request.user.is_staff:
+            objs = Advertisement.objects.all()
+        else:
+            objs = Advertisement.objects.filter(enable=True)
+        return objs
 
 
 # Create your views here.

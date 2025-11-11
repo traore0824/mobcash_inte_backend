@@ -92,3 +92,18 @@ class TelegramUser(models.Model):
     @property
     def fullname(self):
         return f"{self.last_name} {self.first_name}"
+
+
+class Advertisement(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    image = models.TextField(blank=True, null=True)
+    # content = models.TextField()
+    enable = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Advertisement"
+        verbose_name_plural = "Advertisements"
+
+    def __str__(self):
+        return str(self.id)

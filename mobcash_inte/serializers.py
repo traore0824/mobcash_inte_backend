@@ -387,3 +387,10 @@ class SearchUserBetSerializer(serializers.Serializer):
 
         data["app"] = app  
         return data
+
+
+class AdvertisementSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Advertisement
+        fields = ["id", "image", "created_at", "enable"]
+        extra_kwargs = {"image": {"required": True}}
