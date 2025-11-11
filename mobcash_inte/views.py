@@ -1,5 +1,6 @@
 import logging
 from django.shortcuts import render
+from datetime import timedelta
 from django.conf.urls import handler404
 from rest_framework.permissions import BasePermission
 from rest_framework import generics, permissions, status, decorators, viewsets
@@ -16,6 +17,7 @@ from mobcash_inte.helpers import (
 from mobcash_inte.models import (
     Bonus,
     Caisse,
+    Coupon,
     Deposit,
     IDLink,
     Network,
@@ -665,19 +667,44 @@ class CreateCoupon(generics.ListCreateAPIView):
             self.permission_classes = [permissions.IsAuthenticated]
         return super().get_permissions()
 
+    def get_queryset(self):
+        """Afficher uniquement les coupons de moins de 24 heures"""
+        now = timezone.now()
+        last_24h = now - timedelta(hours=24)
+        return Coupon.objects.filter(created_at__gte=last_24h)
+
     def create(self, request, *args, **kwargs):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
         bet_app = AppName.objects.filter(
             id=serializer.validated_data.get("bet_app_id")
         ).first()
+
         if not bet_app:
             return Response(
-                {"details": "bet_app not found "}, status=status.HTTP_404_NOT_FOUND
+                {"details": "bet_app not found"}, status=status.HTTP_404_NOT_FOUND
             )
+
         obj = serializer.save(bet_app=bet_app)
         return Response(CouponSerializer(obj).data, status=status.HTTP_201_CREATED)
 
+
+class CouponDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    API pour récupérer, modifier ou supprimer un coupon spécifique.
+    """
+
+    queryset = Coupon.objects.all()
+    serializer_class = CouponSerializer
+    permission_classes = [
+        permissions.IsAdminUser
+    ]  # seuls les admins peuvent modifier/supprimer
+
+    def get_permissions(self):
+        # Permet aux utilisateurs connectés de consulter un coupon (GET)
+        if self.request.method == "GET":
+            self.permission_classes = [permissions.IsAuthenticated]
+        return super().get_permissions()
 
 class CreateAdvertisement(generics.ListCreateAPIView):
     pagination_class = CustomPagination
