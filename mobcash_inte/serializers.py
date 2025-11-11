@@ -7,6 +7,7 @@ from mobcash_inte.models import (
     Advertisement,
     Bonus,
     Caisse,
+    Coupon,
     Deposit,
     IDLink,
     Network,
@@ -341,6 +342,11 @@ class BotDepositTransactionSerializer(serializers.ModelSerializer):
 
         return data
 
+
+class CouponSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Coupon
+        fields = "__all__"
 
 class CaisseSerializer(serializers.ModelSerializer):
     bet_app = ReadAppNameSerializer(read_only=True)

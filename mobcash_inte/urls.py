@@ -30,4 +30,5 @@ urlpatterns = [
     path("caisses", views.ListCaisse.as_view()),
     path("upload", views.UploadFileView.as_view()),
     path("search-user", views.SearchUserBet.as_view()),
+    path("coupon", views.CreateCoupon.as_view()),
 ]

@@ -34,6 +34,7 @@ from mobcash_inte.serializers import (
     BotWithdrawalTransactionSerializer,
     CaisseSerializer,
     ChangeTransactionStatusSerializer,
+    CouponSerializer,
     CreateAppNameSerializer,
     CreateSettingSerializer,
     DepositSerializer,
@@ -651,6 +652,30 @@ class SearchUserBet(decorators.APIView):
             response = {}
 
         return Response(response)
+
+
+class CreateCoupon(generics.ListCreateAPIView):
+    serializer_class = CouponSerializer
+    permission_classes = [permissions.IsAdminUser]
+    pagination_class = CustomPagination
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            self.permission_classes = [permissions.IsAuthenticated]
+        return super().get_permissions()
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        bet_app = AppName.objects.filter(
+            id=serializer.validated_data.get("bet_app_id")
+        ).first()
+        if not bet_app:
+            return Response(
+                {"details": "bet_app not found "}, status=status.HTTP_404_NOT_FOUND
+            )
+        obj = serializer.save(bet_app=bet_app)
+        return Response(CouponSerializer(obj).data, status=status.HTTP_201_CREATED)
 
 
 # Create your views here.

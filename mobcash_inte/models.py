@@ -287,3 +287,14 @@ class WebhookLog(models.Model):
     api = models.CharField(max_length=100)
     reference = models.CharField(max_length=255, blank=True, null=True)
     header = models.TextField(blank=True, null=True)    # Create your models here.
+
+
+class Coupon(models.Model):
+    created_at = models.DateTimeField(auto_now_add=True)
+    bet_app = models.ForeignKey(
+        AppName, on_delete=models.CASCADE, blank=True, null=True
+    )
+    code = models.CharField(max_length=150, blank=True, null=True)
+
+    def __str__(self):
+        return str(self.id)
