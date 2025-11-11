@@ -310,12 +310,19 @@ class CreateBonusDepositTransactionViews(generics.CreateAPIView):
         )
         transaction.api = transaction.network.deposit_api
         transaction.save()
-        webhook_transaction_success(reference=transaction.reference)
+        webhook_transaction_success(transaction=transaction, setting=Setting.objects.first())
         transaction.refresh_from_db()
         return Response(
             TransactionDetailsSerializer(transaction).data,
             status=status.HTTP_201_CREATED,
         )
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        # Ajoute les infos utiles au serializer
+        context["request"] = self.request
+        # context["telegram_user"] = getattr(self.request, "telegram_user", None)
+        return context
 
 
 class RewardTransactionViews(generics.CreateAPIView):
