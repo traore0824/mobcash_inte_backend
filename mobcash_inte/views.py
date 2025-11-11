@@ -33,6 +33,7 @@ from mobcash_inte.permissions import IsAuthenticated
 from mobcash_inte.serializers import (
     AdvertisementSerializer,
     BonusSerializer,
+    BonusTransactionSerializer,
     BotDepositTransactionSerializer,
     BotWithdrawalTransactionSerializer,
     CaisseSerializer,
@@ -281,6 +282,31 @@ class CreateDepositTransactionViews(generics.CreateAPIView):
             reference=generate_reference(prefix="depot-"),
             user=self.request.user,
             type_trans="deposit",
+        )
+        transaction.api = transaction.network.deposit_api
+        transaction.save()
+        payment_fonction(reference=transaction.reference)
+        transaction.refresh_from_db()
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CreateBonusDepositTransactionViews(generics.CreateAPIView):
+    serializer_class = BonusTransactionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Transaction.objects.filter(user=self.request.user)
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        transaction = serializer.save(
+            reference=generate_reference(prefix="depot-"),
+            user=self.request.user,
+            type_trans="reward",
         )
         transaction.api = transaction.network.deposit_api
         transaction.save()

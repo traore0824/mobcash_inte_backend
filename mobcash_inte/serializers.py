@@ -1,5 +1,5 @@
 from rest_framework import serializers
-
+from django.db.models import Sum
 from accounts.models import AppName
 from accounts.serializers import SmallBotUserSerializer, SmallUserSerializer
 from mobcash_inte.models import (
@@ -12,6 +12,7 @@ from mobcash_inte.models import (
     IDLink,
     Network,
     Notification,
+    Reward,
     Setting,
     Transaction,
     UploadFile,
@@ -19,6 +20,7 @@ from mobcash_inte.models import (
 )
 from dateutil.relativedelta import relativedelta
 from django.utils import timezone
+
 
 class AdvertisementSerializer(serializers.ModelSerializer):
     class Meta:
@@ -31,9 +33,7 @@ class UploadFileSerializer(serializers.ModelSerializer):
         model = UploadFile
         fields = "__all__"
 
-        extra_kwargs = {
-            "file": {"required": True}
-        }
+        extra_kwargs = {"file": {"required": True}}
 
 
 class IDLinkSerializer(serializers.ModelSerializer):
@@ -108,15 +108,18 @@ class BonusSerializer(serializers.ModelSerializer):
     class Meta:
         model = Bonus
         # fields = "__all__"
-        exclude = ["bonus_with",
-"bonus_delete",]
+        exclude = [
+            "bonus_with",
+            "bonus_delete",
+        ]
 
 
 class TransactionDetailsSerializer(serializers.ModelSerializer):
     user = SmallUserSerializer()
+
     class Meta:
         model = Transaction
-        fields ="__all__"
+        fields = "__all__"
 
 
 class DepositTransactionSerializer(serializers.ModelSerializer):
@@ -180,6 +183,7 @@ class DepositTransactionSerializer(serializers.ModelSerializer):
 
 class WithdrawalTransactionSerializer(serializers.ModelSerializer):
     user = SmallUserSerializer(read_only=True)
+
     class Meta:
         model = Transaction
         fields = [
@@ -261,6 +265,7 @@ class ChangeTransactionStatusSerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=TRANS_STATUS)
     reference = serializers.CharField()
 
+
 class BotWithdrawalTransactionSerializer(serializers.ModelSerializer):
     telegram_user = SmallBotUserSerializer(read_only=True)
 
@@ -278,7 +283,7 @@ class BotWithdrawalTransactionSerializer(serializers.ModelSerializer):
         ]
         extra_kwargs = {
             "withdriwal_code": {"required": True},
-            "phone_number": {"required": True}, 
+            "phone_number": {"required": True},
             "app": {"required": True},
             "user_app_id": {"required": True},
             "network": {"required": True},
@@ -297,7 +302,6 @@ class BotDepositTransactionSerializer(serializers.ModelSerializer):
             "app",
             "user_app_id",
             "network",
-            
         ]
         extra_kwargs = {
             "amount": {"required": True},
@@ -348,10 +352,12 @@ class CouponSerializer(serializers.ModelSerializer):
         model = Coupon
         fields = "__all__"
 
+
 class CaisseSerializer(serializers.ModelSerializer):
     bet_app = ReadAppNameSerializer(read_only=True)
+
     class Meta:
-        model = Caisse 
+        model = Caisse
         fields = "__all__"
 
 
@@ -385,7 +391,7 @@ class SearchUserBetSerializer(serializers.Serializer):
         if not app:
             raise serializers.ValidationError({"details": "App not found."})
 
-        data["app"] = app  
+        data["app"] = app
         return data
 
 
@@ -394,3 +400,63 @@ class AdvertisementSerializer(serializers.ModelSerializer):
         model = Advertisement
         fields = ["id", "image", "created_at", "enable"]
         extra_kwargs = {"image": {"required": True}}
+
+
+class BonusTransactionSerializer(serializers.ModelSerializer):
+    user = SmallUserSerializer(read_only=True)
+
+    class Meta:
+        model = Transaction
+        fields = ["id", "app", "user_app_id", "user", "source", "amount"]
+        extra_kwargs = {
+            "amount": {"required": True},
+            "app": {"required": True},
+            "user_app_id": {"required": True},
+        }
+
+    def validate(self, data):
+        setting = Setting.objects.first()
+        user = self.context.get("request").user
+
+        # Vérifie s'il y a une transaction acceptée dans les 5 dernières minutes
+        transaction = Transaction.objects.filter(
+            user_app_id=data.get("user_app_id"),
+            status="accept",
+            validated_at__gte=timezone.now() - relativedelta(minutes=5),
+            amount=data.get("amount"),
+        ).first()
+
+        if transaction:
+            time_left = (
+                transaction.validated_at + relativedelta(minutes=5)
+            ) - timezone.now()
+            total_seconds = max(int(time_left.total_seconds()), 0)
+            minutes_left = total_seconds // 60
+            seconds_left = total_seconds % 60
+
+            raise serializers.ValidationError(
+                {"error_time_message": f"{minutes_left} M:{seconds_left} S"}
+            )
+
+        bonus = Bonus.objects.filter(user=user, bonus_with=False, bonus_delete=False)
+        amount = 0
+        if bonus.exists():
+            amount = bonus.aggregate(total=Sum("amount"))["total"] or 0 
+
+        # Vérifie le montant minimum
+        MINIMUM_DEPOSIT = setting.reward_mini_withdrawal
+        if MINIMUM_DEPOSIT > amount:
+            raise serializers.ValidationError(
+                {
+                    "amount": f"{MINIMUM_DEPOSIT} est le montant minimum de bonus pour une operation accepter"
+                }
+            )
+        reward = Reward.objects.filter(user=user).select_for_update().first()
+        
+        data["amount"] = amount
+        bonus = Bonus.objects.update(user=user, bonus_with=True)
+
+        return data
+
+
+

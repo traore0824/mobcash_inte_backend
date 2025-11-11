@@ -109,9 +109,10 @@ class ResetPasswordSerializer(serializers.Serializer):
 
 class UserDetailSerializer(serializers.ModelSerializer):
     bonus_available = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = "__all__"
+        exclude = ["password", "groups", "user_permissions"]
 
     def get_bonus_available(self, obj):
         return obj.bonus_available
@@ -121,9 +122,11 @@ class DeleteUserSerializer(serializers.Serializer):
     phone = serializers.CharField(required=False)
     password = serializers.CharField(required=False)
     user_id = serializers.CharField(required=False)
-    
+
     def validate(self, data):
-        user = User.objects.filter(id=data.get("user_id"), phone=data.get("phone")).first()
+        user = User.objects.filter(
+            id=data.get("user_id"), phone=data.get("phone")
+        ).first()
         if not user:
             raise serializers.ValidationError({"details": "Aucun utilisateur trouver"})
         if not user.check_password(data.get("password")):
@@ -150,9 +153,10 @@ class RefreshObtainSerializer(serializers.Serializer):
 class ValidateOtpSerializer(serializers.Serializer):
     otp = serializers.CharField()
 
-class  SmallUserSerializer(serializers.ModelSerializer):
+
+class SmallUserSerializer(serializers.ModelSerializer):
     class Meta:
-        model = User 
+        model = User
         fields = ["id", "first_name", "last_name", "email"]
 
 

@@ -1,6 +1,6 @@
 import os
 import requests
-from accounts.models import AppName, User
+from accounts.models import AppName, TelegramUser, User
 from celery import shared_task
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
@@ -72,19 +72,22 @@ def send_admin_notification(title: str, content: str, data=None, reference=None)
         )
 
 
-def send_notification(user: User, title: str, content: str, data=None, reference=None):
-    response = send_push_noti(user=user, title=title, body=content, data=data)
-    notification = Notification.objects.create(
-        title=title, content=content, user=user, reference=reference
-    )
-    channel_layer = get_channel_layer()
-    async_to_sync(channel_layer.group_send)(
-        f"private_channel_{str(user.id)}",
-        {
-            "type": "new_notification",
-            "data": NotificationSerializer(notification).data,
-        },
-    )
+def send_notification(user: User|TelegramUser, title: str, content: str, data=None, reference=None):
+    if hasattr(user, "telegram_user_id") and user.telegram_user_id:
+        response = send_push_noti(user=user, title=title, body=content, data=data)
+        notification = Notification.objects.create(
+            title=title, content=content, user=user, reference=reference
+        )
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"private_channel_{str(user.id)}",
+            {
+                "type": "new_notification",
+                "data": NotificationSerializer(notification).data,
+            },
+        )
+    else:
+        send_telegram_message(content=content, chat_id=user.telegram_user_id)
 
 
 def send_telegram_message(content, chat_id=917540842):

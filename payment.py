@@ -339,7 +339,7 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                 servculAPI = init_mobcash(app_name=app)
                 amount = transaction.amount
 
-                if setting.deposit_reward:
+                if setting.deposit_reward and transaction.type_trans != "reward":
                     bonus = (
                         setting.deposit_reward_percent * transaction.amount
                     ) / constant.BONUS_PERCENT_MAX
@@ -364,15 +364,22 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                     transaction.validated_at = timezone.now()
                     transaction.status = "accept"
                     transaction.save()
-
+                    send_notification(
+                        title="Opération réussie avec succès",
+                        content=f"Vous avez effectué un dépôt de {transaction.amount} FCFA sur votre compte {transaction.app.name}",
+                        user=transaction.user if transaction.user else transaction.telegram_user,
+                        
+                    )
                     if transaction.type_trans == "reward":
                         try:
                             accept_bonus_transaction(transaction=transaction)
+                            check_solde.delay(transaction_id=transaction.id)
                         except Exception as e:
                             connect_pro_logger.error(
                                 f"Erreur accept_bonus_transaction pour transaction {transaction.id}: {str(e)}",
                                 exc_info=True,
                             )
+                        return 
 
                     if setting.referral_bonus:
                         try:
@@ -421,7 +428,7 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                         send_notification(
                             title="Erreur de transaction",
                             content=f"Une erreur est survenue lors de votre dépôt de {transaction.amount} FCFA sur {transaction.app.name.upper()}. {transaction.app.name.upper()} Message: {xbet_response_data.get('Message')}. Référence de la transaction {transaction.reference}",
-                            user=transaction.user,
+                            user=transaction.user if transaction.user else transaction.telegram_user,
                             reference=transaction.reference,
                         )
                     except Exception as e:
@@ -451,11 +458,21 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                 connect_pro_logger.info(f"Operation success")
                 transaction.status = "accept"
                 transaction.save()
-                send_notification(
-                    title="Opération réussie",
-                    content=f"Vous avez effectué un retrait de {transaction.amount} FCFA sur {transaction.app.name}",
-                    user=transaction.user,
-                )
+                if transaction.user:
+                    send_notification(
+                        title="Opération réussie",
+                        content=f"Vous avez effectué un retrait de {transaction.amount} FCFA sur {transaction.app.name}",
+                        user=(
+                            transaction.user
+                            if transaction.user
+                            else transaction.telegram_user
+                        ),
+                    )
+                else:
+                    send_telegram_message(
+                        chat_id=transaction.telegram_user.telegram_user_id,
+                        content=f"Vous avez effectué un retrait de {transaction.amount} FCFA sur {transaction.app.name}",
+                    )
             except Exception as e:
                 connect_pro_logger.error(
                     f"Erreur traitement retrait transaction {transaction.id}: {str(e)}",
@@ -489,7 +506,7 @@ def reward_failed_process(transaction: Transaction):
 
 
 def accept_bonus_transaction(transaction: Transaction):
-    bonus = Bonus.objects.filter(transaction=transaction)
+    bonus = Bonus.objects.filter(user=transaction.user, bonus_delete=False)
     if bonus.exists():
         bonus = bonus.update(bonus_with=True, bonus_delete=True)
 
