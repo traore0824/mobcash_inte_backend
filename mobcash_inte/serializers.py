@@ -348,9 +348,13 @@ class BotDepositTransactionSerializer(serializers.ModelSerializer):
 
 
 class CouponSerializer(serializers.ModelSerializer):
+    bet_app_details = serializers.SerializerMethodField()
     class Meta:
         model = Coupon
         fields = "__all__"
+
+    def get_bet_app_details(self, obj):
+        return ReadAppNameSerializer(obj.bet_app).data
 
 
 class CaisseSerializer(serializers.ModelSerializer):
