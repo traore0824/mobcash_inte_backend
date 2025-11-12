@@ -944,27 +944,6 @@ class StatisticsView(decorators.APIView):
         )["total"] or 0
         
         # Top utilisateurs par nombre de filleuls
-        top_referrers = (
-            User.objects.filter(
-                referral_code__isnull=False,
-                referral_code__gt=""
-            )
-            .annotate(
-                filleuls_count=Count(
-                    "id",
-                    filter=Q(
-                        **{
-                            f"user__referrer_code": models.F("referral_code")
-                        }
-                    )
-                )
-            )
-            .filter(filleuls_count__gt=0)
-            .order_by("-filleuls_count")[:10]
-            .values("id", "username", "email", "referral_code", "filleuls_count")
-        )
-        
-        # Calculer le nombre de filleuls correctement
         top_referrers_list = []
         for user in User.objects.filter(referral_code__isnull=False, referral_code__gt=""):
             filleuls = User.objects.filter(referrer_code=user.referral_code, is_delete=False).count()
