@@ -329,21 +329,21 @@ def delete_account_by_admin(request):
 class ListUser(generics.ListAPIView):
     serializer_class = UserDetailSerializer
     pagination_class = CustomPagination
+    permission_classes = [permissions.IsAdminUser]
+    filter_backends = [DjangoFilterBackend, SearchFilter]
+    filterset_fields = ["is_block"]
+    search_fields = [
+        "username",
+        "email",
+        "phone",
+        "first_name",
+        "last_name",
+        "referral_code",
+        "referrer_code",
+    ]
 
     def get_queryset(self):
-        search_fields = self.request.GET.get("search_fields")
-        status = self.request.GET.get("status")
-
-        if search_fields:
-            objs = User.objects.filter(
-                Q(email__icontains=search_fields)
-                | Q(first_name__icontains=search_fields)
-                | Q(last_name__icontains=search_fields)
-                | Q(referral_code__icontains=search_fields)
-            )
-        else:
-            objs = User.objects.all()
-        return objs
+        return User.objects.all().order_by("-date_joined")
 
 
 @api_view(["GET"])

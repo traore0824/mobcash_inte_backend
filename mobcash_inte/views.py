@@ -61,7 +61,8 @@ from django.db import transaction
 from rest_framework.response import Response
 from django.utils import timezone
 from payment import connect_pro_webhook, disbursment_process, payment_fonction, webhook_transaction_success
-from django.db.models import Sum
+from django.db.models import Sum, Count, Q, Avg
+from django.db.models.functions import TruncDate, TruncWeek, TruncMonth, TruncYear
 
 connect_pro_logger = logging.getLogger("mobcash_inte_backend.transactions")
 
@@ -605,9 +606,9 @@ class IDLinkViews(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter]
     filterset_fields = [
-        "app_name",
-        "user",
-        "telegram_user",
+        "email",
+        "phone",
+        
     ]
     search_fields = ["user_app_id"]
 
@@ -756,6 +757,286 @@ class DetailsAdvertisementViews(generics.RetrieveUpdateDestroyAPIView):
         else:
             objs = Advertisement.objects.filter(enable=True)
         return objs
+
+
+class StatisticsView(decorators.APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def get(self, request, *args, **kwargs):
+        """
+        Retourne les statistiques importantes :
+        - Volume des transactions
+        - Croissance utilisateurs
+        - Système de parrainage
+        """
+        # Paramètres de période (optionnels)
+        start_date = request.GET.get("start_date")
+        end_date = request.GET.get("end_date")
+        
+        # Filtre de base pour les dates
+        date_filter = Q()
+        if start_date:
+            date_filter &= Q(created_at__gte=start_date)
+        if end_date:
+            date_filter &= Q(created_at__lte=end_date)
+
+        # ========== VOLUME DES TRANSACTIONS ==========
+        transactions = Transaction.objects.filter(date_filter)
+        
+        # Total des dépôts
+        deposits = transactions.filter(type_trans="deposit", status="accept")
+        total_deposits_amount = deposits.aggregate(
+            total=Sum("amount")
+        )["total"] or 0
+        total_deposits_count = deposits.count()
+        
+        # Total des retraits
+        withdrawals = transactions.filter(type_trans="withdrawal", status="accept")
+        total_withdrawals_amount = withdrawals.aggregate(
+            total=Sum("amount")
+        )["total"] or 0
+        total_withdrawals_count = withdrawals.count()
+        
+        # Volume net
+        net_volume = total_deposits_amount - total_withdrawals_amount
+        
+        # Évolution par période
+        evolution_daily = (
+            transactions.filter(type_trans__in=["deposit", "withdrawal"], status="accept")
+            .annotate(date=TruncDate("created_at"))
+            .values("date", "type_trans")
+            .annotate(
+                total_amount=Sum("amount"),
+                count=Count("id")
+            )
+            .order_by("date")
+        )
+        
+        evolution_weekly = (
+            transactions.filter(type_trans__in=["deposit", "withdrawal"], status="accept")
+            .annotate(week=TruncWeek("created_at"))
+            .values("week", "type_trans")
+            .annotate(
+                total_amount=Sum("amount"),
+                count=Count("id")
+            )
+            .order_by("week")
+        )
+        
+        evolution_monthly = (
+            transactions.filter(type_trans__in=["deposit", "withdrawal"], status="accept")
+            .annotate(month=TruncMonth("created_at"))
+            .values("month", "type_trans")
+            .annotate(
+                total_amount=Sum("amount"),
+                count=Count("id")
+            )
+            .order_by("month")
+        )
+        
+        evolution_yearly = (
+            transactions.filter(type_trans__in=["deposit", "withdrawal"], status="accept")
+            .annotate(year=TruncYear("created_at"))
+            .values("year", "type_trans")
+            .annotate(
+                total_amount=Sum("amount"),
+                count=Count("id")
+            )
+            .order_by("year")
+        )
+
+        # ========== CROISSANCE UTILISATEURS ==========
+        users_date_filter = Q()
+        if start_date:
+            users_date_filter &= Q(date_joined__gte=start_date)
+        if end_date:
+            users_date_filter &= Q(date_joined__lte=end_date)
+        
+        all_users = User.objects.filter(users_date_filter, is_delete=False)
+        
+        # Nouveaux utilisateurs par période
+        new_users_daily = (
+            all_users.annotate(date=TruncDate("date_joined"))
+            .values("date")
+            .annotate(count=Count("id"))
+            .order_by("date")
+        )
+        
+        new_users_weekly = (
+            all_users.annotate(week=TruncWeek("date_joined"))
+            .values("week")
+            .annotate(count=Count("id"))
+            .order_by("week")
+        )
+        
+        new_users_monthly = (
+            all_users.annotate(month=TruncMonth("date_joined"))
+            .values("month")
+            .annotate(count=Count("id"))
+            .order_by("month")
+        )
+        
+        # Utilisateurs actifs (qui ont fait au moins une transaction)
+        # Compte les User normaux avec transactions
+        user_transactions_filter = Q(transaction__isnull=False)
+        if start_date:
+            user_transactions_filter &= Q(transaction__created_at__gte=start_date)
+        if end_date:
+            user_transactions_filter &= Q(transaction__created_at__lte=end_date)
+        
+        active_users = User.objects.filter(user_transactions_filter).distinct().count()
+        
+        # Compte les TelegramUser avec transactions
+        telegram_transactions_filter = Q(transaction__isnull=False)
+        if start_date:
+            telegram_transactions_filter &= Q(transaction__created_at__gte=start_date)
+        if end_date:
+            telegram_transactions_filter &= Q(transaction__created_at__lte=end_date)
+        
+        active_telegram_users = TelegramUser.objects.filter(telegram_transactions_filter).distinct().count()
+        
+        active_users_count = active_users + active_telegram_users
+        
+        # Utilisateurs par source
+        users_by_source = []
+        for source in ["mobile", "web", "bot"]:
+            source_transactions = transactions.filter(source=source)
+            unique_users = source_transactions.exclude(user__isnull=True).values("user").distinct().count()
+            unique_telegram_users = source_transactions.exclude(telegram_user__isnull=True).values("telegram_user").distinct().count()
+            users_by_source.append({
+                "source": source,
+                "count": unique_users + unique_telegram_users
+            })
+        
+        # Utilisateurs bloqués vs actifs
+        blocked_users = User.objects.filter(is_block=True, is_delete=False).count()
+        active_status_users = User.objects.filter(is_active=True, is_block=False, is_delete=False).count()
+        inactive_status_users = User.objects.filter(is_active=False, is_delete=False).count()
+
+        # ========== SYSTÈME DE PARRAINAGE ==========
+        # Nombre de parrainages effectués (utilisateurs avec referrer_code)
+        parrainages_count = User.objects.filter(
+            referrer_code__isnull=False,
+            referrer_code__gt="",
+            is_delete=False
+        ).count()
+        
+        if start_date or end_date:
+            parrainages_count = User.objects.filter(
+                referrer_code__isnull=False,
+                referrer_code__gt="",
+                is_delete=False,
+                date_joined__gte=start_date if start_date else timezone.datetime.min,
+                date_joined__lte=end_date if end_date else timezone.now()
+            ).count()
+        
+        # Montant total des bonus de parrainage distribués
+        referral_bonuses = Bonus.objects.filter(
+            reason_bonus__icontains="parrainage"
+        )
+        if start_date:
+            referral_bonuses = referral_bonuses.filter(created_at__gte=start_date)
+        if end_date:
+            referral_bonuses = referral_bonuses.filter(created_at__lte=end_date)
+        
+        total_referral_bonus = referral_bonuses.aggregate(
+            total=Sum("amount")
+        )["total"] or 0
+        
+        # Top utilisateurs par nombre de filleuls
+        top_referrers = (
+            User.objects.filter(
+                referral_code__isnull=False,
+                referral_code__gt=""
+            )
+            .annotate(
+                filleuls_count=Count(
+                    "id",
+                    filter=Q(
+                        **{
+                            f"user__referrer_code": models.F("referral_code")
+                        }
+                    )
+                )
+            )
+            .filter(filleuls_count__gt=0)
+            .order_by("-filleuls_count")[:10]
+            .values("id", "username", "email", "referral_code", "filleuls_count")
+        )
+        
+        # Calculer le nombre de filleuls correctement
+        top_referrers_list = []
+        for user in User.objects.filter(referral_code__isnull=False, referral_code__gt=""):
+            filleuls = User.objects.filter(referrer_code=user.referral_code, is_delete=False).count()
+            if filleuls > 0:
+                top_referrers_list.append({
+                    "id": str(user.id),
+                    "username": user.username,
+                    "email": user.email,
+                    "referral_code": user.referral_code,
+                    "filleuls_count": filleuls
+                })
+        
+        top_referrers_list = sorted(top_referrers_list, key=lambda x: x["filleuls_count"], reverse=True)[:10]
+        
+        # Taux d'activation des codes de parrainage
+        total_referral_codes = User.objects.filter(
+            referral_code__isnull=False,
+            referral_code__gt="",
+            is_delete=False
+        ).count()
+        
+        activated_referral_codes = User.objects.filter(
+            referrer_code__isnull=False,
+            referrer_code__gt="",
+            is_delete=False
+        ).values("referrer_code").distinct().count()
+        
+        activation_rate = (
+            (activated_referral_codes / total_referral_codes * 100)
+            if total_referral_codes > 0
+            else 0
+        )
+
+        return Response({
+            "volume_transactions": {
+                "deposits": {
+                    "total_amount": float(total_deposits_amount),
+                    "total_count": total_deposits_count
+                },
+                "withdrawals": {
+                    "total_amount": float(total_withdrawals_amount),
+                    "total_count": total_withdrawals_count
+                },
+                "net_volume": float(net_volume),
+                "evolution": {
+                    "daily": list(evolution_daily),
+                    "weekly": list(evolution_weekly),
+                    "monthly": list(evolution_monthly),
+                    "yearly": list(evolution_yearly)
+                }
+            },
+            "user_growth": {
+                "new_users": {
+                    "daily": list(new_users_daily),
+                    "weekly": list(new_users_weekly),
+                    "monthly": list(new_users_monthly)
+                },
+                "active_users_count": active_users_count,
+                "users_by_source": list(users_by_source),
+                "status": {
+                    "blocked": blocked_users,
+                    "active": active_status_users,
+                    "inactive": inactive_status_users
+                }
+            },
+            "referral_system": {
+                "parrainages_count": parrainages_count,
+                "total_referral_bonus": float(total_referral_bonus),
+                "top_referrers": top_referrers_list,
+                "activation_rate": round(activation_rate, 2)
+            }
+        })
 
 
 # Create your views here.
