@@ -1,3 +1,4 @@
+import logging
 import os
 import requests
 from accounts.models import AppName, TelegramUser, User
@@ -71,23 +72,38 @@ def send_admin_notification(title: str, content: str, data=None, reference=None)
             title=title, content=content, data=data, user=user, reference=reference
         )
 
+connect_pro_logger = logging.getLogger("mobcash_inte_backend.transactions")
+def send_notification(
+    user: User | TelegramUser, title: str, content: str, data=None, reference=None
+):
+    try:
+        if isinstance(user, TelegramUser) and user.telegram_user_id:
+            # ✅ Notification via Telegram
+            send_telegram_message(content=content, chat_id=user.telegram_user_id)
+        elif isinstance(user, User):
+            # ✅ Notification via push et base de données
+            response = send_push_noti(user=user, title=title, body=content, data=data)
+            notification = Notification.objects.create(
+                title=title, content=content, user=user, reference=reference
+            )
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f"private_channel_{str(user.id)}",
+                {
+                    "type": "new_notification",
+                    "data": NotificationSerializer(notification).data,
+                },
+            )
+        else:
+            connect_pro_logger.warning(
+                f"send_notification: utilisateur inconnu ou non valide ({user})"
+            )
 
-def send_notification(user: User|TelegramUser, title: str, content: str, data=None, reference=None):
-    if  not hasattr(user, "telegram_user_id") and user.telegram_user_id:
-        response = send_push_noti(user=user, title=title, body=content, data=data)
-        notification = Notification.objects.create(
-            title=title, content=content, user=user, reference=reference
+    except Exception as e:
+        connect_pro_logger.error(
+            f"Erreur send_notification pour utilisateur {getattr(user, 'id', None)}: {str(e)}",
+            exc_info=True,
         )
-        channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(
-            f"private_channel_{str(user.id)}",
-            {
-                "type": "new_notification",
-                "data": NotificationSerializer(notification).data,
-            },
-        )
-    else:
-        send_telegram_message(content=content, chat_id=user.telegram_user_id)
 
 
 def send_telegram_message(content, chat_id=917540842):
