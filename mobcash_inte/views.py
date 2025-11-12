@@ -310,8 +310,8 @@ class CreateBonusDepositTransactionViews(generics.CreateAPIView):
             user=self.request.user,
             type_trans="reward",
         )
-        transaction.api = transaction.network.deposit_api
-        transaction.save()
+        # transaction.api = transaction.network.deposit_api
+        # transaction.save()
         webhook_transaction_success(transaction=transaction, setting=Setting.objects.first())
         transaction.refresh_from_db()
         return Response(
