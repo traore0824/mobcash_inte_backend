@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Bonus, Caisse, Network, Notification, Setting, Transaction, UserPhone, WebhookLog
+from .models import Bonus, Caisse, Network, Notification, Reward, Setting, Transaction, UserPhone, WebhookLog
 
 
 @admin.register(Network)
@@ -301,3 +301,5 @@ class TransactionAdmin(admin.ModelAdmin):
     ordering = ("-created_at",)
     date_hierarchy = "created_at"
     autocomplete_fields = ("user", "app", "network")
+
+admin.site.register(Reward)
