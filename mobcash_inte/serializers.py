@@ -459,7 +459,7 @@ class BonusTransactionSerializer(serializers.ModelSerializer):
                     "amount": f"{MINIMUM_DEPOSIT} est le montant minimum de bonus pour une operation accepter"
                 }
             )
-        reward = Reward.objects.filter(user=user)().first()
+        reward = Reward.objects.filter(user=user).first()
         if reward.amount<amount:
             raise serializers.ValidationError(
                 {
