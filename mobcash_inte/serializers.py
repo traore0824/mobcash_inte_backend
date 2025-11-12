@@ -116,11 +116,14 @@ class BonusSerializer(serializers.ModelSerializer):
 
 class TransactionDetailsSerializer(serializers.ModelSerializer):
     user = SmallUserSerializer()
-    app=ReadAppNameSerializer(read_only=True)
+    app_details=serializers.SerializerMethodField()
 
     class Meta:
         model = Transaction
         fields = "__all__"
+
+    def get_app_details(self, obj):
+        return ReadAppNameSerializer(obj.app).data
 
 
 class DepositTransactionSerializer(serializers.ModelSerializer):
