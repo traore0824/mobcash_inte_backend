@@ -22,6 +22,7 @@ from mobcash_inte.models import (
     IDLink,
     Network,
     Notification,
+    Reward,
     Setting,
     Transaction,
     UploadFile,
@@ -977,7 +978,133 @@ class StatisticsView(decorators.APIView):
             else 0
         )
 
+        # ========== STATISTIQUES DASHBOARD ==========
+        # Total Utilisateurs
+        total_users = User.objects.filter(is_delete=False).count()
+        
+        # Utilisateurs Actifs/Inactifs
+        active_users_total = User.objects.filter(is_active=True, is_block=False, is_delete=False).count()
+        inactive_users_total = User.objects.filter(is_active=False, is_delete=False).count()
+        
+        # Total Bonus
+        total_bonus = Bonus.objects.filter(bonus_delete=False).aggregate(
+            total=Sum("amount")
+        )["total"] or 0
+        
+        # Statistiques Bot
+        bot_transactions = transactions.filter(source="bot")
+        total_transactions_bot = bot_transactions.count()
+        total_deposit_bot = bot_transactions.filter(type_trans="deposit", status="accept").count()
+        total_withdrawal_bot = bot_transactions.filter(type_trans="withdrawal", status="accept").count()
+        
+        # Utilisateurs Bot (TelegramUser)
+        telegram_users_count = TelegramUser.objects.count()
+        if start_date or end_date:
+            telegram_users_filter = Q()
+            if start_date:
+                telegram_users_filter &= Q(created_at__gte=start_date)
+            if end_date:
+                telegram_users_filter &= Q(created_at__lte=end_date)
+            telegram_users_count = TelegramUser.objects.filter(telegram_users_filter).count()
+        
+        # Total Transactions
+        total_transactions = transactions.count()
+        
+        # Transactions par application
+        transactions_by_app = {}
+        apps = AppName.objects.all()
+        for app in apps:
+            app_transactions = transactions.filter(app=app, status="accept")
+            transactions_by_app[app.name] = {
+                "count": app_transactions.count(),
+                "total_amount": float(app_transactions.aggregate(total=Sum("amount"))["total"] or 0)
+            }
+        
+        # Balance Bizao (Solde de caisse total)
+        total_balance_bizao = Caisse.objects.aggregate(
+            total=Sum("solde")
+        )["total"] or 0
+        
+        # Dépôts et Retraits Bizao (depuis le modèle Deposit)
+        deposits_bizao = Deposit.objects.all()
+        if start_date:
+            deposits_bizao = deposits_bizao.filter(created_at__gte=start_date)
+        if end_date:
+            deposits_bizao = deposits_bizao.filter(created_at__lte=end_date)
+        
+        total_deposits_bizao_count = deposits_bizao.count()
+        total_deposits_bizao_amount = deposits_bizao.aggregate(
+            total=Sum("amount")
+        )["total"] or 0
+        
+        # Retraits Bizao (depuis Caisse - calculé différemment)
+        # On utilise les retraits acceptés des transactions
+        withdrawals_bizao = withdrawals
+        total_withdrawals_bizao_count = withdrawals_bizao.count()
+        total_withdrawals_bizao_amount = float(total_withdrawals_amount)
+        
+        # Récompenses (Rewards)
+        total_rewards = Reward.objects.aggregate(
+            total=Sum("amount")
+        )["total"] or 0
+        
+        # Remboursements (Disbursements)
+        disbursements = transactions.filter(type_trans="disbursements")
+        total_disbursements = disbursements.count()
+        total_disbursements_amount = disbursements.aggregate(
+            total=Sum("amount")
+        )["total"] or 0
+        
+        # Publicités (Advertisements)
+        total_advertisements = Advertisement.objects.count()
+        active_advertisements = Advertisement.objects.filter(enable=True).count()
+        
+        # Coupons
+        total_coupons = Coupon.objects.count()
+        # Coupons en cours (moins de 24h)
+        now = timezone.now()
+        last_24h = now - timedelta(hours=24)
+        active_coupons = Coupon.objects.filter(created_at__gte=last_24h).count()
+
         return Response({
+            "dashboard_stats": {
+                "total_users": total_users,
+                "active_users": active_users_total,
+                "inactive_users": inactive_users_total,
+                "total_bonus": float(total_bonus),
+                "bot_stats": {
+                    "total_transactions": total_transactions_bot,
+                    "total_deposits": total_deposit_bot,
+                    "total_withdrawals": total_withdrawal_bot,
+                    "total_users": telegram_users_count
+                },
+                "total_transactions": total_transactions,
+                "transactions_by_app": transactions_by_app,
+                "balance_bizao": float(total_balance_bizao),
+                "deposits_bizao": {
+                    "count": total_deposits_bizao_count,
+                    "amount": float(total_deposits_bizao_amount)
+                },
+                "withdrawals_bizao": {
+                    "count": total_withdrawals_bizao_count,
+                    "amount": total_withdrawals_bizao_amount
+                },
+                "rewards": {
+                    "total": float(total_rewards)
+                },
+                "disbursements": {
+                    "count": total_disbursements,
+                    "amount": float(total_disbursements_amount)
+                },
+                "advertisements": {
+                    "total": total_advertisements,
+                    "active": active_advertisements
+                },
+                "coupons": {
+                    "total": total_coupons,
+                    "active": active_coupons
+                }
+            },
             "volume_transactions": {
                 "deposits": {
                     "total_amount": float(total_deposits_amount),
