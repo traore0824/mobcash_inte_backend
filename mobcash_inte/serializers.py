@@ -116,6 +116,7 @@ class BonusSerializer(serializers.ModelSerializer):
 
 class TransactionDetailsSerializer(serializers.ModelSerializer):
     user = SmallUserSerializer()
+    app=ReadAppNameSerializer(read_only=True)
 
     class Meta:
         model = Transaction

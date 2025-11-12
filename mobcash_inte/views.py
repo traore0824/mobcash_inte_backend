@@ -301,7 +301,9 @@ class CreateBonusDepositTransactionViews(generics.CreateAPIView):
         return Transaction.objects.filter(user=self.request.user)
 
     def create(self, request, *args, **kwargs):
-        serializer = self.serializer_class(data=request.data)
+        serializer = self.serializer_class(
+            data=request.data, context={"request": request}
+        )
         serializer.is_valid(raise_exception=True)
         transaction = serializer.save(
             reference=generate_reference(prefix="depot-"),
@@ -317,12 +319,12 @@ class CreateBonusDepositTransactionViews(generics.CreateAPIView):
             status=status.HTTP_201_CREATED,
         )
 
-    def get_serializer_context(self):
-        context = super().get_serializer_context()
-        # Ajoute les infos utiles au serializer
-        context["request"] = self.request
-        # context["telegram_user"] = getattr(self.request, "telegram_user", None)
-        return context
+    # def get_serializer_context(self):
+    #     context = super().get_serializer_context()
+    #     # Ajoute les infos utiles au serializer
+    #     context["request"] = self.request
+    #     # context["telegram_user"] = getattr(self.request, "telegram_user", None)
+    #     return context
 
 
 class RewardTransactionViews(generics.CreateAPIView):
