@@ -73,7 +73,7 @@ def send_admin_notification(title: str, content: str, data=None, reference=None)
 
 
 def send_notification(user: User|TelegramUser, title: str, content: str, data=None, reference=None):
-    if hasattr(user, "telegram_user_id") and user.telegram_user_id:
+    if  not hasattr(user, "telegram_user_id") and user.telegram_user_id:
         response = send_push_noti(user=user, title=title, body=content, data=data)
         notification = Notification.objects.create(
             title=title, content=content, user=user, reference=reference

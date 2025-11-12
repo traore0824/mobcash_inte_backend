@@ -302,4 +302,35 @@ class TransactionAdmin(admin.ModelAdmin):
     date_hierarchy = "created_at"
     autocomplete_fields = ("user", "app", "network")
 
-admin.site.register(Reward)
+
+@admin.register(Reward)
+class RewardAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "user",
+        "amount",
+        "referral_code_display",
+        "share_link_display",
+    )
+    search_fields = ("user__username", "user__email", "user__referral_code")
+    list_filter = ("user",)
+    readonly_fields = ("referral_code_display", "share_link_display")
+
+    # Pour afficher le code de parrainage dans l'admin
+    def referral_code_display(self, obj):
+        return obj.referral_code()
+
+    referral_code_display.short_description = "Code de parrainage"
+
+    # Pour afficher le lien de partage dans l'admin
+    def share_link_display(self, obj):
+        return obj.share_link()
+
+    share_link_display.short_description = "Lien de partage"
+
+    # Optionnel : si tu veux rendre les liens cliquables
+    def share_link_display(self, obj):
+        return f'<a href="{obj.share_link()}" target="_blank">Voir le lien</a>'
+
+    share_link_display.allow_tags = True
+    share_link_display.short_description = "Lien de partage"
