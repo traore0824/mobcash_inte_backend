@@ -234,7 +234,7 @@ class SettingViews(decorators.APIView):
 
     def get_permissions(self):
         if self.request.method == "GET":
-            self.permission_classes = [permissions.IsAuthenticated]
+            self.permission_classes = [permissions.AllowAny]
         return super().get_permissions()
 
     def put(self, request, *args, **kwargs):
