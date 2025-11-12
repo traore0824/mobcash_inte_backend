@@ -438,14 +438,34 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                         )
 
                     try:
-                        send_telegram_message(
-                            content=f"{transaction.user.first_name.upper()} {transaction.user.last_name.capitalize()} a lancé une demande de depot de {transaction.app.name.upper()}. Montant : {transaction.amount} F CFA | Numéro de référence : {transaction.reference} | Réseau : {transaction.network.name.upper()} Mobile Money | User AP ID : {transaction.user_app_id} | Telephone : +{transaction.network.indication} {transaction.phone_number}. ",
+                        # Récupération sécurisée du nom de l'utilisateur (User ou TelegramUser)
+                        user_obj = transaction.user if transaction.user else transaction.telegram_user
+
+                        first_name = getattr(user_obj, "first_name", "") or getattr(user_obj, "username", "Inconnu")
+                        last_name = getattr(user_obj, "last_name", "")
+                        full_name = f"{first_name.upper()} {last_name.capitalize()}".strip()
+
+                        app_name = getattr(transaction.app, "name", "Application inconnue").upper()
+                        network_name = getattr(transaction.network, "name", "Réseau inconnu").upper()
+                        indication = getattr(transaction.network, "indication", "")
+
+                        content = (
+                            f"{full_name} a lancé une demande de dépôt de {app_name}. "
+                            f"Montant : {transaction.amount} F CFA | "
+                            f"Numéro de référence : {transaction.reference} | "
+                            f"Réseau : {network_name} Mobile Money | "
+                            f"User App ID : {transaction.user_app_id} | "
+                            f"Téléphone : +{indication} {transaction.phone_number}."
                         )
+
+                        send_telegram_message(content=content)
+
                     except Exception as e:
                         connect_pro_logger.error(
                             f"Erreur send_telegram_message pour transaction {transaction.id}: {str(e)}",
                             exc_info=True,
                         )
+
 
             except Exception as e:
                 connect_pro_logger.error(
