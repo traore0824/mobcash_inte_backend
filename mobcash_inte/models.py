@@ -157,6 +157,7 @@ class Setting(models.Model):
     expired_connect_pro_token = models.DateTimeField(blank=True, null=True)
     orange_default_link = models.URLField(blank=True, null=True)
     mtn_default_link = models.URLField(blank=True, null=True)
+    telegram = models.URLField(blank=True, null=True)
 
     def __str__(self):
         return str(self.id)

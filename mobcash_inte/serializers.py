@@ -37,9 +37,13 @@ class UploadFileSerializer(serializers.ModelSerializer):
 
 
 class IDLinkSerializer(serializers.ModelSerializer):
+    app_details = serializers.SerializerMethodField()
     class Meta:
         model = IDLink
         fields = "__all__"
+
+    def get_app_details(self, obj):
+        return ReadAppNameSerializer(obj.app_name).data
 
 
 class NotificationSerializer(serializers.ModelSerializer):
