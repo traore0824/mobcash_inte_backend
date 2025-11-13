@@ -740,8 +740,14 @@ class CreateAdvertisementViews(generics.ListCreateAPIView):
     def get_queryset(self):
         user = self.request.user
         if user.is_staff:
-            return Advertisement.objects.all()
-        return Advertisement.objects.filter(enable=True)
+            return Advertisement.objects.all().order_by("-created_at")
+        return Advertisement.objects.filter(enable=True).order_by("-created_at")
+    
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        instance = serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 class DetailsAdvertisementViews(generics.RetrieveUpdateDestroyAPIView):

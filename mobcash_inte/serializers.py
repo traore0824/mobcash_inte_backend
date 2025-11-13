@@ -1,10 +1,9 @@
 from rest_framework import serializers
 from django.db.models import Sum
-from accounts.models import AppName
+from accounts.models import AppName, Advertisement
 from accounts.serializers import SmallBotUserSerializer, SmallUserSerializer
 from mobcash_inte.models import (
     TRANS_STATUS,
-    Advertisement,
     Bonus,
     Caisse,
     Coupon,
@@ -22,10 +21,6 @@ from dateutil.relativedelta import relativedelta
 from django.utils import timezone
 
 
-class AdvertisementSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Advertisement
-        fields = "__all__"
 
 
 class UploadFileSerializer(serializers.ModelSerializer):
