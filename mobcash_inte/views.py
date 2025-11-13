@@ -607,8 +607,7 @@ class IDLinkViews(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter]
     filterset_fields = [
-        "email",
-        "phone",
+        "app_name",
         
     ]
     search_fields = ["user_app_id"]

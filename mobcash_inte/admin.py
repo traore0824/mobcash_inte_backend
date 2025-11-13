@@ -1,4 +1,6 @@
 from django.contrib import admin
+
+from accounts.models import Advertisement
 from .models import Bonus, Caisse, Network, Notification, Reward, Setting, Transaction, UserPhone, WebhookLog
 
 
@@ -334,3 +336,5 @@ class RewardAdmin(admin.ModelAdmin):
 
     share_link_display.allow_tags = True
     share_link_display.short_description = "Lien de partage"
+
+admin.site.register(Advertisement)
