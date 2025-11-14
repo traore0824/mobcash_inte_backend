@@ -30,25 +30,25 @@ find . -name "__pycache__" -type d -exec rm -rf {} + || true
 # python manage.py test test_mobcash.user test_mobcash.telegram --verbosity=2
 # RESULT=$?
 
-if [ $RESULT -eq 0 ]; then
-    echo "✅ Tous les tests ont réussi !"
-    read -p "Voulez-vous redémarrer les services maintenant ? (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        echo "🔄 Redémarrage des services..."
-        sudo systemctl restart gunicorn_mobcash.service
-        for i in $(seq 1 $CELERY_WORKERS); do
-            PID_FILE="/tmp/celery_worker$i.pid"
-            [ -f "$PID_FILE" ] && kill -9 $(cat "$PID_FILE") || true
-            celery -A mobcash_inte_backend worker --loglevel=info -n "worker$i@%h" --detach --pidfile="$PID_FILE"
-        done
-        echo "🎉 Services redémarrés avec succès !"
-    else
-        echo "⚠️ Services non redémarrés."
-    fi
-else
-    echo "❌ Certains tests ont échoué. Veuillez corriger les erreurs avant de redémarrer."
-fi
+# if [ $RESULT -eq 0 ]; then
+#     echo "✅ Tous les tests ont réussi !"
+#     read -p "Voulez-vous redémarrer les services maintenant ? (y/N): " -n 1 -r
+#     echo
+#     if [[ $REPLY =~ ^[Yy]$ ]]; then
+#         echo "🔄 Redémarrage des services..."
+#         sudo systemctl restart gunicorn_mobcash.service
+#         for i in $(seq 1 $CELERY_WORKERS); do
+#             PID_FILE="/tmp/celery_worker$i.pid"
+#             [ -f "$PID_FILE" ] && kill -9 $(cat "$PID_FILE") || true
+#             celery -A mobcash_inte_backend worker --loglevel=info -n "worker$i@%h" --detach --pidfile="$PID_FILE"
+#         done
+#         echo "🎉 Services redémarrés avec succès !"
+#     else
+#         echo "⚠️ Services non redémarrés."
+#     fi
+# else
+#     echo "❌ Certains tests ont échoué. Veuillez corriger les erreurs avant de redémarrer."
+# fi
 
 echo ""
 echo "📊 Statut actuel :"

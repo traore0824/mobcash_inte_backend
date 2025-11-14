@@ -43,6 +43,7 @@ ALLOWED_HOSTS = [
     "127.0.0.1",
     "api.turaincash.net",
     "api.zefast.net",
+    "api.africash.io",
 ]
 
 
@@ -90,8 +91,13 @@ CORS_ALLOWED_ORIGINS = [
     "https://zefast.net",
     "https://zefast-mobile-app.vercel.app",
     "https://admin.zefast.net",
-    "https://zefast.net",
     "https://zefast-mobile-app.vercel.app",
+    "https://module.zefast.net",
+    "https://africash.io",
+    "https://africash-mobile-app.vercel.app",
+    "https://admin.africash.io",
+    "https://africash-mobile-app.vercel.app",
+    "https://module.africash.io",
 ]
 
 
