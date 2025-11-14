@@ -34,6 +34,6 @@ urlpatterns = [
     path("coupon", views.CreateCoupon.as_view()),
     path("coupon/<int:pk>", views.CouponDetailAPIView.as_view()),
     path("ann", views.CreateAdvertisementViews.as_view()),
-    path("ann/<int:pk>", views.DetailsAdvertisementViews.as_view()),
+    path("ann/<str:pk>", views.DetailsAdvertisementViews.as_view()),
     path("statistics", views.StatisticsView.as_view()),
 ]
