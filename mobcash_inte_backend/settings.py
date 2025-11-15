@@ -44,6 +44,7 @@ ALLOWED_HOSTS = [
     "api.turaincash.net",
     "api.zefast.net",
     "api.africash.io",
+    "api.fastxof.com",
 ]
 
 
