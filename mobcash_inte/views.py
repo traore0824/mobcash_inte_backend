@@ -613,11 +613,22 @@ class IDLinkViews(viewsets.ModelViewSet):
     search_fields = ["user_app_id"]
 
     def get_queryset(self):
-        if self.request.user.is_authenticated and self.request.user.is_staff:
-            return IDLink.objects.all()
-        if self.request.user.is_authenticated:
-            return IDLink.objects.filter(user=self.request.user)
-        return IDLink.objects.filter(telegram_user=self.request.telegram_user)
+        user = self.request.user
+        bet_app_id = self.request.query_params.get("bet_app")  
+
+        queryset = IDLink.objects.all()
+
+        
+        if user.is_authenticated and not user.is_staff:
+            queryset = queryset.filter(user=user)
+        elif not user.is_authenticated:
+            queryset = queryset.filter(telegram_user=self.request.telegram_user)
+
+      
+        if bet_app_id:
+            queryset = queryset.filter(app_name__id=bet_app_id)
+
+        return queryset
 
     def perform_create(self, serializer):
         if self.request.user.is_authenticated:
