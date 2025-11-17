@@ -21,8 +21,6 @@ from dateutil.relativedelta import relativedelta
 from django.utils import timezone
 
 
-
-
 class UploadFileSerializer(serializers.ModelSerializer):
     class Meta:
         model = UploadFile
@@ -361,11 +359,14 @@ class CouponSerializer(serializers.ModelSerializer):
 
 
 class CaisseSerializer(serializers.ModelSerializer):
-    bet_app = ReadAppNameSerializer(read_only=True)
+    bet_app_details = serializers.SerializerMethodField()
 
     class Meta:
         model = Caisse
         fields = "__all__"
+
+    def get_bet_app_details(self, obj):
+        return ReadAppNameSerializer(obj.bet_app).data
 
 
 class DepositSerializer(serializers.ModelSerializer):
