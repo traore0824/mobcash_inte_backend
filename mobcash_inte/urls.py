@@ -13,7 +13,7 @@ urlpatterns = [
     path("connect-pro-webhook", views.ConnectProWebhook.as_view()),
     path("", include(router.urls)),
     path("network", views.CreateNetworkView.as_view(), name="network"),
-    path("network/<int:pk>", views.CreateNetworkView.as_view()),
+    path("network/<int:pk>", views.DetailsNetworkView.as_view()),
     path("plateform", views.CreateAppName.as_view()),
     path("plateform/<str:pk>", views.DetailAppName.as_view()),
     path("notification", views.NotificationView.as_view()),
