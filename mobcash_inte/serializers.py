@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.db.models import Sum
 from accounts.models import AppName, Advertisement
 from accounts.serializers import SmallBotUserSerializer, SmallUserSerializer
+# from mobcash_inte.mobcash_service import BetApp
 from mobcash_inte.models import (
     TRANS_STATUS,
     Bonus,
@@ -370,7 +371,12 @@ class CaisseSerializer(serializers.ModelSerializer):
 
 
 class DepositSerializer(serializers.ModelSerializer):
-    bet_app = ReadAppNameSerializer(read_only=True)
+    
+    bet_app = serializers.PrimaryKeyRelatedField(
+        queryset=AppName.objects.all(), write_only=True
+    )
+    
+    bet_app_detail = ReadAppNameSerializer(source="bet_app", read_only=True)
 
     class Meta:
         model = Deposit
