@@ -706,12 +706,11 @@ class CreateCoupon(generics.ListCreateAPIView):
 
     def get_queryset(self):
         """Afficher uniquement les coupons de moins de 24 heures"""
-        if not self.request.user.is_staff:
-            # now = timezone.now()
-            last_24h = timezone.now() + relativedelta(hours=24)
-            return Coupon.objects.filter(created_at__gte=last_24h)
-        else:
+        if self.request.user.is_staff:
             return Coupon.objects.all()
+        else:
+            last_24h = timezone.now() - relativedelta(hours=24)
+            return Coupon.objects.filter(created_at__gte=last_24h)
 
 
 class CouponDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
