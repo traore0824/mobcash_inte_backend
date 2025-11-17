@@ -536,6 +536,7 @@ def check_solde(transaction_id):
     transaction = (
         Transaction.objects.filter(id=transaction_id).select_for_update().first()
     )
+    setting = Setting.objects.first()
     with db_transaction.atomic():
         if transaction.already_process:
             return
@@ -555,6 +556,14 @@ def check_solde(transaction_id):
             )
             caisse.solde = float(caisse.solde) - float(transaction.amount)
             caisse.save()
+        if caisse.solde<setting.minimum_solde:
+            send_telegram_message(
+                content=(
+                    f"Il ne vous reste plus que {caisse.solde} FCFA "
+                    f"sur votre Caisse {caisse.bet_app.name.upper()}. "
+                    f"Pensez à recharger votre compte"
+                )
+            )
 
 
 @shared_task
