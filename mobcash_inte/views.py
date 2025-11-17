@@ -8,6 +8,7 @@ from accounts.helpers import CustomPagination
 from accounts.models import Advertisement, AppName, TelegramUser, User
 from rest_framework.filters import SearchFilter
 import constant
+from dateutil.relativedelta import relativedelta
 from mobcash_inte.helpers import (
     generate_reference,
     init_mobcash,
@@ -705,9 +706,12 @@ class CreateCoupon(generics.ListCreateAPIView):
 
     def get_queryset(self):
         """Afficher uniquement les coupons de moins de 24 heures"""
-        now = timezone.now()
-        last_24h = now - timedelta(hours=24)
-        return Coupon.objects.filter(created_at__gte=last_24h)
+        if not self.request.user.is_staff:
+            # now = timezone.now()
+            last_24h = timezone.now() + relativedelta(hours=24)
+            return Coupon.objects.filter(created_at__gte=last_24h)
+        else:
+            return Coupon.objects.all()
 
 
 class CouponDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
