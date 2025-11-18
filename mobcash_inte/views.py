@@ -125,9 +125,14 @@ class NotificationView(generics.ListCreateAPIView):
         serializer.is_valid(raise_exception=True)
         user_id = self.request.GET.get("user_id")
         if user_id:
-            user = User.objects.filter(id=user_id).first()
+            try:
+                user = User.objects.filter(id=user_id).first()
+            except:
+                user = TelegramUser.objects.filter(id=user_id).first()
             if not user:
                 return Response(status=status.HTTP_404_NOT_FOUND)
+            
+            
             send_notification(
                 user=user,
                 title=serializer.validated_data.get("title"),
