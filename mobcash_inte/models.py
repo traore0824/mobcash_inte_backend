@@ -158,6 +158,7 @@ class Setting(models.Model):
     orange_default_link = models.URLField(blank=True, null=True)
     mtn_default_link = models.URLField(blank=True, null=True)
     telegram = models.URLField(blank=True, null=True)
+    moov_marchand_phone = models.CharField(max_length=250, blank=True, null=True)
 
     def __str__(self):
         return str(self.id)
