@@ -414,7 +414,7 @@ class ConnectProWebhook(decorators.APIView):
 
             # Lancement de la tâche asynchrone
             try:
-                connect_pro_webhook.delay(data=data)
+                connect_pro_webhook(data=data)
                 connect_pro_logger.info(f"Tâche asynchrone lancée pour UID {uid}")
             except Exception as e:
                 connect_pro_logger.error(
