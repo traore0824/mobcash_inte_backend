@@ -364,57 +364,28 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                     transaction.validated_at = timezone.now()
                     transaction.status = "accept"
                     transaction.save()
-                    send_notification(
-                        title="Opération réussie avec succès",
-                        content=f"Vous avez effectué un dépôt de {transaction.amount} FCFA sur votre compte {transaction.app.name}",
-                        user=transaction.user if transaction.user else transaction.telegram_user,
-                        
-                    )
+                    
+                    # Appel de la tâche Celery pour les opérations lentes (notifications, bonus, etc.)
+                    try:
+                        process_transaction_notifications_and_bonus.delay(transaction_id=transaction.id)
+                    except Exception as e:
+                        connect_pro_logger.error(
+                            f"Erreur process_transaction_notifications_and_bonus.delay pour transaction {transaction.id}: {str(e)}",
+                            exc_info=True,
+                        )
+                    
+                    # Si c'est une reward, on doit aussi appeler check_solde
                     if transaction.type_trans == "reward":
                         try:
-                            accept_bonus_transaction(transaction=transaction)
                             check_solde.delay(transaction_id=transaction.id)
                         except Exception as e:
                             connect_pro_logger.error(
-                                f"Erreur accept_bonus_transaction pour transaction {transaction.id}: {str(e)}",
+                                f"Erreur check_solde.delay pour transaction {transaction.id}: {str(e)}",
                                 exc_info=True,
                             )
                         return 
 
-                    if setting.referral_bonus:
-                        try:
-                            user_referrer = User.objects.filter(
-                                referral_code=transaction.user.referrer_code
-                            ).first()
-                            if user_referrer:
-                                bonus_amount = (
-                                    setting.bonus_percent * transaction.amount
-                                ) / constant.BONUS_PERCENT_MAX
-                                Bonus.objects.create(
-                                    transaction=transaction,
-                                    user=user_referrer,
-                                    amount=bonus_amount,
-                                    reason_bonus="Bonus de parrainage de transaction",
-                                )
-                                reward, _ = Reward.objects.get_or_create(
-                                    user=user_referrer
-                                )
-                                reward.amount = float(reward.amount) + float(
-                                    bonus_amount
-                                )
-                                reward.save()
-
-                                send_notification(
-                                    title="Félicitations, vous avez un bonus !",
-                                    content=f" Vous venez de recevoir un bonus grâce à une opération de {transaction.amount} FCFA effectuée par {transaction.user.email}.",
-                                    user=user_referrer,
-                                )
-                        except Exception as e:
-                            connect_pro_logger.error(
-                                f"Erreur bonus parrainage pour transaction {transaction.id}: {str(e)}",
-                                exc_info=True,
-                            )
-
+                    # Pour les dépôts normaux, on appelle aussi check_solde
                     try:
                         check_solde.delay(transaction_id=transaction.id)
                     except Exception as e:
@@ -423,46 +394,22 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                             exc_info=True,
                         )
                 else:
-                    # Handle transaction failure
+                    # Handle transaction failure - Appel de la tâche Celery pour les notifications d'erreur
+                    error_message = (
+                        f"Une erreur est survenue lors de votre dépôt de {transaction.amount} FCFA sur "
+                        f"{transaction.app.name.upper() if transaction.app else 'l\'application'}. "
+                        f"{transaction.app.name.upper() if transaction.app else ''} Message: {xbet_response_data.get('Message')}. "
+                        f"Référence de la transaction {transaction.reference}"
+                    )
                     try:
-                        send_notification(
-                            title="Erreur de transaction",
-                            content=f"Une erreur est survenue lors de votre dépôt de {transaction.amount} FCFA sur {transaction.app.name.upper()}. {transaction.app.name.upper()} Message: {xbet_response_data.get('Message')}. Référence de la transaction {transaction.reference}",
-                            user=transaction.user if transaction.user else transaction.telegram_user,
-                            reference=transaction.reference,
+                        process_transaction_notifications_and_bonus.delay(
+                            transaction_id=transaction.id,
+                            is_error=True,
+                            error_message=error_message
                         )
                     except Exception as e:
                         connect_pro_logger.error(
-                            f"Erreur send_notification échec transaction {transaction.id}: {str(e)}",
-                            exc_info=True,
-                        )
-
-                    try:
-                        # Récupération sécurisée du nom de l'utilisateur (User ou TelegramUser)
-                        user_obj = transaction.user if transaction.user else transaction.telegram_user
-
-                        first_name = getattr(user_obj, "first_name", "") or getattr(user_obj, "username", "Inconnu")
-                        last_name = getattr(user_obj, "last_name", "")
-                        full_name = f"{first_name.upper()} {last_name.capitalize()}".strip()
-
-                        app_name = getattr(transaction.app, "name", "Application inconnue").upper()
-                        network_name = getattr(transaction.network, "name", "Réseau inconnu").upper()
-                        indication = getattr(transaction.network, "indication", "")
-
-                        content = (
-                            f"{full_name} a lancé une demande de dépôt de {app_name}. "
-                            f"Montant : {transaction.amount} F CFA | "
-                            f"Numéro de référence : {transaction.reference} | "
-                            f"Réseau : {network_name} Mobile Money | "
-                            f"User App ID : {transaction.user_app_id} | "
-                            f"Téléphone : +{indication} {transaction.phone_number}."
-                        )
-
-                        send_telegram_message(content=content)
-
-                    except Exception as e:
-                        connect_pro_logger.error(
-                            f"Erreur send_telegram_message pour transaction {transaction.id}: {str(e)}",
+                            f"Erreur process_transaction_notifications_and_bonus.delay (erreur) pour transaction {transaction.id}: {str(e)}",
                             exc_info=True,
                         )
 
@@ -478,20 +425,14 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                 connect_pro_logger.info(f"Operation success")
                 transaction.status = "accept"
                 transaction.save()
-                if transaction.user:
-                    send_notification(
-                        title="Opération réussie",
-                        content=f"Vous avez effectué un retrait de {transaction.amount} FCFA sur {transaction.app.name}",
-                        user=(
-                            transaction.user
-                            if transaction.user
-                            else transaction.telegram_user
-                        ),
-                    )
-                else:
-                    send_telegram_message(
-                        chat_id=transaction.telegram_user.telegram_user_id,
-                        content=f"Vous avez effectué un retrait de {transaction.amount} FCFA sur {transaction.app.name}",
+                
+                # Appel de la tâche Celery pour les notifications (retrait)
+                try:
+                    process_transaction_notifications_and_bonus.delay(transaction_id=transaction.id)
+                except Exception as e:
+                    connect_pro_logger.error(
+                        f"Erreur process_transaction_notifications_and_bonus.delay pour transaction {transaction.id}: {str(e)}",
+                        exc_info=True,
                     )
             except Exception as e:
                 connect_pro_logger.error(
@@ -532,6 +473,178 @@ def accept_bonus_transaction(transaction: Transaction):
 
 
 @shared_task
+def process_transaction_notifications_and_bonus(transaction_id, is_error=False, error_message=None):
+    """
+    Tâche Celery pour traiter les notifications et bonus après une transaction.
+    Cette fonction gère toutes les opérations lentes de manière asynchrone.
+    
+    Args:
+        transaction_id: ID de la transaction
+        is_error: True si c'est une notification d'erreur
+        error_message: Message d'erreur à envoyer (si is_error=True)
+    """
+    try:
+        transaction = Transaction.objects.select_related(
+            'user', 'telegram_user', 'app', 'network'
+        ).filter(id=transaction_id).first()
+        
+        if not transaction:
+            connect_pro_logger.error(
+                f"Transaction {transaction_id} non trouvée dans process_transaction_notifications_and_bonus"
+            )
+            return
+        
+        setting = Setting.objects.first()
+        if not setting:
+            connect_pro_logger.error("Setting non trouvé dans process_transaction_notifications_and_bonus")
+            return
+        
+        # Gestion des notifications d'erreur
+        if is_error:
+            try:
+                user = transaction.user if transaction.user else transaction.telegram_user
+                if user:
+                    send_notification(
+                        title="Erreur de transaction",
+                        content=error_message or f"Une erreur est survenue lors de votre transaction de {transaction.amount} FCFA.",
+                        user=user,
+                        reference=transaction.reference,
+                    )
+            except Exception as e:
+                connect_pro_logger.error(
+                    f"Erreur send_notification échec transaction {transaction_id}: {str(e)}",
+                    exc_info=True,
+                )
+            
+            # Message Telegram pour les admins en cas d'erreur
+            try:
+                user_obj = transaction.user if transaction.user else transaction.telegram_user
+                if user_obj:
+                    first_name = getattr(user_obj, "first_name", "") or getattr(user_obj, "username", "Inconnu")
+                    last_name = getattr(user_obj, "last_name", "")
+                    full_name = f"{first_name.upper()} {last_name.capitalize()}".strip()
+                    
+                    app_name = getattr(transaction.app, "name", "Application inconnue").upper() if transaction.app else "Application inconnue"
+                    network_name = getattr(transaction.network, "name", "Réseau inconnu").upper() if transaction.network else "Réseau inconnu"
+                    indication = getattr(transaction.network, "indication", "") if transaction.network else ""
+                    
+                    content = (
+                        f"{full_name} a lancé une demande de dépôt de {app_name}. "
+                        f"Montant : {transaction.amount} F CFA | "
+                        f"Numéro de référence : {transaction.reference} | "
+                        f"Réseau : {network_name} Mobile Money | "
+                        f"User App ID : {transaction.user_app_id} | "
+                        f"Téléphone : +{indication} {transaction.phone_number}."
+                    )
+                    
+                    send_telegram_message(content=content)
+            except Exception as e:
+                connect_pro_logger.error(
+                    f"Erreur send_telegram_message pour transaction {transaction_id}: {str(e)}",
+                    exc_info=True,
+                )
+            return
+        
+        # 1. Notification à l'utilisateur pour transaction réussie
+        if transaction.type_trans in ["deposit", "reward"]:
+            try:
+                user = transaction.user if transaction.user else transaction.telegram_user
+                if user:
+                    send_notification(
+                        title="Opération réussie avec succès",
+                        content=f"Vous avez effectué un dépôt de {transaction.amount} FCFA sur votre compte {transaction.app.name if transaction.app else 'l\'application'}",
+                        user=user,
+                    )
+            except Exception as e:
+                connect_pro_logger.error(
+                    f"Erreur send_notification utilisateur pour transaction {transaction_id}: {str(e)}",
+                    exc_info=True,
+                )
+        
+        # 2. Si c'est une reward, accepter les bonus
+        if transaction.type_trans == "reward":
+            try:
+                accept_bonus_transaction(transaction=transaction)
+            except Exception as e:
+                connect_pro_logger.error(
+                    f"Erreur accept_bonus_transaction pour transaction {transaction_id}: {str(e)}",
+                    exc_info=True,
+                )
+        
+        # 3. Attribution de bonus de parrainage (si applicable)
+        if (
+            transaction.type_trans == "deposit" 
+            and transaction.user 
+            and transaction.user.referrer_code 
+            and setting.referral_bonus
+        ):
+            try:
+                user_referrer = User.objects.filter(
+                    referral_code=transaction.user.referrer_code
+                ).first()
+                
+                if user_referrer:
+                    bonus_amount = (
+                        setting.bonus_percent * transaction.amount
+                    ) / constant.BONUS_PERCENT_MAX
+                    
+                    Bonus.objects.create(
+                        transaction=transaction,
+                        user=user_referrer,
+                        amount=bonus_amount,
+                        reason_bonus="Bonus de parrainage de transaction",
+                    )
+                    
+                    reward, _ = Reward.objects.get_or_create(
+                        user=user_referrer
+                    )
+                    reward.amount = float(reward.amount) + float(bonus_amount)
+                    reward.save()
+                    
+                    # Notification au parrain
+                    send_notification(
+                        title="Félicitations, vous avez un bonus !",
+                        content=f"Vous venez de recevoir un bonus grâce à une opération de {transaction.amount} FCFA effectuée par {transaction.user.email}.",
+                        user=user_referrer,
+                    )
+            except Exception as e:
+                connect_pro_logger.error(
+                    f"Erreur bonus parrainage pour transaction {transaction_id}: {str(e)}",
+                    exc_info=True,
+                )
+        
+        # 4. Notification pour retrait
+        if transaction.type_trans == "withdrawal":
+            try:
+                if transaction.user:
+                    send_notification(
+                        title="Opération réussie",
+                        content=f"Vous avez effectué un retrait de {transaction.amount} FCFA sur {transaction.app.name if transaction.app else 'l\'application'}",
+                        user=transaction.user,
+                    )
+                elif transaction.telegram_user:
+                    send_telegram_message(
+                        chat_id=transaction.telegram_user.telegram_user_id,
+                        content=f"Vous avez effectué un retrait de {transaction.amount} FCFA sur {transaction.app.name if transaction.app else 'l\'application'}",
+                    )
+            except Exception as e:
+                connect_pro_logger.error(
+                    f"Erreur notification retrait pour transaction {transaction_id}: {str(e)}",
+                    exc_info=True,
+                )
+        
+        connect_pro_logger.info(
+            f"process_transaction_notifications_and_bonus terminé avec succès pour transaction {transaction_id}"
+        )
+        
+    except Exception as e:
+        connect_pro_logger.error(
+            f"Erreur globale process_transaction_notifications_and_bonus pour transaction {transaction_id}: {str(e)}",
+            exc_info=True,
+        )
+
+
+@shared_task
 def check_solde(transaction_id):
     transaction = (
         Transaction.objects.filter(id=transaction_id).select_for_update().first()
@@ -557,13 +670,19 @@ def check_solde(transaction_id):
             caisse.solde = float(caisse.solde) - float(transaction.amount)
             caisse.save()
         if caisse.solde<setting.minimum_solde:
-            send_telegram_message(
-                content=(
-                    f"Il ne vous reste plus que {caisse.solde} FCFA "
-                    f"sur votre Caisse {caisse.bet_app.name.upper()}. "
-                    f"Pensez à recharger votre compte"
+            try:
+                send_telegram_message(
+                    content=(
+                        f"Il ne vous reste plus que {caisse.solde} FCFA "
+                        f"sur votre Caisse {caisse.bet_app.name.upper()}. "
+                        f"Pensez à recharger votre compte"
+                    )
                 )
-            )
+            except Exception as e:
+                connect_pro_logger.error(
+                    f"Erreur send_telegram_message solde faible pour transaction {transaction_id}: {str(e)}",
+                    exc_info=True,
+                )
 
 
 @shared_task
