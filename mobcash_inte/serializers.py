@@ -103,6 +103,7 @@ class CreateSettingSerializer(serializers.ModelSerializer):
 
 
 class BonusSerializer(serializers.ModelSerializer):
+    user = SmallUserSerializer(read_only=True)
     class Meta:
         model = Bonus
         # fields = "__all__"
