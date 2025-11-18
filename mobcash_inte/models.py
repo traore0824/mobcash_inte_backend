@@ -302,6 +302,7 @@ class WebhookLog(models.Model):
     )
     processed_at = models.DateTimeField(null=True, blank=True)
     error_message = models.TextField(null=True, blank=True)
+    processed = models.BooleanField(default=False)
 
 
 class Coupon(models.Model):
