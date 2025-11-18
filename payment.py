@@ -165,7 +165,6 @@ def deposit_connect(transaction: Transaction):
                 setting.wave_default_link + f"?amount={transaction.amount}"
             )
             transaction.save()
-            transaction.save()
         except Exception as e:
             connect_pro_logger.critical(
                 f" Erreur de creation wave pour connect pro {e}"

@@ -283,12 +283,25 @@ class UserPhone(models.Model):
         Network, on_delete=models.CASCADE, blank=True, null=True
     )
 
+
 class WebhookLog(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "En attente"
+        PROCESSING = "processing", "En cours"
+        SUCCESS = "success", "Succès"
+        FAILED = "failed", "Échec"
+
     created_at = models.DateTimeField(auto_now_add=True)
     webhook_data = models.JSONField(default=dict)
     api = models.CharField(max_length=100)
     reference = models.CharField(max_length=255, blank=True, null=True)
-    header = models.TextField(blank=True, null=True)    # Create your models here.
+    header = models.TextField(blank=True, null=True)
+
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.PENDING
+    )
+    processed_at = models.DateTimeField(null=True, blank=True)
+    error_message = models.TextField(null=True, blank=True)
 
 
 class Coupon(models.Model):

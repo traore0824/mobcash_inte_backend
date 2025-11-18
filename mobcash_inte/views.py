@@ -60,6 +60,7 @@ from mobcash_inte.serializers import (
     WithdrawalTransactionSerializer,
 )
 from django.db import transaction
+from django.db.models import F
 from rest_framework.response import Response
 from django.utils import timezone
 from payment import connect_pro_webhook, disbursment_process, payment_fonction, webhook_transaction_success
@@ -371,23 +372,13 @@ class RewardTransactionViews(generics.CreateAPIView):
 class ConnectProWebhook(decorators.APIView):
     def post(self, request, *args, **kwargs):
         try:
-            # Log de la réception du webhook
             connect_pro_logger.info(
                 f"Connect pro webhook reçu le {timezone.now()} avec le body: {request.data}"
             )
 
             data = request.data
-
-            # Vérification des données
-            if not data:
-                connect_pro_logger.warning("Webhook reçu mais avec aucune donnée")
-                return Response(
-                    {"error": "Aucune donnée fournie"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            # Vérification de l'UID
             uid = data.get("uid")
+
             if not uid:
                 connect_pro_logger.warning("Webhook reçu sans UID")
                 return Response(
@@ -395,61 +386,96 @@ class ConnectProWebhook(decorators.APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            # Vérification de duplication
-            try:
-                webhook_log = WebhookLog.objects.filter(reference=uid).first()
-                if webhook_log:
+            # ✅ TRANSACTION ATOMIQUE avec LOCK
+            with transaction.atomic():
+                # Vérifier si déjà traité (avec lock pour éviter race condition)
+                existing_log = (
+                    WebhookLog.objects.select_for_update()
+                    .filter(reference=uid, processed=True)
+                    .first()
+                )
+
+                if existing_log:
                     connect_pro_logger.info(
-                        f"Webhook avec UID {uid} déjà traité - Duplication évitée"
+                        f"[DUPLICATION] Webhook {uid} déjà traité le {existing_log.processed_at}"
                     )
                     return Response(
                         {"message": "Webhook déjà traité"}, status=status.HTTP_200_OK
                     )
-            except Exception as e:
-                connect_pro_logger.error(
-                    f"Erreur lors de la vérification du webhook log: {str(e)}",
-                    exc_info=True,
-                )
-                # On continue le traitement même si la vérification échoue
 
-            # Lancement de la tâche asynchrone
+                # Créer ou récupérer le WebhookLog (avec lock)
+                (
+                    webhook_log,
+                    created,
+                ) = WebhookLog.objects.select_for_update().get_or_create(
+                    reference=uid,
+                    defaults={
+                        "api": "CONNECT PRO",
+                        "webhook_data": data,
+                        "header": str(request.headers),
+                        "processed": False,
+                    },
+                )
+
+                # Si déjà en cours de traitement par une autre requête
+                if not created and webhook_log.processed:
+                    connect_pro_logger.info(
+                        f"[RACE-CONDITION] Webhook {uid} déjà traité"
+                    )
+                    return Response(
+                        {"message": "Webhook déjà traité"}, status=status.HTTP_200_OK
+                    )
+
+                # Si déjà créé mais pas encore traité (rare, mais possible)
+                if not created and not webhook_log.processed:
+                    connect_pro_logger.warning(
+                        f"[RETRY] Webhook {uid} en retry (erreur précédente: {webhook_log.error_message})"
+                    )
+
+            # ⚠️ SORTIE DE LA TRANSACTION - Le traitement peut être long
+            connect_pro_logger.info(
+                f"[NEW] WebhookLog créé pour UID {uid}, début du traitement..."
+            )
+
+            # ✅ TRAITEMENT (hors transaction pour ne pas bloquer la DB trop longtemps)
             try:
                 connect_pro_webhook(data=data)
-                connect_pro_logger.info(f"Tâche asynchrone lancée pour UID {uid}")
+
+                # ✅ MARQUER COMME TRAITÉ (dans une nouvelle transaction)
+                with transaction.atomic():
+                    webhook_log.processed = True
+                    webhook_log.processed_at = timezone.now()
+                    webhook_log.error_message = None  # Clear previous errors
+                    webhook_log.save(
+                        update_fields=["processed", "processed_at", "error_message"]
+                    )
+
+                connect_pro_logger.info(f"[SUCCESS] Webhook {uid} traité avec succès")
+
+                return Response(
+                    {"message": "Webhook traité avec succès"}, status=status.HTTP_200_OK
+                )
+
             except Exception as e:
+                # ✅ ENREGISTRER L'ERREUR mais NE PAS marquer comme processed
+                with transaction.atomic():
+                    webhook_log.error_message = str(e)
+                    webhook_log.save(update_fields=["error_message"])
+
                 connect_pro_logger.error(
-                    f"Erreur lors du lancement de la tâche asynchrone: {str(e)}",
+                    f"[ERROR] Erreur lors du traitement de {uid}: {str(e)}",
                     exc_info=True,
                 )
+
                 return Response(
-                    {"error": "Erreur lors du traitement asynchrone"},
+                    {"error": "Erreur lors du traitement"},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
 
-            # Création du log
-            try:
-                WebhookLog.objects.create(
-                    reference=uid,
-                    api="CONNECT PRO",
-                    webhook_data=data,
-                    header=str(request.headers),
-                )
-                connect_pro_logger.info(f"WebhookLog créé avec succès pour UID {uid}")
-            except Exception as e:
-                connect_pro_logger.error(
-                    f"Erreur lors de la création du WebhookLog pour UID {uid}: {str(e)}",
-                    exc_info=True,
-                )
-                # On ne retourne pas d'erreur car la tâche a déjà été lancée
-
-            return Response(
-                {"message": "Webhook traité avec succès"}, status=status.HTTP_200_OK
-            )
-
         except Exception as e:
-            # Catch-all pour toute erreur non prévue
             connect_pro_logger.error(
-                f"Erreur inattendue dans ConnectProWebhook: {str(e)}", exc_info=True
+                f"[CRITICAL] Erreur inattendue dans ConnectProWebhook: {str(e)}",
+                exc_info=True,
             )
             return Response(
                 {"error": "Erreur interne du serveur"},
