@@ -157,71 +157,71 @@ class SettingAdmin(admin.ModelAdmin):
         "deposit_reward",
         "deposit_reward_percent",
         "min_version",
-        "last_version",
+        "moov_marchand_phone",
     )
 
     search_fields = ("whatsapp_phone", "connect_pro_email")
     list_filter = ("referral_bonus", "deposit_reward")
     readonly_fields = ("id",)
-    fieldsets = (
-        # ("Info General", {"fields": ("moov_marchand_phone")}),
-        (
-            "Montants minimaux",
-            {
-                "fields": (
-                    "minimum_deposit",
-                    "minimum_withdrawal",
-                    "reward_mini_withdrawal",
-                    "minimum_solde",
-                    "moov_marchand_phone",
-                )
-            },
-        ),
-        (
-            "Bonus et Récompenses",
-            {
-                "fields": (
-                    "bonus_percent",
-                    "referral_bonus",
-                    "deposit_reward",
-                    "deposit_reward_percent",
-                )
-            },
-        ),
-        (
-            "Versions et APK",
-            {
-                "fields": (
-                    "min_version",
-                    "last_version",
-                    "dowload_apk_link",
-                )
-            },
-        ),
-        (
-            "Liens par défaut",
-            {
-                "fields": (
-                    "wave_default_link",
-                    "orange_default_link",
-                    "mtn_default_link",
-                )
-            },
-        ),
-        ("WhatsApp et Contact", {"fields": ("whatsapp_phone",)}),
-        (
-            "Connect Pro",
-            {
-                "fields": (
-                    "connect_pro_email",
-                    "connect_pro_password",
-                    "connect_pro_token",
-                    "connect_pro_refresh",
-                    "expired_connect_pro_token",
-                )
-            },
-        ),
-    )
+    # fieldsets = (
+    #     # ("Info General", {"fields": ("moov_marchand_phone")}),
+    #     (
+    #         "Montants minimaux",
+    #         {
+    #             "fields": (
+    #                 "minimum_deposit",
+    #                 "minimum_withdrawal",
+    #                 "reward_mini_withdrawal",
+    #                 "minimum_solde",
+    #                 "moov_marchand_phone",
+    #             )
+    #         },
+    #     ),
+    #     (
+    #         "Bonus et Récompenses",
+    #         {
+    #             "fields": (
+    #                 "bonus_percent",
+    #                 "referral_bonus",
+    #                 "deposit_reward",
+    #                 "deposit_reward_percent",
+    #             )
+    #         },
+    #     ),
+    #     (
+    #         "Versions et APK",
+    #         {
+    #             "fields": (
+    #                 "min_version",
+    #                 "last_version",
+    #                 "dowload_apk_link",
+    #             )
+    #         },
+    #     ),
+    #     (
+    #         "Liens par défaut",
+    #         {
+    #             "fields": (
+    #                 "wave_default_link",
+    #                 "orange_default_link",
+    #                 "mtn_default_link",
+    #             )
+    #         },
+    #     ),
+    #     ("WhatsApp et Contact", {"fields": ("whatsapp_phone",)}),
+    #     (
+    #         "Connect Pro",
+    #         {
+    #             "fields": (
+    #                 "connect_pro_email",
+    #                 "connect_pro_password",
+    #                 "connect_pro_token",
+    #                 "connect_pro_refresh",
+    #                 "expired_connect_pro_token",
+    #             )
+    #         },
+    #     ),
+    # )
 
 
 @admin.register(Bonus)
