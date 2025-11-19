@@ -163,6 +163,7 @@ class SettingAdmin(admin.ModelAdmin):
     list_filter = ("referral_bonus", "deposit_reward")
     readonly_fields = ("id",)
     fieldsets = (
+        ("Info General", {"fields": ("moov_marchand_phone")}),
         (
             "Montants minimaux",
             {
