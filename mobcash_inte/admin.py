@@ -159,6 +159,7 @@ class SettingAdmin(admin.ModelAdmin):
         "min_version",
         "last_version",
     )
+    
     search_fields = ("whatsapp_phone", "connect_pro_email")
     list_filter = ("referral_bonus", "deposit_reward")
     readonly_fields = ("id",)
