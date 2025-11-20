@@ -45,6 +45,7 @@ ALLOWED_HOSTS = [
     "api.zefast.net",
     "api.africash.io",
     "api.fastxof.com",
+    "api.1xpay.app",
 ]
 
 

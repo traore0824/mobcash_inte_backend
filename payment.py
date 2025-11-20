@@ -232,10 +232,10 @@ def deposit_connect(transaction: Transaction):
             "type": "withdrawal",
             "amount": amount,
             "recipient_phone": (
-            transaction.phone_number[3:]
-            if len(transaction.phone_number) > 10
-            else transaction.phone_number
-        ),
+                transaction.phone_number[3:]
+                if len(transaction.phone_number) > 10
+                else transaction.phone_number
+            ),
             "recipient_name": full_name,
             "objet": "Blaffa deposit",
             "network": get_network_id(
