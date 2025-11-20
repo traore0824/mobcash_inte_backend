@@ -141,6 +141,7 @@ def round_up_half(n):
     return int(Decimal(n).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
+
 def deposit_connect(transaction: Transaction):
     token = connect_pro_token()
     setting = Setting.objects.first()
