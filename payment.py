@@ -207,7 +207,7 @@ def deposit_connect(transaction: Transaction):
         if (
             transaction.network.name == "moov" or transaction.network.name == "mtn"
         ) or transaction.network.name == "orange":
-            amount = round_up_half(transaction.amount - (transaction.amount / 100))
+            amount = round(transaction.amount - (transaction.amount / 100))
         else:
             amount = transaction.amount
         transaction.net_payable_amout = amount
