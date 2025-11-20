@@ -308,6 +308,7 @@ def connect_pro_webhook(data):
             connect_pro_logger.info(
                 f"La transaction avec public id {data.get("uid")} n'existe pas ou a ete deja traiter"
             )
+            return
             # data = None
         transaction.wehook_receive_at = timezone.now()
         transaction.webhook_data = data
