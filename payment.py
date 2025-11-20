@@ -95,7 +95,11 @@ def connect_withdrawal(transaction: Transaction):
     data = {
         "type": "deposit",
         "amount": f"{transaction.amount}",
-        "recipient_phone": transaction.phone_number[3:],
+        "recipient_phone": (
+            transaction.phone_number[3:]
+            if len(transaction.phone_number) > 10
+            else transaction.phone_number
+        ),
         "recipient_name": transaction.user.full_name(),
         "objet": "Turnaincash deposit",
         "network": get_network_id(
@@ -141,7 +145,6 @@ def round_up_half(n):
     return int(Decimal(n).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
-
 def deposit_connect(transaction: Transaction):
     token = connect_pro_token()
     setting = Setting.objects.first()
@@ -155,7 +158,11 @@ def deposit_connect(transaction: Transaction):
         url = CONNECT_PRO_BASE_URL + "/api/payments/wave-business-transactions/"
         data = {
             "amount": transaction.amount,
-            "recipient_phone": transaction.phone_number[3:],
+            "recipient_phone": (
+                transaction.phone_number[3:]
+                if len(transaction.phone_number) > 10
+                else transaction.phone_number
+            ),
             "callback_url": f"{BASE_URL}/connect-pro-webhook",
         }
         try:
@@ -177,7 +184,11 @@ def deposit_connect(transaction: Transaction):
         url = CONNECT_PRO_BASE_URL + "/api/payments/momo-pay-transactions/"
         data = {
             "amount": transaction.amount,
-            "recipient_phone": transaction.phone_number[3:],
+            "recipient_phone": (
+                transaction.phone_number[3:]
+                if len(transaction.phone_number) > 10
+                else transaction.phone_number
+            ),
             "callback_url": f"{BASE_URL}/connect-pro-webhook",
             "payment_type": f"{transaction.network.name}-{transaction.network.country_code}",
         }
@@ -220,7 +231,11 @@ def deposit_connect(transaction: Transaction):
         data = {
             "type": "withdrawal",
             "amount": amount,
-            "recipient_phone": transaction.phone_number[3:],
+            "recipient_phone": (
+            transaction.phone_number[3:]
+            if len(transaction.phone_number) > 10
+            else transaction.phone_number
+        ),
             "recipient_name": full_name,
             "objet": "Blaffa deposit",
             "network": get_network_id(

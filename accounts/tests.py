@@ -1,2 +1,2 @@
-data = "2250594811767"
-print(data[3:])
+data = "0594811767"
+print(len(data))
