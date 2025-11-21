@@ -100,6 +100,8 @@ CORS_ALLOWED_ORIGINS = [
     "https://admin.africash.io",
     "https://africash-mobile-app.vercel.app",
     "https://module.africash.io",
+    "https://admin.fastxof.com",
+    "https://www.fastxof.com",
 ]
 
 

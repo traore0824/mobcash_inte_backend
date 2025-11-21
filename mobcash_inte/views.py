@@ -63,7 +63,7 @@ from django.db import transaction
 from django.db.models import F
 from rest_framework.response import Response
 from django.utils import timezone
-from payment import connect_pro_webhook, disbursment_process, payment_fonction, webhook_transaction_success
+from payment import connect_pro_webhook, disbursment_process, payment_fonction, webhook_transaction_success, feexpay_webhook
 from django.db.models import Sum, Count, Q, Avg
 from django.db.models.functions import TruncDate, TruncWeek, TruncMonth, TruncYear
 
@@ -477,6 +477,120 @@ class ConnectProWebhook(decorators.APIView):
         except Exception as e:
             connect_pro_logger.error(
                 f"[CRITICAL] Erreur inattendue dans ConnectProWebhook: {str(e)}",
+                exc_info=True,
+            )
+            return Response(
+                {"error": "Erreur interne du serveur"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class FeexpayWebhook(decorators.APIView):
+    def post(self, request, *args, **kwargs):
+        try:
+            connect_pro_logger.info(
+                f"Feexpay webhook reçu le {timezone.now()} avec le body: {request.data}"
+            )
+
+            data = request.data
+            reference = data.get("externalId") or data.get("reference") or data.get("uid")
+
+            if not reference:
+                connect_pro_logger.warning("Webhook reçu sans référence")
+                return Response(
+                    {"error": "Référence manquante dans les données"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # ✅ TRANSACTION ATOMIQUE avec LOCK
+            with transaction.atomic():
+                # Vérifier si déjà traité (avec lock pour éviter race condition)
+                existing_log = (
+                    WebhookLog.objects.select_for_update()
+                    .filter(reference=reference, processed=True)
+                    .first()
+                )
+
+                if existing_log:
+                    connect_pro_logger.info(
+                        f"[DUPLICATION] Webhook {reference} déjà traité le {existing_log.processed_at}"
+                    )
+                    return Response(
+                        {"message": "Webhook déjà traité"}, status=status.HTTP_200_OK
+                    )
+
+                # Créer ou récupérer le WebhookLog (avec lock)
+                (
+                    webhook_log,
+                    created,
+                ) = WebhookLog.objects.select_for_update().get_or_create(
+                    reference=reference,
+                    defaults={
+                        "api": "FEEXPAY",
+                        "webhook_data": data,
+                        "header": str(request.headers),
+                        "processed": False,
+                    },
+                )
+
+                # Si déjà en cours de traitement par une autre requête
+                if not created and webhook_log.processed:
+                    connect_pro_logger.info(
+                        f"[RACE-CONDITION] Webhook {reference} déjà traité"
+                    )
+                    return Response(
+                        {"message": "Webhook déjà traité"}, status=status.HTTP_200_OK
+                    )
+
+                # Si déjà créé mais pas encore traité (rare, mais possible)
+                if not created and not webhook_log.processed:
+                    connect_pro_logger.warning(
+                        f"[RETRY] Webhook {reference} en retry (erreur précédente: {webhook_log.error_message})"
+                    )
+
+            # ⚠️ SORTIE DE LA TRANSACTION - Le traitement peut être long
+            connect_pro_logger.info(
+                f"[NEW] WebhookLog créé pour référence {reference}, début du traitement..."
+            )
+
+            # ✅ TRAITEMENT (hors transaction pour ne pas bloquer la DB trop longtemps)
+            try:
+                feexpay_webhook(data=data)
+
+                # ✅ MARQUER COMME TRAITÉ (dans une nouvelle transaction)
+                with transaction.atomic():
+                    webhook_log.processed = True
+                    webhook_log.processed_at = timezone.now()
+                    webhook_log.error_message = None  # Clear previous errors
+                    webhook_log.save(
+                        update_fields=["processed", "processed_at", "error_message"]
+                    )
+
+                connect_pro_logger.info(f"[SUCCESS] Webhook {reference} traité avec succès")
+
+                return Response(
+                    {"message": "Webhook traité avec succès"}, status=status.HTTP_200_OK
+                )
+
+            except Exception as e:
+                # ✅ ENREGISTRER L'ERREUR mais NE PAS marquer comme processed
+                with transaction.atomic():
+                    webhook_log.error_message = str(e)
+                    webhook_log.save(update_fields=["error_message"])
+
+                connect_pro_logger.error(
+                    f"[ERROR] Erreur lors du traitement de {reference}: {str(e)}",
+                    exc_info=True,
+                )
+
+                return Response(
+                    {"error": "Erreur lors du traitement"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+
+        except Exception as e:
+            connect_pro_logger.error(
+                f"[CRITICAL] Erreur inattendue dans FeexpayWebhook: {str(e)}",
                 exc_info=True,
             )
             return Response(

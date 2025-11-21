@@ -11,6 +11,7 @@ router.register(r"user-app-id", views.IDLinkViews, basename="user-app-id")
 app_name = "mobcash_inte"
 urlpatterns = [
     path("connect-pro-webhook", views.ConnectProWebhook.as_view()),
+    path("feexpay-webhook", views.FeexpayWebhook.as_view()),
     path("", include(router.urls)),
     path("network", views.CreateNetworkView.as_view(), name="network"),
     path("network/<int:pk>", views.DetailsNetworkView.as_view()),
