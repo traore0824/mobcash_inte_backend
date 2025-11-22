@@ -195,13 +195,7 @@ def send_otp(request):
     email = request.data.get("email")
     user = User.objects.filter(email=email).first()
     if not user:
-        return Response(
-            {
-                "success": False,
-                "details": "USER_NOT_FOUND",
-            },
-            status=status.HTTP_404_NOT_FOUND,
-        )
+        return Response(status=status.HTTP_200_OK)
     otp = create_otp()
     user.otp = otp
     user.otp_created_at = timezone.now() + relativedelta(minutes=2)
