@@ -477,7 +477,7 @@ LOGGING = {
 }
 
 
-BASE_URL = "https://api.turaincash.com/mobcash"
+BASE_URL = os.getenv("BASE_URL")
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
