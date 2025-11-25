@@ -32,7 +32,7 @@ def connect_base_url():
     setting = Setting.objects.first()
     return setting.connect_pro_base_url or "https://connect.turaincash.com"
 
-CONNECT_PRO_BASE_URL = connect_base_url()
+CONNECT_PRO_BASE_URL = os.getenv("CONNECT_PRO_BASE_URL")
 
 
 def connect_pro_token():
