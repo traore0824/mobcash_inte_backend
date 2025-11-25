@@ -70,11 +70,7 @@ class ReadAppNameSerializer(serializers.ModelSerializer):
 class CreateAppNameSerializer(serializers.ModelSerializer):
     class Meta:
         model = AppName
-        exclude = [
-            "hash",
-            "cashdeskid",
-            "cashierpass",
-        ]
+        fields = "__all__"
 
 
 class UpdateSettingSerializer(serializers.ModelSerializer):
