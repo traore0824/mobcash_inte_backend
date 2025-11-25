@@ -27,7 +27,12 @@ connect_pro_logger = logging.getLogger("mobcash_inte_backend.transactions")
 payment_logger = logging.getLogger("Payment transaction process")
 logger = logging.getLogger(__name__)
 
-CONNECT_PRO_BASE_URL = "https://connect.turaincash.com"
+
+def connect_base_url():
+    setting = Setting.objects.first()
+    return setting.connect_pro_base_url or "https://connect.turaincash.com"
+
+CONNECT_PRO_BASE_URL = connect_base_url()
 
 
 def connect_pro_token():
