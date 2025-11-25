@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 
 
 def connect_base_url():
-    # setting = Setting.objects.first()
-    return  "https://connect.turaincash.com"
+    setting = Setting.objects.first()
+    return setting.connect_pro_base_url or "https://connect.turaincash.com"
 
 CONNECT_PRO_BASE_URL = connect_base_url()
 
