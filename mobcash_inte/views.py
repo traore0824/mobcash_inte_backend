@@ -9,6 +9,7 @@ from accounts.models import Advertisement, AppName, TelegramUser, User
 from rest_framework.filters import SearchFilter
 import constant
 from dateutil.relativedelta import relativedelta
+from mobcash_balance import get_balance
 from mobcash_inte.helpers import (
     generate_reference,
     init_mobcash,
@@ -63,7 +64,7 @@ from django.db import transaction
 from django.db.models import F
 from rest_framework.response import Response
 from django.utils import timezone
-from payment import connect_pro_webhook, disbursment_process, payment_fonction, webhook_transaction_success, feexpay_webhook
+from payment import connect_balance, connect_pro_webhook, disbursment_process, payment_fonction, webhook_transaction_success, feexpay_webhook
 from django.db.models import Sum, Count, Q, Avg
 from django.db.models.functions import TruncDate, TruncWeek, TruncMonth, TruncYear
 
@@ -927,7 +928,7 @@ class StatisticsView(decorators.APIView):
         # Paramètres de période (optionnels)
         start_date = request.GET.get("start_date")
         end_date = request.GET.get("end_date")
-        
+
         # Filtre de base pour les dates
         date_filter = Q()
         if start_date:
@@ -937,24 +938,24 @@ class StatisticsView(decorators.APIView):
 
         # ========== VOLUME DES TRANSACTIONS ==========
         transactions = Transaction.objects.filter(date_filter)
-        
+
         # Total des dépôts
         deposits = transactions.filter(type_trans="deposit", status="accept")
         total_deposits_amount = deposits.aggregate(
             total=Sum("amount")
         )["total"] or 0
         total_deposits_count = deposits.count()
-        
+
         # Total des retraits
         withdrawals = transactions.filter(type_trans="withdrawal", status="accept")
         total_withdrawals_amount = withdrawals.aggregate(
             total=Sum("amount")
         )["total"] or 0
         total_withdrawals_count = withdrawals.count()
-        
+
         # Volume net
         net_volume = total_deposits_amount - total_withdrawals_amount
-        
+
         # Évolution par période
         evolution_daily = (
             transactions.filter(type_trans__in=["deposit", "withdrawal"], status="accept")
@@ -966,7 +967,7 @@ class StatisticsView(decorators.APIView):
             )
             .order_by("date")
         )
-        
+
         evolution_weekly = (
             transactions.filter(type_trans__in=["deposit", "withdrawal"], status="accept")
             .annotate(week=TruncWeek("created_at"))
@@ -977,7 +978,7 @@ class StatisticsView(decorators.APIView):
             )
             .order_by("week")
         )
-        
+
         evolution_monthly = (
             transactions.filter(type_trans__in=["deposit", "withdrawal"], status="accept")
             .annotate(month=TruncMonth("created_at"))
@@ -988,7 +989,7 @@ class StatisticsView(decorators.APIView):
             )
             .order_by("month")
         )
-        
+
         evolution_yearly = (
             transactions.filter(type_trans__in=["deposit", "withdrawal"], status="accept")
             .annotate(year=TruncYear("created_at"))
@@ -1006,9 +1007,9 @@ class StatisticsView(decorators.APIView):
             users_date_filter &= Q(date_joined__gte=start_date)
         if end_date:
             users_date_filter &= Q(date_joined__lte=end_date)
-        
+
         all_users = User.objects.filter(users_date_filter, is_delete=False)
-        
+
         # Nouveaux utilisateurs par période
         new_users_daily = (
             all_users.annotate(date=TruncDate("date_joined"))
@@ -1016,21 +1017,21 @@ class StatisticsView(decorators.APIView):
             .annotate(count=Count("id"))
             .order_by("date")
         )
-        
+
         new_users_weekly = (
             all_users.annotate(week=TruncWeek("date_joined"))
             .values("week")
             .annotate(count=Count("id"))
             .order_by("week")
         )
-        
+
         new_users_monthly = (
             all_users.annotate(month=TruncMonth("date_joined"))
             .values("month")
             .annotate(count=Count("id"))
             .order_by("month")
         )
-        
+
         # Utilisateurs actifs (qui ont fait au moins une transaction)
         # Compte les User normaux avec transactions
         user_transactions_filter = Q(transaction__isnull=False)
@@ -1038,20 +1039,20 @@ class StatisticsView(decorators.APIView):
             user_transactions_filter &= Q(transaction__created_at__gte=start_date)
         if end_date:
             user_transactions_filter &= Q(transaction__created_at__lte=end_date)
-        
+
         active_users = User.objects.filter(user_transactions_filter).distinct().count()
-        
+
         # Compte les TelegramUser avec transactions
         telegram_transactions_filter = Q(transaction__isnull=False)
         if start_date:
             telegram_transactions_filter &= Q(transaction__created_at__gte=start_date)
         if end_date:
             telegram_transactions_filter &= Q(transaction__created_at__lte=end_date)
-        
+
         active_telegram_users = TelegramUser.objects.filter(telegram_transactions_filter).distinct().count()
-        
+
         active_users_count = active_users + active_telegram_users
-        
+
         # Utilisateurs par source
         users_by_source = []
         for source in ["mobile", "web", "bot"]:
@@ -1062,7 +1063,7 @@ class StatisticsView(decorators.APIView):
                 "source": source,
                 "count": unique_users + unique_telegram_users
             })
-        
+
         # Utilisateurs bloqués vs actifs
         blocked_users = User.objects.filter(is_block=True, is_delete=False).count()
         active_status_users = User.objects.filter(is_active=True, is_block=False, is_delete=False).count()
@@ -1075,7 +1076,7 @@ class StatisticsView(decorators.APIView):
             referrer_code__gt="",
             is_delete=False
         ).count()
-        
+
         if start_date or end_date:
             parrainages_count = User.objects.filter(
                 referrer_code__isnull=False,
@@ -1084,7 +1085,7 @@ class StatisticsView(decorators.APIView):
                 date_joined__gte=start_date if start_date else timezone.datetime.min,
                 date_joined__lte=end_date if end_date else timezone.now()
             ).count()
-        
+
         # Montant total des bonus de parrainage distribués
         referral_bonuses = Bonus.objects.filter(
             reason_bonus__icontains="parrainage"
@@ -1093,11 +1094,11 @@ class StatisticsView(decorators.APIView):
             referral_bonuses = referral_bonuses.filter(created_at__gte=start_date)
         if end_date:
             referral_bonuses = referral_bonuses.filter(created_at__lte=end_date)
-        
+
         total_referral_bonus = referral_bonuses.aggregate(
             total=Sum("amount")
         )["total"] or 0
-        
+
         # Top utilisateurs par nombre de filleuls
         top_referrers_list = []
         for user in User.objects.filter(referral_code__isnull=False, referral_code__gt=""):
@@ -1110,22 +1111,22 @@ class StatisticsView(decorators.APIView):
                     "referral_code": user.referral_code,
                     "filleuls_count": filleuls
                 })
-        
+
         top_referrers_list = sorted(top_referrers_list, key=lambda x: x["filleuls_count"], reverse=True)[:10]
-        
+
         # Taux d'activation des codes de parrainage
         total_referral_codes = User.objects.filter(
             referral_code__isnull=False,
             referral_code__gt="",
             is_delete=False
         ).count()
-        
+
         activated_referral_codes = User.objects.filter(
             referrer_code__isnull=False,
             referrer_code__gt="",
             is_delete=False
         ).values("referrer_code").distinct().count()
-        
+
         activation_rate = (
             (activated_referral_codes / total_referral_codes * 100)
             if total_referral_codes > 0
@@ -1135,22 +1136,22 @@ class StatisticsView(decorators.APIView):
         # ========== STATISTIQUES DASHBOARD ==========
         # Total Utilisateurs
         total_users = User.objects.filter(is_delete=False).count()
-        
+
         # Utilisateurs Actifs/Inactifs
         active_users_total = User.objects.filter(is_active=True, is_block=False, is_delete=False).count()
         inactive_users_total = User.objects.filter(is_active=False, is_delete=False).count()
-        
+
         # Total Bonus
         total_bonus = Bonus.objects.filter(bonus_delete=False).aggregate(
             total=Sum("amount")
         )["total"] or 0
-        
+
         # Statistiques Bot
         bot_transactions = transactions.filter(source="bot")
         total_transactions_bot = bot_transactions.count()
         total_deposit_bot = bot_transactions.filter(type_trans="deposit", status="accept").count()
         total_withdrawal_bot = bot_transactions.filter(type_trans="withdrawal", status="accept").count()
-        
+
         # Utilisateurs Bot (TelegramUser)
         telegram_users_count = TelegramUser.objects.count()
         if start_date or end_date:
@@ -1160,10 +1161,10 @@ class StatisticsView(decorators.APIView):
             if end_date:
                 telegram_users_filter &= Q(created_at__lte=end_date)
             telegram_users_count = TelegramUser.objects.filter(telegram_users_filter).count()
-        
+
         # Total Transactions
         total_transactions = transactions.count()
-        
+
         # Transactions par application
         transactions_by_app = {}
         apps = AppName.objects.all()
@@ -1173,46 +1174,46 @@ class StatisticsView(decorators.APIView):
                 "count": app_transactions.count(),
                 "total_amount": float(app_transactions.aggregate(total=Sum("amount"))["total"] or 0)
             }
-        
+
         # Balance Bizao (Solde de caisse total)
         total_balance_bizao = Caisse.objects.aggregate(
             total=Sum("solde")
         )["total"] or 0
-        
+
         # Dépôts et Retraits Bizao (depuis le modèle Deposit)
         deposits_bizao = Deposit.objects.all()
         if start_date:
             deposits_bizao = deposits_bizao.filter(created_at__gte=start_date)
         if end_date:
             deposits_bizao = deposits_bizao.filter(created_at__lte=end_date)
-        
+
         total_deposits_bizao_count = deposits_bizao.count()
         total_deposits_bizao_amount = deposits_bizao.aggregate(
             total=Sum("amount")
         )["total"] or 0
-        
+
         # Retraits Bizao (depuis Caisse - calculé différemment)
         # On utilise les retraits acceptés des transactions
         withdrawals_bizao = withdrawals
         total_withdrawals_bizao_count = withdrawals_bizao.count()
         total_withdrawals_bizao_amount = float(total_withdrawals_amount)
-        
+
         # Récompenses (Rewards)
         total_rewards = Reward.objects.aggregate(
             total=Sum("amount")
         )["total"] or 0
-        
+
         # Remboursements (Disbursements)
         disbursements = transactions.filter(type_trans="disbursements")
         total_disbursements = disbursements.count()
         total_disbursements_amount = disbursements.aggregate(
             total=Sum("amount")
         )["total"] or 0
-        
+
         # Publicités (Advertisements)
         total_advertisements = Advertisement.objects.count()
         active_advertisements = Advertisement.objects.filter(enable=True).count()
-        
+
         # Coupons
         total_coupons = Coupon.objects.count()
         # Coupons en cours (moins de 24h)
@@ -1297,6 +1298,52 @@ class StatisticsView(decorators.APIView):
                 "activation_rate": round(activation_rate, 2)
             }
         })
+
+
+class APIBalanceView(decorators.APIView):
+    def get(self, request, *args, **kwargs):
+        # balance, created = BpaySold.objects.get_or_create()
+        data = {
+            # "barkapay": barkapay_balance(),
+            # "pal": balance_pal(),
+            "connect": connect_balance(),
+            # "dgs_pay": dgs_pay_balance(),
+            # "bpay": balance.balance,
+        }
+        return Response(data, status=status.HTTP_200_OK)
+
+
+class MobCashBalance(decorators.APIView):
+
+    async def get(self, request, *args, **kwargs):
+        soldes = Caisse.objects.all()
+
+        result = []
+        for solde in soldes:
+
+            # Appel de ton API externe
+            api_response = await get_balance(
+                solde.bet_app.cashdeskid,
+                solde.bet_app.hash,
+                solde.bet_app.cashierpass,
+            )
+
+            # Récupérer la clé Limit dans la réponse
+            balance_limit = None
+            if api_response and isinstance(api_response, dict):
+                balance_limit = api_response.get("Limit")
+
+            # Construire l'objet final
+            result.append(
+                {
+                    "app_name": solde.bet_app.name,
+                    "solde": float(solde.solde),
+                    "app_image": solde.bet_app.image,
+                    "balance_limit": balance_limit,  # <-- clé ajoutée
+                }
+            )
+
+        return Response(result, status=status.HTTP_200_OK)
 
 
 # Create your views here.

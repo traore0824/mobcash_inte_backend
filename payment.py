@@ -1,9 +1,11 @@
+import asyncio
 import requests
 import os
 from accounts.models import User
 import constant
 from dotenv import load_dotenv
 load_dotenv()
+from mobcash_balance import get_balance
 from mobcash_inte.helpers import (
     init_mobcash,
     send_admin_notification,
@@ -512,18 +514,18 @@ def process_transaction_notifications_and_bonus(transaction_id, is_error=False, 
         transaction = Transaction.objects.select_related(
             'user', 'telegram_user', 'app', 'network'
         ).filter(id=transaction_id).first()
-        
+
         if not transaction:
             connect_pro_logger.error(
                 f"Transaction {transaction_id} non trouvée dans process_transaction_notifications_and_bonus"
             )
             return
-        
+
         setting = Setting.objects.first()
         if not setting:
             connect_pro_logger.error("Setting non trouvé dans process_transaction_notifications_and_bonus")
             return
-        
+
         # Gestion des notifications d'erreur
         if is_error:
             try:
@@ -540,7 +542,7 @@ def process_transaction_notifications_and_bonus(transaction_id, is_error=False, 
                     f"Erreur send_notification échec transaction {transaction_id}: {str(e)}",
                     exc_info=True,
                 )
-            
+
             # Message Telegram pour les admins en cas d'erreur
             try:
                 user_obj = transaction.user if transaction.user else transaction.telegram_user
@@ -548,11 +550,11 @@ def process_transaction_notifications_and_bonus(transaction_id, is_error=False, 
                     first_name = getattr(user_obj, "first_name", "") or getattr(user_obj, "username", "Inconnu")
                     last_name = getattr(user_obj, "last_name", "")
                     full_name = f"{first_name.upper()} {last_name.capitalize()}".strip()
-                    
+
                     app_name = getattr(transaction.app, "name", "Application inconnue").upper() if transaction.app else "Application inconnue"
                     network_name = getattr(transaction.network, "name", "Réseau inconnu").upper() if transaction.network else "Réseau inconnu"
                     indication = getattr(transaction.network, "indication", "") if transaction.network else ""
-                    
+
                     content = (
                         f"{full_name} a lancé une demande de dépôt de {app_name}. "
                         f"Montant : {transaction.amount} F CFA | "
@@ -561,7 +563,7 @@ def process_transaction_notifications_and_bonus(transaction_id, is_error=False, 
                         f"User App ID : {transaction.user_app_id} | "
                         f"Téléphone : +{indication} {transaction.phone_number}."
                     )
-                    
+
                     send_telegram_message(content=content)
             except Exception as e:
                 connect_pro_logger.error(
@@ -569,7 +571,7 @@ def process_transaction_notifications_and_bonus(transaction_id, is_error=False, 
                     exc_info=True,
                 )
             return
-        
+
         # 1. Notification à l'utilisateur pour transaction réussie
         if transaction.type_trans in ["deposit", "reward"]:
             try:
@@ -585,7 +587,7 @@ def process_transaction_notifications_and_bonus(transaction_id, is_error=False, 
                     f"Erreur send_notification utilisateur pour transaction {transaction_id}: {str(e)}",
                     exc_info=True,
                 )
-        
+
         # 2. Si c'est une reward, accepter les bonus
         if transaction.type_trans == "reward":
             try:
@@ -595,7 +597,7 @@ def process_transaction_notifications_and_bonus(transaction_id, is_error=False, 
                     f"Erreur accept_bonus_transaction pour transaction {transaction_id}: {str(e)}",
                     exc_info=True,
                 )
-        
+
         # 3. Attribution de bonus de parrainage (si applicable)
         if (
             transaction.type_trans == "deposit" 
@@ -607,25 +609,25 @@ def process_transaction_notifications_and_bonus(transaction_id, is_error=False, 
                 user_referrer = User.objects.filter(
                     referral_code=transaction.user.referrer_code
                 ).first()
-                
+
                 if user_referrer:
                     bonus_amount = (
                         setting.bonus_percent * transaction.amount
                     ) / constant.BONUS_PERCENT_MAX
-                    
+
                     Bonus.objects.create(
                         transaction=transaction,
                         user=user_referrer,
                         amount=bonus_amount,
                         reason_bonus="Bonus de parrainage de transaction",
                     )
-                    
+
                     reward, _ = Reward.objects.get_or_create(
                         user=user_referrer
                     )
                     reward.amount = float(reward.amount) + float(bonus_amount)
                     reward.save()
-                    
+
                     # Notification au parrain
                     send_notification(
                         title="Félicitations, vous avez un bonus !",
@@ -637,7 +639,7 @@ def process_transaction_notifications_and_bonus(transaction_id, is_error=False, 
                     f"Erreur bonus parrainage pour transaction {transaction_id}: {str(e)}",
                     exc_info=True,
                 )
-        
+
         # 4. Notification pour retrait
         if transaction.type_trans == "withdrawal":
             try:
@@ -657,11 +659,11 @@ def process_transaction_notifications_and_bonus(transaction_id, is_error=False, 
                     f"Erreur notification retrait pour transaction {transaction_id}: {str(e)}",
                     exc_info=True,
                 )
-        
+
         connect_pro_logger.info(
             f"process_transaction_notifications_and_bonus terminé avec succès pour transaction {transaction_id}"
         )
-        
+
     except Exception as e:
         connect_pro_logger.error(
             f"Erreur globale process_transaction_notifications_and_bonus pour transaction {transaction_id}: {str(e)}",
@@ -671,43 +673,90 @@ def process_transaction_notifications_and_bonus(transaction_id, is_error=False, 
 
 @shared_task
 def check_solde(transaction_id):
-    transaction = (
-        Transaction.objects.filter(id=transaction_id).select_for_update().first()
-    )
-    setting = Setting.objects.first()
     with db_transaction.atomic():
-        if transaction.already_process:
-            return
-        if transaction.type_trans == "withdrawal":
-            caisse = (
-                Caisse.objects.filter(bet_app=transaction.app)
-                .select_for_update()
-                .first()
-            )
-            caisse.solde = float(caisse.solde) + float(transaction.amount)
-            caisse.save()
-        else:
-            caisse = (
-                Caisse.objects.filter(bet_app=transaction.app)
-                .select_for_update()
-                .first()
-            )
-            caisse.solde = float(caisse.solde) - float(transaction.amount)
-            caisse.save()
-        if caisse.solde<setting.minimum_solde:
+        transaction = Transaction.objects.filter(
+            id=transaction_id,
+            fond_calculate=False,
+            status__in=["accept", "payment_init_success"],
+        ).first()
+
+        if transaction:
+            caisse, created = Caisse.objects.get_or_create(bet_app=transaction.app)
+
+            # Tentative de récupération du solde depuis l'API Mobcash
             try:
-                send_telegram_message(
-                    content=(
-                        f"Il ne vous reste plus que {caisse.solde} FCFA "
-                        f"sur votre Caisse {caisse.bet_app.name.upper()}. "
-                        f"Pensez à recharger votre compte"
-                    )
-                )
+                # Récupération des credentials depuis AppName
+                cashdesk_id = transaction.app.cashdeskid
+                hash_key = transaction.app.hash
+                cashier_pass = transaction.app.cashierpass
+
+                # Vérification que les credentials existent
+                if cashdesk_id and hash_key and cashier_pass:
+                    # Conversion de cashdesk_id en int si nécessaire
+                    try:
+                        cashdesk_id_int = int(cashdesk_id)
+                    except (ValueError, TypeError):
+                        cashdesk_id_int = None
+
+                    if cashdesk_id_int:
+                        # Appel API async
+                        balance_result = asyncio.run(
+                            get_balance(cashdesk_id_int, hash_key, cashier_pass)
+                        )
+                    else:
+                        # Fallback: cashdesk_id invalide
+                        balance_result = None
+
+                    # Mise à jour du solde si succès
+                    if (
+                        balance_result
+                        and isinstance(balance_result, dict)
+                        and "Limit" in balance_result
+                    ):
+                        caisse.solde = float(balance_result["Limit"])
+                        caisse.save()
+                    else:
+                        # Fallback: ancienne logique de calcul
+                        if transaction.type_trans == "deposit":
+                            caisse.solde = float(caisse.solde) - float(
+                                transaction.amount
+                            )
+                        elif transaction.type_trans == "withdrawal":
+                            caisse.solde = float(caisse.solde) + float(
+                                transaction.amount
+                            )
+                        caisse.save()
+                else:
+                    # Fallback: credentials manquants, utiliser l'ancienne logique
+                    if transaction.type_trans == "deposit":
+                        caisse.solde = float(caisse.solde) - float(transaction.amount)
+                    elif transaction.type_trans == "withdrawal":
+                        caisse.solde = float(caisse.solde) + float(transaction.amount)
+                    caisse.save()
             except Exception as e:
-                connect_pro_logger.error(
-                    f"Erreur send_telegram_message solde faible pour transaction {transaction_id}: {str(e)}",
-                    exc_info=True,
-                )
+                # Fallback en cas d'erreur
+                if transaction.type_trans == "deposit":
+                    caisse.solde = float(caisse.solde) - float(transaction.amount)
+                elif transaction.type_trans == "withdrawal":
+                    caisse.solde = float(caisse.solde) + float(transaction.amount)
+                caisse.save()
+
+            setting = Setting.objects.first()
+            # if caisse.solde < setting.minimum_solde:
+            #     user = BotUser.objects.filter(chat_id=5475155671).first()
+            #     if user:
+            #         send_telegram_message(
+            #             content=(
+            #                 f"Il ne vous reste plus que {caisse.solde} FCFA "
+            #                 f"sur votre Caisse {caisse.bet_app.public_name}. "
+            #                 f"Pensez à recharger votre compte"
+            #             ),
+            #             user=user,
+            #         )
+
+            transaction.fond_calculate = True
+            transaction.save()
+            transaction.refresh_from_db()
 
 
 @shared_task
@@ -1076,3 +1125,18 @@ def feexpay_webhook(data):
         elif transaction_status == "SUCCESSFUL" or transaction_status == "success" or transaction_status == "confirmed":
             connect_pro_logger.info("Transaction is success")
             webhook_transaction_success(transaction=transaction, setting=setting)
+
+def connect_balance():
+    url = f"{CONNECT_PRO_BASE_URL}/api/payments/user/account/"
+    token = connect_pro_token()
+    if not token:
+        return None
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    try:
+        response = requests.get(url=url, headers=headers, timeout=30)
+        return {"data": response.json(), "code": constant.CODE_SUCCESS}
+    except Exception as e:
+        return {"error": str(e), "code": constant.CODE_EXEPTION}

@@ -38,4 +38,6 @@ urlpatterns = [
     path("ann", views.CreateAdvertisementViews.as_view()),
     path("ann/<str:pk>", views.DetailsAdvertisementViews.as_view()),
     path("statistics", views.StatisticsView.as_view()),
+    path("balance", views.APIBalanceView.as_view()),
+    path("mobcash-balance", views.MobCashBalance.as_view()),
 ]
