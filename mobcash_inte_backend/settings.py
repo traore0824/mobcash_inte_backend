@@ -46,6 +46,7 @@ ALLOWED_HOSTS = [
     "api.africash.io",
     "api.fastxof.com",
     "api.1xpay.app",
+    "api.1xstore.org",
 ]
 
 
