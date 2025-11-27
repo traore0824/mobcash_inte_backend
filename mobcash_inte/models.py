@@ -317,3 +317,14 @@ class Coupon(models.Model):
 
     def __str__(self):
         return str(self.id)
+
+
+class TestModel(models.Model):
+    name = models.TextField(blank=True, null=True)
+
+    def __str__(self):
+        return str(self.name)
+
+    class Meta:
+        verbose_name = "Test Model"
+        verbose_name_plural = "Test Models"

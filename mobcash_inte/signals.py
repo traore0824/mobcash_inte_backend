@@ -2,7 +2,7 @@ from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 import requests
 from logger import LoggerService
-from mobcash_inte.models import Caisse, Transaction
+from mobcash_inte.models import Caisse, TestModel, Transaction
 import logging
 import os 
 from dotenv import load_dotenv
@@ -29,7 +29,7 @@ def send_transaction(transaction: Transaction):
             data = {
                
                 "reference": transaction.reference,
-                "amount": transaction.amount,
+                "amount": float(transaction.amount),
                 "user_mobcash_id": transaction.user_app_id,
                 "source": transaction.source or "other",
                 "type": (
@@ -55,13 +55,13 @@ def send_transaction(transaction: Transaction):
             response = requests.post(url=url, json=data, headers=headers)
 
             # Log de debug
-            compta_log.info(f"Renvoie de comptat body {response.content} data1111 {data}")
+            TestModel.objects.create(name=f"Renvoie de comptat body {response.content} data1111 {data}")
 
             if str(response.status_code).startswith("2"):
                 transaction.event_send = True
                 transaction.save()
         except Exception as e:
-            compta_log.info(f"Renvoie de comptat error {e}")
+            TestModel.objects.create(name=f"Renvoie de comptat error {e}")
 
 
 @receiver(post_save, sender=Transaction)
