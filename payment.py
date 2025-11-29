@@ -227,9 +227,9 @@ def deposit_connect(transaction: Transaction):
         connect_pro_logger.info(" Test de transaction par USSD")
         url = CONNECT_PRO_BASE_URL + "/api/payments/user/transactions/"
         amount = 0
-        if (
+        if ((
             transaction.network.name == "moov" or transaction.network.name == "mtn"
-        ) or transaction.network.name == "orange":
+        ) or transaction.network.name == "orange") and transaction.network.country_code.lower()=="ci":
             amount = round(transaction.amount - (transaction.amount / 100))
         else:
             amount = transaction.amount
