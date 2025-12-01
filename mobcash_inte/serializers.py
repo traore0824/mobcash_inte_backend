@@ -266,7 +266,7 @@ class UserPhoneSerializer(serializers.ModelSerializer):
 
 
 class ChangeTransactionStatusSerializer(serializers.Serializer):
-    status = serializers.ChoiceField(choices=TRANS_STATUS)
+    status = serializers.ChoiceField(choices=TRANS_STATUS, required=False)
     reference = serializers.CharField()
 
 

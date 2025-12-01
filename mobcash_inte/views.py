@@ -653,7 +653,7 @@ class UserPhoneViewSet(viewsets.ModelViewSet):
 
 
 class ChangeTransactionStatus(decorators.APIView):
-    permission_classes = [permissions.IsAdminUser]
+    # permission_classes = [permissions.IsAdminUser]
 
     def post(self, request, *args, **kwargs):
         serializer = ChangeTransactionStatusSerializer(data=request.data)
