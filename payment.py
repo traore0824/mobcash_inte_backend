@@ -843,7 +843,7 @@ def send_transaction_event_once(transaction: Transaction):
         return False
     logging.info(f"Event envoyer avec le status {status}")
     send_event(
-        channel_name=f"private-channel_{str(transaction.created_by.id)}",
+        channel_name=f"private-channel_{str(transaction.user.id)}",
         event_name="transaction",
         data=TransactionDetailsSerializer(transaction).data,
     )
