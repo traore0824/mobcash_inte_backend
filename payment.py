@@ -210,7 +210,7 @@ def deposit_connect(transaction: Transaction):
             if transaction.network.name == "orange":
                 transaction.transaction_link = (
                     setting.orange_default_link
-                    + f"?amount%5Bcurrency%5D=XOF&amount%5Bvalue%5D={transaction.amount}"
+                    + f"&amount={transaction.amount}"
                 )
             else:
                 transaction.transaction_link = (
