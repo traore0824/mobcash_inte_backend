@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.db.models import Sum
 from accounts.models import AppName, Advertisement
 from accounts.serializers import SmallBotUserSerializer, SmallUserSerializer
+
 # from mobcash_inte.mobcash_service import BetApp
 from mobcash_inte.models import (
     TRANS_STATUS,
@@ -32,6 +33,7 @@ class UploadFileSerializer(serializers.ModelSerializer):
 
 class IDLinkSerializer(serializers.ModelSerializer):
     app_details = serializers.SerializerMethodField()
+
     class Meta:
         model = IDLink
         fields = "__all__"
@@ -89,6 +91,8 @@ class ReadSettingSerializer(serializers.ModelSerializer):
             "connect_pro_token",
             "connect_pro_refresh",
             "expired_connect_pro_token",
+            "mobcash_api_key",
+            "mobcash_api_secret",
         ]
 
 
@@ -100,6 +104,7 @@ class CreateSettingSerializer(serializers.ModelSerializer):
 
 class BonusSerializer(serializers.ModelSerializer):
     user = SmallUserSerializer(read_only=True)
+
     class Meta:
         model = Bonus
         # fields = "__all__"
@@ -111,7 +116,7 @@ class BonusSerializer(serializers.ModelSerializer):
 
 class TransactionDetailsSerializer(serializers.ModelSerializer):
     user = SmallUserSerializer()
-    app_details=serializers.SerializerMethodField()
+    app_details = serializers.SerializerMethodField()
 
     class Meta:
         model = Transaction
@@ -348,6 +353,7 @@ class BotDepositTransactionSerializer(serializers.ModelSerializer):
 
 class CouponSerializer(serializers.ModelSerializer):
     bet_app_details = serializers.SerializerMethodField()
+
     class Meta:
         model = Coupon
         fields = "__all__"
@@ -368,11 +374,11 @@ class CaisseSerializer(serializers.ModelSerializer):
 
 
 class DepositSerializer(serializers.ModelSerializer):
-    
+
     bet_app = serializers.PrimaryKeyRelatedField(
         queryset=AppName.objects.all(), write_only=True
     )
-    
+
     bet_app_detail = ReadAppNameSerializer(source="bet_app", read_only=True)
 
     class Meta:
@@ -452,7 +458,7 @@ class BonusTransactionSerializer(serializers.ModelSerializer):
         bonus = Bonus.objects.filter(user=user, bonus_with=False, bonus_delete=False)
         amount = 0
         if bonus.exists():
-            amount = bonus.aggregate(total=Sum("amount"))["total"] or 0 
+            amount = bonus.aggregate(total=Sum("amount"))["total"] or 0
 
         # Vérifie le montant minimum
         MINIMUM_DEPOSIT = setting.reward_mini_withdrawal
@@ -463,7 +469,7 @@ class BonusTransactionSerializer(serializers.ModelSerializer):
                 }
             )
         reward = Reward.objects.filter(user=user).first()
-        if reward.amount<amount:
+        if reward.amount < amount:
             raise serializers.ValidationError(
                 {
                     "amount": f"{MINIMUM_DEPOSIT} est le montant minimum de bonus pour une operation accepter"
@@ -472,7 +478,7 @@ class BonusTransactionSerializer(serializers.ModelSerializer):
 
         data["amount"] = amount
         bonus = Bonus.objects.update(user=user, bonus_with=True)
-        reward.amount=0
+        reward.amount = 0
         reward.save()
 
         return data
