@@ -376,7 +376,7 @@ class ConnectProWebhook(decorators.APIView):
     def post(self, request, *args, **kwargs):
         try:
             connect_pro_logger.info(
-                f"Connect pro webhook reçu le {timezone.now()} avec le body: {request.data}"
+                f"[RECEPTION] Connect pro webhook reçu le {timezone.now()} avec le body: {request.data}"
             )
 
             data = request.data
@@ -389,8 +389,10 @@ class ConnectProWebhook(decorators.APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            # ✅ TRANSACTION ATOMIQUE avec LOCK
+            # ✅ TOUT DANS UNE SEULE TRANSACTION ATOMIQUE
             with transaction.atomic():
+                connect_pro_logger.info(f"[STEP 1] Entrée transaction pour {uid}")
+                
                 # Vérifier si déjà traité (avec lock pour éviter race condition)
                 existing_log = (
                     WebhookLog.objects.select_for_update()
@@ -406,11 +408,10 @@ class ConnectProWebhook(decorators.APIView):
                         {"message": "Webhook déjà traité"}, status=status.HTTP_200_OK
                     )
 
+                connect_pro_logger.info(f"[STEP 2] Création WebhookLog pour {uid}")
+                
                 # Créer ou récupérer le WebhookLog (avec lock)
-                (
-                    webhook_log,
-                    created,
-                ) = WebhookLog.objects.select_for_update().get_or_create(
+                webhook_log, created = WebhookLog.objects.select_for_update().get_or_create(
                     reference=uid,
                     defaults={
                         "api": "CONNECT PRO",
@@ -418,6 +419,10 @@ class ConnectProWebhook(decorators.APIView):
                         "header": str(request.headers),
                         "processed": False,
                     },
+                )
+
+                connect_pro_logger.info(
+                    f"[STEP 3] WebhookLog created={created}, processed={webhook_log.processed}"
                 )
 
                 # Si déjà en cours de traitement par une autre requête
@@ -429,23 +434,21 @@ class ConnectProWebhook(decorators.APIView):
                         {"message": "Webhook déjà traité"}, status=status.HTTP_200_OK
                     )
 
-                # Si déjà créé mais pas encore traité (rare, mais possible)
+                # Si déjà créé mais pas encore traité (retry)
                 if not created and not webhook_log.processed:
                     connect_pro_logger.warning(
-                        f"[RETRY] Webhook {uid} en retry (erreur précédente: {webhook_log.error_message})"
+                        f"[RETRY] Webhook {uid} en retry (erreur: {webhook_log.error_message})"
                     )
 
-            # ⚠️ SORTIE DE LA TRANSACTION - Le traitement peut être long
-            connect_pro_logger.info(
-                f"[NEW] WebhookLog créé pour UID {uid}, début du traitement..."
-            )
+                # ✅ TRAITEMENT DANS LA TRANSACTION
+                connect_pro_logger.info(f"[STEP 4] AVANT appel connect_pro_webhook pour {uid}")
+                
+                try:
+                    connect_pro_webhook(data=data)
+                    
+                    connect_pro_logger.info(f"[STEP 5] APRÈS appel connect_pro_webhook pour {uid}")
 
-            # ✅ TRAITEMENT (hors transaction pour ne pas bloquer la DB trop longtemps)
-            try:
-                connect_pro_webhook(data=data)
-
-                # ✅ MARQUER COMME TRAITÉ (dans une nouvelle transaction)
-                with transaction.atomic():
+                    # ✅ MARQUER COMME TRAITÉ (dans la même transaction)
                     webhook_log.processed = True
                     webhook_log.processed_at = timezone.now()
                     webhook_log.error_message = None  # Clear previous errors
@@ -453,38 +456,38 @@ class ConnectProWebhook(decorators.APIView):
                         update_fields=["processed", "processed_at", "error_message"]
                     )
 
-                connect_pro_logger.info(f"[SUCCESS] Webhook {uid} traité avec succès")
+                    connect_pro_logger.info(f"[SUCCESS] Webhook {uid} traité avec succès")
 
-                return Response(
-                    {"message": "Webhook traité avec succès"}, status=status.HTTP_200_OK
-                )
+                    return Response(
+                        {"message": "Webhook traité avec succès"}, 
+                        status=status.HTTP_200_OK
+                    )
 
-            except Exception as e:
-                # ✅ ENREGISTRER L'ERREUR mais NE PAS marquer comme processed
-                with transaction.atomic():
+                except Exception as e:
+                    # ✅ ENREGISTRER L'ERREUR mais NE PAS marquer comme processed
                     webhook_log.error_message = str(e)
                     webhook_log.save(update_fields=["error_message"])
 
-                connect_pro_logger.error(
-                    f"[ERROR] Erreur lors du traitement de {uid}: {str(e)}",
-                    exc_info=True,
-                )
+                    connect_pro_logger.error(
+                        f"[ERROR] Erreur traitement {uid}: {str(e)}",
+                        exc_info=True,
+                    )
 
-                return Response(
-                    {"error": "Erreur lors du traitement"},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
+                    # La transaction sera automatiquement rollback
+                    return Response(
+                        {"error": "Erreur lors du traitement"},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    )
 
         except Exception as e:
             connect_pro_logger.error(
-                f"[CRITICAL] Erreur inattendue dans ConnectProWebhook: {str(e)}",
+                f"[CRITICAL] Erreur inattendue: {str(e)}",
                 exc_info=True,
             )
             return Response(
                 {"error": "Erreur interne du serveur"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-
 
 class FeexpayWebhook(decorators.APIView):
     def post(self, request, *args, **kwargs):
