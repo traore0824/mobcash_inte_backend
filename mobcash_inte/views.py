@@ -8,6 +8,7 @@ from accounts.helpers import CustomPagination
 from accounts.models import Advertisement, AppName, TelegramUser, User
 from rest_framework.filters import SearchFilter
 import constant
+from django.db import transaction as db_transaction
 from dateutil.relativedelta import relativedelta
 from mobcash_balance import get_balance
 from mobcash_inte.helpers import (
@@ -64,7 +65,7 @@ from django.db import transaction
 from django.db.models import F
 from rest_framework.response import Response
 from django.utils import timezone
-from payment import connect_balance, connect_pro_webhook, disbursment_process, payment_fonction, webhook_transaction_success, feexpay_webhook
+from payment import connect_balance, connect_pro_status, connect_pro_webhook, disbursment_process, payment_fonction, webhook_transaction_failled, webhook_transaction_success, feexpay_webhook
 from django.db.models import Sum, Count, Q, Avg
 from django.db.models.functions import TruncDate, TruncWeek, TruncMonth, TruncYear
 
@@ -659,14 +660,69 @@ class ChangeTransactionStatus(decorators.APIView):
         serializer.is_valid(raise_exception=True)
         reference = serializer.validated_data.get("reference")
         transaction = Transaction.objects.filter(reference=reference).first()
+        setting = Setting.objects.first()
+        destination_status = serializer.validated_data.get("status")
         if not transaction:
             return Response(status=status.HTTP_404_NOT_FOUND)
-        transaction.status = serializer.validated_data.get("status")
-        transaction.save()
+        if not destination_status:
+            if transaction.status == "pending" :
+                with db_transaction.atomic():
+                    if transaction.network.name == "wave":
+                        data = connect_pro_status(reference=transaction.public_id, is_wave=True)
+                    else:
+                        data = connect_pro_status(
+                            reference=transaction.public_id,
+                            is_momo_pay=(
+                                False
+                                if (
+                                    not transaction.network.payment_by_link
+                                    or transaction.type_trans == "withdrawal"
+                                )
+                                else True
+                            ),
+                        )
+                    if (
+                        data.get("status") == "failed" or data.get("status") == "cancelled"
+                    ) or data.get("status") == "timeout":
+                        connect_pro_logger.info("Transaction is fail")
+                        webhook_transaction_failled(transaction=transaction)
+                    elif data.get("status") == "success" or data.get("status") == "confirmed":
+                        connect_pro_logger.info("Transaction is success")
+                        webhook_transaction_success(transaction=transaction, setting=setting)
+            elif transaction.status == "init_payment":
+                webhook_transaction_success(transaction=transaction, setting=setting)
+
+            transaction = Transaction.objects.filter(reference=reference).first()
+        else: 
+            transaction.status = serializer.validated_data.get("status")
+            transaction.save()
         return Response(
             TransactionDetailsSerializer(transaction).data, status=status.HTTP_200_OK
         )
 
+class TransactionStatus(decorators.APIView):
+    def get(self, request, *args, **kwargs):
+        reference=self.request.GET.get("reference")
+        transaction = Transaction.objects.filter(reference=reference).first()
+        if not transaction:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        if transaction.api=="connect":
+            if transaction.network.name == "wave":
+                data = connect_pro_status(reference=transaction.public_id, is_wave=True)
+            else:
+                data = connect_pro_status(
+                    reference=transaction.public_id,
+                    is_momo_pay=(
+                        False
+                        if (
+                            not transaction.network.payment_by_link
+                            or transaction.type_trans == "withdrawal"
+                        )
+                        else True
+                    ),
+                )
+            return Response(data, status=status.HTTP_200_OK)
+        return Response(status=status.HTTP_200_OK)
 
 class BotWithdrawalTransactionViews(generics.CreateAPIView):
 
