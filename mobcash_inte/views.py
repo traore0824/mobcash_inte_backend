@@ -697,7 +697,7 @@ class ChangeTransactionStatus(decorators.APIView):
             transaction.status = serializer.validated_data.get("status")
             transaction.save()
         return Response(
-            TransactionDetailsSerializer(transaction).data, status=status.HTTP_200_OK
+            {"status": data.get("status")}, status=status.HTTP_200_OK
         )
 
 class TransactionStatus(decorators.APIView):
