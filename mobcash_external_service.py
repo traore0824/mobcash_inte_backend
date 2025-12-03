@@ -537,7 +537,7 @@ class MobCashExternalService:
             str | None: L'UUID de la plateforme si trouvée, sinon None
         """
         endpoint = "/api/v1/platforms/"
-        result = self._make_request("GET", endpoint)
+        result = self._make_request("GET", endpoint).get("data")
         connect_pro_logger.info(f"resultat de verification de user {result}")
 
         if not result or "results" not in result:
@@ -549,7 +549,9 @@ class MobCashExternalService:
         for platform in result["results"]:
             # Compare insensible à la casse
             if platform.get("code", "").strip().lower() == search_code:
-                connect_pro_logger.info(f"resultat de verification de user iididid {platform.get('id')}")
+                connect_pro_logger.info(
+                    f"resultat de verification de user iididid {platform.get('id')}"
+                )
                 return platform.get("id")
 
         # Si rien trouvé
