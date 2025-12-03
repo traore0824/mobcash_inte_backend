@@ -11,6 +11,7 @@ import constant
 from django.db import transaction as db_transaction
 from dateutil.relativedelta import relativedelta
 from mobcash_balance import get_balance
+from mobcash_external_service import MobCashExternalService
 from mobcash_inte.helpers import (
     generate_reference,
     init_mobcash,
@@ -889,9 +890,13 @@ class SearchUserBet(decorators.APIView):
         app = serializer.validated_data["app"]
         app_name = app.name
         userid = serializer.validated_data["userid"]
-
-        init_app = init_mobcash(app_name=app)
-        response = init_app.search_user(userid=userid)
+        if app.hash:
+            init_app = init_mobcash(app_name=app)
+            response = init_app.search_user(userid=userid)
+        else:
+            response = MobCashExternalService().verify_player(
+                player_user_id=userid, code=app.name
+            )
 
         if response.get("code") != constant.CODE_EXEPTION:
             response = response.get("data")

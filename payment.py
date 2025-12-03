@@ -4,6 +4,8 @@ import os
 from accounts.models import User
 import constant
 from dotenv import load_dotenv
+
+from mobcash_external_service import MobCashExternalService
 load_dotenv()
 from mobcash_balance import get_balance
 from mobcash_inte.helpers import (
@@ -375,15 +377,20 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                     transaction.net_payable_amout = amount
                     transaction.save()
 
-                response = servculAPI.recharge_account(
-                    amount=float(amount), userid=transaction.user_app_id
-                )
-                connect_pro_logger.info(
-                    f"Reponse de l'api de {transaction.app.name}: {response}"
-                )
-
-                xbet_response_data = response.get("data")
-
+                if transaction.app.hash:
+                    response = servculAPI.recharge_account(
+                        amount=float(amount), userid=transaction.user_app_id
+                    )
+                    connect_pro_logger.info(
+                        f"Reponse de l'api de {transaction.app.name}: {response}"
+                    )
+                    xbet_response_data = response.get("data")
+                else:
+                    response = MobCashExternalService().create_deposit(transaction=transaction)
+                    connect_pro_logger.info(
+                        f"Reponse de l'api de {transaction.app.name}: {response}"
+                    )
+                    xbet_response_data = response
                 if xbet_response_data.get("Success") == True:
                     payment_logger.info(
                         f"Transaction de {transaction.app.name} success"
@@ -391,7 +398,7 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                     transaction.validated_at = timezone.now()
                     transaction.status = "accept"
                     transaction.save()
-                    
+
                     # Appel de la tâche Celery pour les opérations lentes (notifications, bonus, etc.)
                     try:
                         process_transaction_notifications_and_bonus.delay(transaction_id=transaction.id)
@@ -400,7 +407,7 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                             f"Erreur process_transaction_notifications_and_bonus.delay pour transaction {transaction.id}: {str(e)}",
                             exc_info=True,
                         )
-                    
+
                     # Si c'est une reward, on doit aussi appeler check_solde
                     if transaction.type_trans == "reward":
                         try:
@@ -440,7 +447,6 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                             exc_info=True,
                         )
 
-
             except Exception as e:
                 connect_pro_logger.error(
                     f"Erreur traitement deposit/reward transaction {transaction.id}: {str(e)}",
@@ -452,7 +458,7 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                 connect_pro_logger.info(f"Operation success")
                 transaction.status = "accept"
                 transaction.save()
-                
+
                 # Appel de la tâche Celery pour les notifications (retrait)
                 try:
                     process_transaction_notifications_and_bonus.delay(transaction_id=transaction.id)
@@ -783,10 +789,17 @@ def xbet_withdrawal_process(transaction: Transaction):
     app_name = transaction.app
     servculAPI = init_mobcash(app_name=app_name)
     if transaction.type_trans == "withdrawal":
-        response = servculAPI.withdraw_from_account(
-            userid=transaction.user_app_id, code=transaction.withdriwal_code
-        )
-        xbet_response_data = response.get("data")
+        if transaction.app.hash:
+            response = servculAPI.withdraw_from_account(
+                userid=transaction.user_app_id, code=transaction.withdriwal_code
+            )
+            xbet_response_data = response.get("data")
+        else:
+            response = MobCashExternalService().create_withdrawal(transaction=transaction)
+            connect_pro_logger.info(
+                        f"Reponse de l'api de {transaction.app.name}: {response}"
+                    )
+            xbet_response_data = response
         connect_pro_logger.info(f"La reponse de retrait de mobcash{response}")
         if (
             str(xbet_response_data.get("Success")).lower() == "false"
