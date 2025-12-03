@@ -454,7 +454,7 @@ class MobCashExternalService:
         )
 
         result = self._make_request('POST', endpoint, data=payload)
-        print(f"result result {result}")
+        connect_pro_logger.info(f"result result {result}")
 
         if result.get('success') and 'data' in result:
 
@@ -538,7 +538,7 @@ class MobCashExternalService:
         """
         endpoint = "/api/v1/platforms/"
         result = self._make_request("GET", endpoint).get("data")
-        connect_pro_logger.info(f"resultat de verification de user {result}")
+        connect_pro_logger.info(f"resultat de verification de user {result} et le code {code}")
 
         if not result or "results" not in result:
             return None
