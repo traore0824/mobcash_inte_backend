@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 
 from accounts.models import AppName
 from mobcash_inte.models import Transaction
-
+connect_pro_logger = logging.getLogger("mobcash_inte_backend.transactions")
 load_dotenv()
 logger = logging.getLogger('betting_transactions')
 
@@ -538,6 +538,7 @@ class MobCashExternalService:
         """
         endpoint = "/api/v1/platforms/"
         result = self._make_request("GET", endpoint)
+        connect_pro_logger.info(f"resultat de verification de user {result}")
 
         if not result or "results" not in result:
             return None
@@ -548,6 +549,7 @@ class MobCashExternalService:
         for platform in result["results"]:
             # Compare insensible à la casse
             if platform.get("code", "").strip().lower() == search_code:
+                connect_pro_logger.info(f"resultat de verification de user iididid {platform.get('id')}")
                 return platform.get("id")
 
         # Si rien trouvé
