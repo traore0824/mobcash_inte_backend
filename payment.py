@@ -136,19 +136,21 @@ def connect_pro_withd_process(transaction: Transaction, disbursements=False):
     else:
         response = True
     if response == True:
-        connect_withdrawal(transaction=transaction)
-        # content = (
-        #     "💸 **Nouvelle demande de retrait** 💸\n\n"
-        #     f"**Référence :** {transaction.reference}\n"
-        #     f"**Nom de la plateforme :** {transaction.app.name if transaction.app else 'N/A'}\n"
-        #     f"**User ID :** {transaction.user_app_id}\n"
-        #     f"**Email :** {transaction.user.email if transaction.user and hasattr(transaction.user, 'email') else 'N/A'}\n"
-        #     f"**Téléphone :** {transaction.phone_number or 'N/A'}"
-        #     f"**Montant :** {transaction.amount } Franc"
-        #     f"**Reseau :** {transaction.network.name }"
-        #     f"**Date de confirmation :** {transaction.validated_at }"
-        # )
-        # send_telegram_message(content=content)
+        if os.getenv("CAN_WITHDRAWAL") and os.getenv("CAN_WITHDRAWAL").lower()=="false":
+            content = (
+            "💸 **Nouvelle demande de retrait** 💸\n\n"
+            f"**Référence :** {transaction.reference}\n"
+            f"**Nom de la plateforme :** {transaction.app.name if transaction.app else 'N/A'}\n"
+            f"**User ID :** {transaction.user_app_id}\n"
+            f"**Email :** {transaction.user.email if transaction.user and hasattr(transaction.user, 'email') else 'N/A'}\n"
+            f"**Téléphone :** {transaction.phone_number or 'N/A'}"
+            f"**Montant :** {transaction.amount } Franc"
+            f"**Reseau :** {transaction.network.name }"
+            f"**Date de confirmation :** {transaction.validated_at }"
+        )
+            send_telegram_message(content=content, chat_id=os.getenv("USER_CHAT_ID"))
+        else:
+            connect_withdrawal(transaction=transaction)
 
 
 from decimal import Decimal, ROUND_HALF_UP
