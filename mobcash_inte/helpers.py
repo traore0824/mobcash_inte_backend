@@ -31,7 +31,7 @@ def get_access_token():
 
 
 def call_api(fcm_token, title, body, priority="normal", message_data=None):
-    url = "https://fcm.googleapis.com/v1/projects/blaffa-441d9/messages:send"
+    url = "https://fcm.googleapis.com/v1/projects/turaincash-57c48/messages:send"
     headers = {
         "Authorization": f"Bearer {get_access_token()}",
         "Content-Type": "application/json; UTF-8",
@@ -76,35 +76,35 @@ connect_pro_logger = logging.getLogger("mobcash_inte_backend.transactions")
 def send_notification(
     user: User | TelegramUser, title: str, content: str, data=None, reference=None
 ):
-    pass 
-    # try:
-    #     if isinstance(user, TelegramUser) and user.telegram_user_id:
-    #         # ✅ Notification via Telegram
-    #         send_telegram_message(content=content, chat_id=user.telegram_user_id)
-    #     elif isinstance(user, User):
-    #         # ✅ Notification via push et base de données
-    #         response = send_push_noti(user=user, title=title, body=content, data=data)
-    #         notification = Notification.objects.create(
-    #             title=title, content=content, user=user, reference=reference
-    #         )
-    #         channel_layer = get_channel_layer()
-    #         async_to_sync(channel_layer.group_send)(
-    #             f"private_channel_{str(user.id)}",
-    #             {
-    #                 "type": "new_notification",
-    #                 "data": NotificationSerializer(notification).data,
-    #             },
-    #         )
-    #     else:
-    #         connect_pro_logger.warning(
-    #             f"send_notification: utilisateur inconnu ou non valide ({user})"
-    #         )
+     
+    try:
+        if isinstance(user, TelegramUser) and user.telegram_user_id:
+            # ✅ Notification via Telegram
+            send_telegram_message(content=content, chat_id=user.telegram_user_id)
+        elif isinstance(user, User):
+            # ✅ Notification via push et base de données
+            response = send_push_noti(user=user, title=title, body=content, data=data)
+            notification = Notification.objects.create(
+                title=title, content=content, user=user, reference=reference
+            )
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f"private_channel_{str(user.id)}",
+                {
+                    "type": "new_notification",
+                    "data": NotificationSerializer(notification).data,
+                },
+            )
+        else:
+            connect_pro_logger.warning(
+                f"send_notification: utilisateur inconnu ou non valide ({user})"
+            )
 
-    # except Exception as e:
-    #     connect_pro_logger.error(
-    #         f"Erreur send_notification pour utilisateur {getattr(user, 'id', None)}: {str(e)}",
-    #         exc_info=True,
-    #     )
+    except Exception as e:
+        connect_pro_logger.error(
+            f"Erreur send_notification pour utilisateur {getattr(user, 'id', None)}: {str(e)}",
+            exc_info=True,
+        )
 
 
 def send_telegram_message(content, chat_id=917540842):
