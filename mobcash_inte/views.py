@@ -893,15 +893,16 @@ class SearchUserBet(decorators.APIView):
         if app.hash:
             init_app = init_mobcash(app_name=app)
             response = init_app.search_user(userid=userid)
+            if response.get("code") != constant.CODE_EXEPTION:
+                response = response.get("data")
+            else:
+                response = {}
         else:
             response = MobCashExternalService().verify_player(
                 player_user_id=userid, code=app.name
             )
 
-        if response.get("code") != constant.CODE_EXEPTION:
-            response = response.get("data")
-        else:
-            response = {}
+        
 
         return Response(response)
 
