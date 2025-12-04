@@ -77,7 +77,7 @@ connect_pro_logger = logging.getLogger("mobcash_inte_backend.transactions")
 def send_notification(
     user: User | TelegramUser, title: str, content: str, data=None, reference=None
 ):
-     
+
     try:
         if isinstance(user, TelegramUser) and user.telegram_user_id:
             # ✅ Notification via Telegram
@@ -85,6 +85,9 @@ def send_notification(
         elif isinstance(user, User):
             # ✅ Notification via push et base de données
             response = send_push_noti(user=user, title=title, body=content, data=data)
+            connect_pro_logger.warning(
+                f"send_notification: 1111111111111 ({response})"
+            )
             notification = Notification.objects.create(
                 title=title, content=content, user=user, reference=reference
             )
