@@ -57,10 +57,11 @@ def call_api(fcm_token, title, body, priority="normal", message_data=None):
 def send_push_noti(user: User, title, body, data=None):
     devices = FCMDevice.objects.filter(user=user)[:3]
     for device in devices:
+        connect_pro_logger = logging.getLogger("mobcash_inte_backend.transactions")
         response = call_api(
             device.registration_id, title=title, body=body, message_data=data
         )
-        LoggerService.v(f"send notification response 111111111111111 {response}")
+        connect_pro_logger.info(f"send notification response 111111111111111 {response}")
         return response
 
 
