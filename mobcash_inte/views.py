@@ -1371,7 +1371,7 @@ class APIBalanceView(decorators.APIView):
         data = {
             # "barkapay": barkapay_balance(),
             # "pal": balance_pal(),
-            "connect": round(connect_balance().get("data").get("balance")),
+            "connect": float(connect_balance().get("data").get("balance")),
             # "dgs_pay": dgs_pay_balance(),
             # "bpay": balance.balance,
         }
