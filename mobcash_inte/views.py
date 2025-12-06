@@ -1378,37 +1378,41 @@ class APIBalanceView(decorators.APIView):
         return Response(data, status=status.HTTP_200_OK)
 
 
+import asyncio
 class MobCashBalance(decorators.APIView):
 
-    async def get(self, request, *args, **kwargs):
-        soldes = Caisse.objects.all()
+    def get(self, request, *args, **kwargs):
+        # Exécuter la logique async dans un contexte sync
+        result = asyncio.run(self.get_balances())
+        return Response(result, status=status.HTTP_200_OK)
+
+    async def get_balances(self):
+        from asgiref.sync import sync_to_async
+
+        soldes = await sync_to_async(list)(
+            Caisse.objects.select_related("bet_app").all()
+        )
 
         result = []
         for solde in soldes:
-
-            # Appel de ton API externe
             api_response = await get_balance(
                 solde.bet_app.cashdeskid,
                 solde.bet_app.hash,
                 solde.bet_app.cashierpass,
             )
 
-            # Récupérer la clé Limit dans la réponse
-            balance_limit = None
-            if api_response and isinstance(api_response, dict):
-                balance_limit = api_response.get("Limit")
-
-            # Construire l'objet final
             result.append(
                 {
                     "app_name": solde.bet_app.name,
                     "solde": float(solde.solde),
                     "app_image": solde.bet_app.image,
-                    "balance_limit": balance_limit,  # <-- clé ajoutée
+                    "balance_limit": (
+                        api_response.get("Limit") if api_response else None
+                    ),
                 }
             )
 
-        return Response(result, status=status.HTTP_200_OK)
+        return result
 
 
 # Create your views here.
