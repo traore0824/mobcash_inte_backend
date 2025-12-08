@@ -691,15 +691,22 @@ class ChangeTransactionStatus(decorators.APIView):
                         connect_pro_logger.info("Transaction is success")
                         webhook_transaction_success(transaction=transaction, setting=setting)
             elif transaction.status == "init_payment":
-                webhook_transaction_success(transaction=transaction, setting=setting)
+                if transaction.type_trans == "withdrawal":
+                    transaction.status = "accept"
+                    transaction.save()
+                else:
+                    webhook_transaction_success(transaction=transaction, setting=setting)
 
             transaction = Transaction.objects.filter(reference=reference).first()
+            return Response(
+                {"status": transaction.status}, status=status.HTTP_200_OK
+            )
         else: 
             transaction.status = serializer.validated_data.get("status")
             transaction.save()
-        return Response(
-            {"status": data.get("status")}, status=status.HTTP_200_OK
-        )
+            return Response(
+                {"status": transaction.status}, status=status.HTTP_200_OK
+            )
 
 class TransactionStatus(decorators.APIView):
     def get(self, request, *args, **kwargs):
@@ -1379,6 +1386,7 @@ class APIBalanceView(decorators.APIView):
 
 
 import asyncio
+
 class MobCashBalance(decorators.APIView):
 
     def get(self, request, *args, **kwargs):
