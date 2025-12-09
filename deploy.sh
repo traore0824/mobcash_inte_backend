@@ -82,26 +82,8 @@ if ! command -v python &> /dev/null && ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-# Étape 3: Résoudre les problèmes courants (migrations, collectstatic, etc.)
-info "Étape 3: Résolution des problèmes courants..."
-
-# Appliquer les migrations
-if [ -f "manage.py" ]; then
-    info "Application des migrations Django..."
-    python3 manage.py migrate --noinput || {
-        warn "Erreur lors des migrations, tentative de résolution..."
-        python3 manage.py migrate --run-syncdb --noinput || true
-    }
-    
-    # Collecter les fichiers statiques
-    info "Collecte des fichiers statiques..."
-    python3 manage.py collectstatic --noinput --clear || warn "Erreur lors de collectstatic (peut être ignoré)"
-else
-    warn "Fichier manage.py non trouvé, saut des étapes Django"
-fi
-
-# Étape 4: Vérification Django AVANT redémarrage
-info "Étape 4: Vérification Django avant redémarrage..."
+# Étape 3: Vérification Django AVANT redémarrage
+info "Étape 3: Vérification Django avant redémarrage..."
 if [ -f "manage.py" ]; then
     if python3 manage.py check; then
         info "Vérification Django réussie - Aucun problème détecté"
@@ -131,8 +113,8 @@ else
     warn "Fichier manage.py non trouvé, saut de la vérification Django"
 fi
 
-# Étape 5: Redémarrer Gunicorn
-info "Étape 5: Redémarrage de Gunicorn..."
+# Étape 4: Redémarrer Gunicorn
+info "Étape 4: Redémarrage de Gunicorn..."
 if sudo systemctl restart gunicorn_mysolde.service; then
     info "Gunicorn redémarré avec succès"
     sleep 2
@@ -149,8 +131,8 @@ else
     sudo systemctl status gunicorn_mysolde.service || true
 fi
 
-# Étape 6: Redémarrer tous les services Supervisor
-info "Étape 6: Redémarrage des services Supervisor..."
+# Étape 5: Redémarrer tous les services Supervisor
+info "Étape 5: Redémarrage des services Supervisor..."
 
 # Trouver tous les fichiers de configuration supervisor
 SUPERVISOR_CONF_DIR="/etc/supervisor/conf.d"
@@ -206,8 +188,8 @@ else
     warn "Répertoire Supervisor non trouvé: $SUPERVISOR_CONF_DIR"
 fi
 
-# Étape 7: Vérification finale avec Python
-info "Étape 7: Vérification finale de l'installation Python..."
+# Étape 6: Vérification finale avec Python
+info "Étape 6: Vérification finale de l'installation Python..."
 
 # Vérifier la version de Python
 PYTHON_VERSION=$(python3 --version 2>&1)
