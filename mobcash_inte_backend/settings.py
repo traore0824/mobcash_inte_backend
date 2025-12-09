@@ -103,6 +103,10 @@ CORS_ALLOWED_ORIGINS = [
     "https://module.africash.io",
     "https://admin.fastxof.com",
     "https://www.fastxof.com",
+    "https://1xstore-mobile-app.vercel.app",
+    "https://1xstore.org",
+    "https://admin.1xstore.org",
+    "https://module.1xstore.org",
 ]
 
 
