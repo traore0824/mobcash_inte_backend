@@ -70,6 +70,8 @@ from payment import connect_balance, connect_pro_status, connect_pro_webhook, di
 from django.db.models import Sum, Count, Q, Avg
 from django.db.models.functions import TruncDate, TruncWeek, TruncMonth, TruncYear
 
+from winwin import CashAPIService
+
 connect_pro_logger = logging.getLogger("mobcash_inte_backend.transactions")
 
 
@@ -1456,5 +1458,9 @@ class MobCashBalance(decorators.APIView):
 
         return result
 
-
+class TestAPIViews(decorators.APIView):
+    def post(self, request, *args, **kwargs):
+        api = CashAPIService(api_key="ebfad3fbccb250211271dd519da8b9e9c10d4797a9ea6f772ee34245c4e6ee0f")
+        result = api.create_deposit(user_id=339966934, amount=500)
+        return Response({"data": result})
 # Create your views here.
