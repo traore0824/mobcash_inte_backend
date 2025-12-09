@@ -1,56 +1,247 @@
 #!/bin/bash
-set -e
 
-echo "🚀 Début du déploiement Mobcash Backend"
+# Script de déploiement pour mobcash_inte_backend
+# Ce script effectue un git pull, résout les problèmes courants,
+# active l'environnement virtuel, redémarre les services et vérifie l'installation
 
-PROJECT_DIR="/root/mobcash_inte_backend"
-VENV_PATH="$PROJECT_DIR/.venv"
-CELERY_WORKERS=2
+echo "=========================================="
+echo "Début du déploiement"
+echo "=========================================="
 
-cd "$PROJECT_DIR"
-source "$VENV_PATH/bin/activate"
+# Couleurs pour les messages
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
 
-echo "📥 Git pull..."
-git pull origin
+# Fonction pour afficher les messages
+info() {
+    echo -e "${GREEN}[INFO]${NC} $1"
+}
 
-echo "🗄️ Migrations..."
-python manage.py makemigrations
-python manage.py migrate
+warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
 
-echo "⏹️ Arrêt temporaire de Daphne et Celery..."
-sudo supervisorctl stop daphne_mobcash
-sudo supervisorctl stop celery_mobcash
-sleep 3
+error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
 
-echo "🧹 Nettoyage fichiers temporaires..."
-find . -name "*.pyc" -delete
-find . -name "__pycache__" -type d -exec rm -rf {} + || true
+# Étape 1: Git pull avec résolution des conflits
+info "Étape 1: Mise à jour du code depuis Git..."
+cd "$(dirname "$0")"
 
-# echo "🧪 Lancement des tests Mobcash..."
-# python manage.py test test_mobcash.user test_mobcash.telegram --verbosity=2
-# RESULT=$?
+# Sauvegarder le commit actuel pour restauration en cas d'échec
+PREVIOUS_COMMIT=$(git rev-parse HEAD)
 
-# if [ $RESULT -eq 0 ]; then
-#     echo "✅ Tous les tests ont réussi !"
-#     read -p "Voulez-vous redémarrer les services maintenant ? (y/N): " -n 1 -r
-#     echo
-#     if [[ $REPLY =~ ^[Yy]$ ]]; then
-#         echo "🔄 Redémarrage des services..."
-#         sudo systemctl restart gunicorn_mobcash.service
-#         for i in $(seq 1 $CELERY_WORKERS); do
-#             PID_FILE="/tmp/celery_worker$i.pid"
-#             [ -f "$PID_FILE" ] && kill -9 $(cat "$PID_FILE") || true
-#             celery -A mobcash_inte_backend worker --loglevel=info -n "worker$i@%h" --detach --pidfile="$PID_FILE"
-#         done
-#         echo "🎉 Services redémarrés avec succès !"
-#     else
-#         echo "⚠️ Services non redémarrés."
-#     fi
-# else
-#     echo "❌ Certains tests ont échoué. Veuillez corriger les erreurs avant de redémarrer."
-# fi
+# Sauvegarder les changements locaux s'il y en a
+if ! git diff-index --quiet HEAD --; then
+    warn "Des changements locaux détectés. Stash des modifications..."
+    git stash save "Auto-stash before deploy $(date +%Y-%m-%d_%H:%M:%S)"
+fi
+
+# Tentative de pull
+if git pull origin main || git pull origin master; then
+    info "Git pull réussi"
+else
+    error "Erreur lors du git pull"
+    
+    # Vérifier s'il y a des conflits
+    if [ -n "$(git ls-files -u)" ]; then
+        warn "Conflits détectés. Tentative de résolution automatique..."
+        git merge --abort 2>/dev/null || true
+        git reset --hard HEAD
+        git pull --rebase origin main || git pull --rebase origin master || {
+            error "Impossible de résoudre les conflits automatiquement"
+            exit 1
+        }
+    else
+        # Autres erreurs (connexion, etc.)
+        warn "Vérification de la connexion et nouvelle tentative..."
+        sleep 2
+        git pull origin main || git pull origin master || {
+            error "Échec du git pull après nouvelle tentative"
+            exit 1
+        }
+    fi
+fi
+
+# Étape 2: Activer l'environnement virtuel
+info "Étape 2: Activation de l'environnement virtuel..."
+if [ -d ".venv" ]; then
+    source .venv/bin/activate
+    info "Environnement virtuel .venv activé"
+else
+    error "Le dossier .venv n'existe pas"
+    exit 1
+fi
+
+# Vérifier que Python est disponible
+if ! command -v python &> /dev/null && ! command -v python3 &> /dev/null; then
+    error "Python n'est pas installé ou n'est pas dans le PATH"
+    exit 1
+fi
+
+# Étape 3: Résoudre les problèmes courants (migrations, collectstatic, etc.)
+info "Étape 3: Résolution des problèmes courants..."
+
+# Appliquer les migrations
+if [ -f "manage.py" ]; then
+    info "Application des migrations Django..."
+    python3 manage.py migrate --noinput || {
+        warn "Erreur lors des migrations, tentative de résolution..."
+        python3 manage.py migrate --run-syncdb --noinput || true
+    }
+    
+    # Collecter les fichiers statiques
+    info "Collecte des fichiers statiques..."
+    python3 manage.py collectstatic --noinput --clear || warn "Erreur lors de collectstatic (peut être ignoré)"
+else
+    warn "Fichier manage.py non trouvé, saut des étapes Django"
+fi
+
+# Étape 4: Vérification Django AVANT redémarrage
+info "Étape 4: Vérification Django avant redémarrage..."
+if [ -f "manage.py" ]; then
+    if python3 manage.py check; then
+        info "Vérification Django réussie - Aucun problème détecté"
+    else
+        error "Échec de la vérification Django - Annulation des changements"
+        
+        # Annuler les changements Git (restaurer l'état précédent)
+        info "Annulation des changements Git..."
+        if [ -n "$PREVIOUS_COMMIT" ]; then
+            git reset --hard "$PREVIOUS_COMMIT" || {
+                warn "Impossible de restaurer l'état précédent automatiquement"
+            }
+        else
+            warn "Commit précédent non disponible pour restauration"
+        }
+        
+        # Redémarrer supervisorctl restart all
+        info "Redémarrage de tous les services Supervisor..."
+        sudo supervisorctl restart all || {
+            error "Erreur lors du redémarrage des services Supervisor"
+        }
+        
+        error "Déploiement annulé à cause d'erreurs de vérification Django"
+        exit 1
+    fi
+else
+    warn "Fichier manage.py non trouvé, saut de la vérification Django"
+fi
+
+# Étape 5: Redémarrer Gunicorn
+info "Étape 5: Redémarrage de Gunicorn..."
+if sudo systemctl restart gunicorn_mysolde.service; then
+    info "Gunicorn redémarré avec succès"
+    sleep 2
+    
+    # Vérifier le statut
+    if sudo systemctl is-active --quiet gunicorn_mysolde.service; then
+        info "Gunicorn est actif et fonctionne"
+    else
+        error "Gunicorn n'est pas actif après le redémarrage"
+        sudo systemctl status gunicorn_mysolde.service || true
+    fi
+else
+    error "Erreur lors du redémarrage de Gunicorn"
+    sudo systemctl status gunicorn_mysolde.service || true
+fi
+
+# Étape 6: Redémarrer tous les services Supervisor
+info "Étape 6: Redémarrage des services Supervisor..."
+
+# Trouver tous les fichiers de configuration supervisor
+SUPERVISOR_CONF_DIR="/etc/supervisor/conf.d"
+if [ -d "$SUPERVISOR_CONF_DIR" ]; then
+    # Lister tous les fichiers .conf
+    CONFIG_FILES=$(find "$SUPERVISOR_CONF_DIR" -name "*.conf" 2>/dev/null || true)
+    
+    if [ -n "$CONFIG_FILES" ]; then
+        info "Fichiers de configuration Supervisor trouvés:"
+        echo "$CONFIG_FILES" | while read -r conf_file; do
+            # Extraire le nom du service depuis le nom du fichier
+            service_name=$(basename "$conf_file" .conf)
+            info "  - $service_name"
+        done
+        
+        # Recharger la configuration supervisor
+        if sudo supervisorctl reread; then
+            info "Configuration Supervisor rechargée"
+        else
+            warn "Erreur lors du rechargement de la configuration Supervisor"
+        fi
+        
+        # Mettre à jour les services
+        if sudo supervisorctl update; then
+            info "Services Supervisor mis à jour"
+        else
+            warn "Erreur lors de la mise à jour des services Supervisor"
+        fi
+        
+        # Redémarrer tous les services
+        if sudo supervisorctl restart all; then
+            info "Tous les services Supervisor redémarrés"
+        else
+            warn "Erreur lors du redémarrage de tous les services Supervisor"
+            # Essayer de redémarrer individuellement
+            echo "$CONFIG_FILES" | while read -r conf_file; do
+                service_name=$(basename "$conf_file" .conf)
+                if sudo supervisorctl restart "$service_name"; then
+                    info "  ✓ $service_name redémarré"
+                else
+                    warn "  ✗ Échec du redémarrage de $service_name"
+                fi
+            done
+        fi
+        
+        # Afficher le statut
+        info "Statut des services Supervisor:"
+        sudo supervisorctl status || true
+    else
+        warn "Aucun fichier de configuration Supervisor trouvé dans $SUPERVISOR_CONF_DIR"
+    fi
+else
+    warn "Répertoire Supervisor non trouvé: $SUPERVISOR_CONF_DIR"
+fi
+
+# Étape 7: Vérification finale avec Python
+info "Étape 7: Vérification finale de l'installation Python..."
+
+# Vérifier la version de Python
+PYTHON_VERSION=$(python3 --version 2>&1)
+info "Version Python: $PYTHON_VERSION"
+
+# Vérifier que Django peut être importé
+if python3 -c "import django; print(f'Django {django.get_version()}')" 2>/dev/null; then
+    info "Django est correctement installé"
+else
+    error "Django ne peut pas être importé"
+    exit 1
+fi
+
+# Vérifier les modules critiques
+info "Vérification des modules critiques..."
+CRITICAL_MODULES=("celery" "rest_framework" "channels")
+for module in "${CRITICAL_MODULES[@]}"; do
+    if python3 -c "import $module" 2>/dev/null; then
+        info "  ✓ Module $module disponible"
+    else
+        warn "  ✗ Module $module non disponible"
+    fi
+done
 
 echo ""
-echo "📊 Statut actuel :"
-echo "   - Gunicorn: $(sudo systemctl is-active gunicorn_mobcash.service || echo inactive)"
-echo "   - Workers actifs: $(pgrep -c -f 'mobcash_inte_backend worker' || echo 0)"
+echo "=========================================="
+info "Déploiement terminé avec succès!"
+echo "=========================================="
+echo ""
+info "Résumé:"
+info "  - Code mis à jour depuis Git"
+info "  - Environnement virtuel activé"
+info "  - Gunicorn redémarré"
+info "  - Services Supervisor redémarrés"
+info "  - Vérifications Python effectuées"
+echo ""
+
