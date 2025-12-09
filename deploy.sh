@@ -115,20 +115,20 @@ fi
 
 # Étape 4: Redémarrer Gunicorn
 info "Étape 4: Redémarrage de Gunicorn..."
-if sudo systemctl restart gunicorn_mysolde.service; then
+if sudo systemctl restart gunicorn_mobcash.service; then
     info "Gunicorn redémarré avec succès"
     sleep 2
     
     # Vérifier le statut
-    if sudo systemctl is-active --quiet gunicorn_mysolde.service; then
+    if sudo systemctl is-active --quiet gunicorn_mobcash.service; then
         info "Gunicorn est actif et fonctionne"
     else
         error "Gunicorn n'est pas actif après le redémarrage"
-        sudo systemctl status gunicorn_mysolde.service || true
+        sudo systemctl status gunicorn_mobcash.service || true
     fi
 else
     error "Erreur lors du redémarrage de Gunicorn"
-    sudo systemctl status gunicorn_mysolde.service || true
+    sudo systemctl status gunicorn_mobcash.service || true
 fi
 
 # Étape 5: Redémarrer tous les services Supervisor
