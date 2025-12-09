@@ -98,7 +98,7 @@ if [ -f "manage.py" ]; then
             }
         else
             warn "Commit précédent non disponible pour restauration"
-        }
+        fi
         
         # Redémarrer supervisorctl restart all
         info "Redémarrage de tous les services Supervisor..."
