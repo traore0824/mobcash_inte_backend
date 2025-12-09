@@ -64,14 +64,75 @@ def save_user_location(request):
 
 @api_view(["POST"])
 def registration(request):
-    user = User.objects.filter(email=request.data.get("email"), is_delete=True).first()
-    if user:
-        user.is_delete = False
-        user.save()
-    else:
-        serializer = UserRegistrationSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = serializer.save()
+    email = request.data.get("email")
+    
+    # Vérifier si un utilisateur existe déjà avec cet email (actif ou supprimé)
+    existing_user = User.objects.filter(email=email).first()
+    
+    if existing_user:
+        # Si l'utilisateur existe et est supprimé, on le réactive
+        if existing_user.is_delete:
+            existing_user.is_delete = False
+            # Mettre à jour les autres champs si nécessaire
+            if request.data.get("first_name"):
+                existing_user.first_name = request.data.get("first_name")
+            if request.data.get("last_name"):
+                existing_user.last_name = request.data.get("last_name")
+            if request.data.get("phone"):
+                existing_user.phone = request.data.get("phone")
+            # Mettre à jour le mot de passe si fourni
+            if request.data.get("password"):
+                existing_user.set_password(request.data.get("password"))
+            existing_user.save()
+            return Response(
+                UserRegistrationSerializer(existing_user).data, status=status.HTTP_200_OK
+            )
+        else:
+            # L'utilisateur existe déjà et n'est pas supprimé
+            return Response(
+                {
+                    "success": False,
+                    "details": "Un compte existe déjà avec cet email. Veuillez vous connecter.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+    
+    # Vérifier aussi si un username existe déjà (car username = email dans le serializer)
+    username = email  # Le username est défini comme l'email dans le serializer
+    existing_username = User.objects.filter(username=username).first()
+    
+    if existing_username:
+        # Si l'utilisateur avec ce username existe et est supprimé, on le réactive
+        if existing_username.is_delete:
+            existing_username.is_delete = False
+            if request.data.get("first_name"):
+                existing_username.first_name = request.data.get("first_name")
+            if request.data.get("last_name"):
+                existing_username.last_name = request.data.get("last_name")
+            if request.data.get("phone"):
+                existing_username.phone = request.data.get("phone")
+            if request.data.get("email"):
+                existing_username.email = request.data.get("email")
+            if request.data.get("password"):
+                existing_username.set_password(request.data.get("password"))
+            existing_username.save()
+            return Response(
+                UserRegistrationSerializer(existing_username).data, status=status.HTTP_200_OK
+            )
+        else:
+            # L'utilisateur avec ce username existe déjà et n'est pas supprimé
+            return Response(
+                {
+                    "success": False,
+                    "details": "Un compte existe déjà avec cet email. Veuillez vous connecter.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+    
+    # Aucun utilisateur existant, créer un nouvel utilisateur
+    serializer = UserRegistrationSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    user = serializer.save()
     return Response(
         UserRegistrationSerializer(user).data, status=status.HTTP_201_CREATED
     )
