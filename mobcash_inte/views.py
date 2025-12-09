@@ -853,6 +853,40 @@ class ReadAllNotificaation(decorators.APIView):
         return Response({"result": result})
 
 
+class ReadNotificationView(decorators.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        """
+        Marque toutes les notifications de l'utilisateur connecté comme lues.
+        """
+        if not request.user.is_authenticated:
+            return Response(
+                {"error": "User not authenticated"}, 
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        notifications = Notification.objects.filter(
+            user=request.user, 
+            is_read=False
+        )
+        
+        if notifications.exists():
+            updated_count = notifications.update(is_read=True)
+            return Response(
+                {
+                    "message": f"{updated_count} notification(s) marquée(s) comme lue(s)",
+                    "updated_count": updated_count
+                },
+                status=status.HTTP_200_OK
+            )
+        
+        return Response(
+            {"message": "Aucune notification non lue trouvée", "updated_count": 0},
+            status=status.HTTP_200_OK
+        )
+
+
 class HistoryTransactionViews(generics.ListAPIView):
     serializer_class = TransactionDetailsSerializer
     permission_classes = [IsAuthenticated]
