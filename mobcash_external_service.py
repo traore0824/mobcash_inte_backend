@@ -949,41 +949,20 @@ class MobCashExternalService:
         if notes:
             data["notes"] = notes
 
-        # Préparer les fichiers si fourni
+        # Préparer les fichiers si fourni - passer directement le fichier tel quel
         files = {}
-        opened_file = None
         if payment_proof_file:
-            # Si c'est un FileField Django
-            if hasattr(payment_proof_file, 'file'):
-                # C'est un FileField Django
-                payment_proof_file.file.seek(0)
-                file_name = payment_proof_file.name if hasattr(payment_proof_file, 'name') and payment_proof_file.name else 'payment_proof'
-                files["payment_proof"] = (
-                    file_name,
-                    payment_proof_file.file,
-                    'application/octet-stream'
-                )
-            elif hasattr(payment_proof_file, 'read'):
-                # C'est déjà un file-like object
-                file_name = payment_proof_file.name if hasattr(payment_proof_file, 'name') else 'payment_proof'
-                files["payment_proof"] = (
-                    file_name,
-                    payment_proof_file,
-                    'application/octet-stream'
-                )
-            elif isinstance(payment_proof_file, str):
-                # C'est un chemin de fichier
-                opened_file = open(payment_proof_file, 'rb')
-                files["payment_proof"] = (
-                    os.path.basename(payment_proof_file),
-                    opened_file,
-                    'application/octet-stream'
-                )
-            else:
-                logger.warning(
-                    "[MOBCASH] [RECHARGE_REQUEST] Type de fichier non reconnu",
-                    extra={'file_type': type(payment_proof_file).__name__}
-                )
+            # Le fichier vient directement du frontend (InMemoryUploadedFile ou UploadedFile)
+            # On le passe directement sans le lire ni le traiter
+            file_name = getattr(payment_proof_file, 'name', 'payment_proof')
+            # S'assurer que le fichier est au début
+            if hasattr(payment_proof_file, 'seek'):
+                payment_proof_file.seek(0)
+            files["payment_proof"] = (
+                file_name,
+                payment_proof_file,
+                getattr(payment_proof_file, 'content_type', 'application/octet-stream')
+            )
 
         # Pour multipart, on génère la signature avec un body vide
         # (la signature HMAC standard ne fonctionne pas avec multipart)
@@ -1117,10 +1096,3 @@ class MobCashExternalService:
                 'error': error_msg,
                 'error_type': 'unexpected_error'
             }
-        finally:
-            # Fermer les fichiers ouverts manuellement
-            if opened_file:
-                try:
-                    opened_file.close()
-                except:
-                    pass

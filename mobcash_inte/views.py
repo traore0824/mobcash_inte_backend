@@ -1489,10 +1489,13 @@ class RechargeMobcashBalanceView(generics.ListCreateAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
+        # Récupérer le fichier directement depuis request.FILES avant la sauvegarde
+        payment_proof_file = request.FILES.get('payment_proof', None)
+        
         # Créer l'instance
         instance = serializer.save()
         
-        # Appeler l'API MobCash avec les mêmes clés que sur la photo
+        # Appeler l'API MobCash avec le fichier directement depuis request.FILES
         try:
             mobcash_service = MobCashExternalService()
             result = mobcash_service.create_recharge_request(
@@ -1500,7 +1503,7 @@ class RechargeMobcashBalanceView(generics.ListCreateAPIView):
                 payment_method=instance.payment_method,
                 payment_reference=instance.payment_reference,
                 notes=instance.notes,
-                payment_proof_file=instance.payment_proof if instance.payment_proof else None
+                payment_proof_file=payment_proof_file  # Passer directement le fichier du frontend
             )
             
             connect_pro_logger.info(
