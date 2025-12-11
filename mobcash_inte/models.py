@@ -333,3 +333,32 @@ class TestModel(models.Model):
     class Meta:
         verbose_name = "Test Model"
         verbose_name_plural = "Test Models"
+
+
+PAYMENT_METHOD_CHOICES = [
+    ("MOBILE_MONEY", "Mobile Money"),
+    ("BANK_TRANSFER", "Bank Transfer"),
+    ("OTHER", "Other"),
+]
+
+
+class RechargeMobcashBalance(models.Model):
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    payment_method = models.CharField(
+        max_length=50, choices=PAYMENT_METHOD_CHOICES, default="MOBILE_MONEY"
+    )
+    payment_reference = models.CharField(max_length=255)
+    notes = models.TextField(blank=True, null=True)
+    payment_proof = models.FileField(upload_to="payment_proofs/", blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True
+    )
+
+    class Meta:
+        verbose_name = "Recharge Mobcash Balance"
+        verbose_name_plural = "Recharge Mobcash Balances"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Recharge {self.payment_reference} - {self.amount}"

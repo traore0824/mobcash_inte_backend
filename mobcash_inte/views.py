@@ -27,6 +27,7 @@ from mobcash_inte.models import (
     IDLink,
     Network,
     Notification,
+    RechargeMobcashBalance,
     Reward,
     Setting,
     Transaction,
@@ -55,6 +56,7 @@ from mobcash_inte.serializers import (
     NotificationSerializer,
     ReadAppNameSerializer,
     ReadSettingSerializer,
+    RechargeMobcashBalanceSerializer,
     RewardTransactionSerializer,
     SearchUserBetSerializer,
     SendNotificationSerializer,
@@ -1463,4 +1465,61 @@ class TestAPIViews(decorators.APIView):
         api = CashAPIService(api_key="ebfad3fbccb250211271dd519da8b9e9c10d4797a9ea6f772ee34245c4e6ee0f")
         result = api.create_deposit(user_id=339966934, amount=500)
         return Response({"data": result})
+
+
+class RechargeMobcashBalanceView(generics.ListCreateAPIView):
+    """
+    API pour créer et lister les recharges de balance Mobcash avec preuve de paiement.
+    Permission: Admin uniquement
+    """
+    serializer_class = RechargeMobcashBalanceSerializer
+    permission_classes = [permissions.IsAdminUser]
+    pagination_class = CustomPagination
+    queryset = RechargeMobcashBalance.objects.all()
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["request"] = self.request
+        return context
+
+    def create(self, request, *args, **kwargs):
+        """
+        Créer une recharge et envoyer la requête à l'API MobCash
+        """
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        # Créer l'instance
+        instance = serializer.save()
+        
+        # Appeler l'API MobCash avec les mêmes clés que sur la photo
+        try:
+            mobcash_service = MobCashExternalService()
+            result = mobcash_service.create_recharge_request(
+                amount=float(instance.amount),
+                payment_method=instance.payment_method,
+                payment_reference=instance.payment_reference,
+                notes=instance.notes,
+                payment_proof_file=instance.payment_proof if instance.payment_proof else None
+            )
+            
+            connect_pro_logger.info(
+                f"Réponse de l'API MobCash pour la recharge {instance.payment_reference}: {result}"
+            )
+            
+            # Si l'API retourne une erreur, on peut logger mais on garde l'instance créée
+            if not result.get('success'):
+                connect_pro_logger.error(
+                    f"Erreur lors de l'envoi à l'API MobCash pour {instance.payment_reference}: {result.get('error')}"
+                )
+            
+        except Exception as e:
+            connect_pro_logger.error(
+                f"Exception lors de l'appel à l'API MobCash pour {instance.payment_reference}: {str(e)}",
+                exc_info=True
+            )
+        return Response(
+            serializer.data,
+            status=status.HTTP_201_CREATED,
+                )
 # Create your views here.

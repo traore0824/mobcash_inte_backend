@@ -912,3 +912,215 @@ class MobCashExternalService:
         """
         status = self.get_transaction_status(transaction_uuid)
         return status == 'FAILED'
+
+    def create_recharge_request(
+        self,
+        amount: float,
+        payment_method: str,
+        payment_reference: str,
+        notes: Optional[str] = None,
+        payment_proof_file: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Créer une demande de recharge de balance Mobcash
+
+        POST /api/v1/wallets/recharge-requests/
+
+        Args:
+            amount: Montant de la recharge
+            payment_method: Méthode de paiement (MOBILE_MONEY, BANK_TRANSFER, OTHER)
+            payment_reference: Référence du paiement
+            notes: Notes optionnelles
+            payment_proof_file: Fichier de preuve de paiement (FileField ou file-like object)
+
+        Returns:
+            Dict avec 'success', 'data', 'error', etc.
+        """
+        endpoint = "/api/v1/wallets/recharge-requests/"
+        url = f"{self.base_url}{endpoint}"
+
+        # Préparer les données form-data
+        data = {
+            "amount": str(amount),
+            "payment_method": payment_method,
+            "payment_reference": payment_reference,
+        }
+
+        if notes:
+            data["notes"] = notes
+
+        # Préparer les fichiers si fourni
+        files = {}
+        opened_file = None
+        if payment_proof_file:
+            # Si c'est un FileField Django
+            if hasattr(payment_proof_file, 'file'):
+                # C'est un FileField Django
+                payment_proof_file.file.seek(0)
+                file_name = payment_proof_file.name if hasattr(payment_proof_file, 'name') and payment_proof_file.name else 'payment_proof'
+                files["payment_proof"] = (
+                    file_name,
+                    payment_proof_file.file,
+                    'application/octet-stream'
+                )
+            elif hasattr(payment_proof_file, 'read'):
+                # C'est déjà un file-like object
+                file_name = payment_proof_file.name if hasattr(payment_proof_file, 'name') else 'payment_proof'
+                files["payment_proof"] = (
+                    file_name,
+                    payment_proof_file,
+                    'application/octet-stream'
+                )
+            elif isinstance(payment_proof_file, str):
+                # C'est un chemin de fichier
+                opened_file = open(payment_proof_file, 'rb')
+                files["payment_proof"] = (
+                    os.path.basename(payment_proof_file),
+                    opened_file,
+                    'application/octet-stream'
+                )
+            else:
+                logger.warning(
+                    "[MOBCASH] [RECHARGE_REQUEST] Type de fichier non reconnu",
+                    extra={'file_type': type(payment_proof_file).__name__}
+                )
+
+        # Pour multipart, on génère la signature avec un body vide
+        # (la signature HMAC standard ne fonctionne pas avec multipart)
+        timestamp = int(time.time())
+        signature = self._generate_signature('POST', endpoint, '', timestamp)
+
+        headers = {
+            'X-API-Key': self.api_key,
+            'X-Timestamp': str(timestamp),
+            'X-Signature': signature
+        }
+        # Ne pas mettre Content-Type, requests le fera automatiquement pour multipart
+
+        logger.info(
+            f"[MOBCASH] [REQUEST_START] POST {endpoint}",
+            extra={
+                'url': url,
+                'has_data': bool(data),
+                'has_files': bool(files)
+            }
+        )
+
+        try:
+            response = requests.post(
+                url,
+                data=data,
+                files=files if files else None,
+                headers=headers,
+                timeout=self.timeout
+            )
+
+            logger.info(
+                f"[MOBCASH] [RESPONSE] Status {response.status_code}",
+                extra={
+                    'status_code': response.status_code,
+                    'content_type': response.headers.get('Content-Type'),
+                    'response_length': len(response.text)
+                }
+            )
+
+            # Parser réponse (même logique que _make_request)
+            if response.status_code in (200, 201):
+                try:
+                    result = response.json()
+                    logger.info(f"[MOBCASH] [SUCCESS] Requête réussie")
+                    logger.debug(f"[MOBCASH] [RESPONSE_DATA] {result}")
+
+                    return {
+                        'success': True,
+                        'data': result,
+                        'status_code': response.status_code
+                    }
+
+                except ValueError as e:
+                    error_msg = "Réponse invalide (JSON parsing error)"
+                    logger.error(
+                        f"[MOBCASH] [JSON_ERROR] {error_msg}",
+                        extra={
+                            'error': str(e),
+                            'response_preview': response.text[:300]
+                        }
+                    )
+                    return {
+                        'success': False,
+                        'error': error_msg,
+                        'error_type': 'invalid_json',
+                        'raw_response': response.text[:500]
+                    }
+
+            else:
+                # Erreur HTTP
+                error_msg = f"HTTP {response.status_code}"
+
+                try:
+                    error_detail = response.json()
+                    if isinstance(error_detail, dict):
+                        error_msg = error_detail.get('message') or error_detail.get('detail') or error_detail.get(
+                            'error') or error_msg
+                        error_code = error_detail.get('error_code') or error_detail.get('code')
+                except:
+                    pass
+
+                logger.error(
+                    f"[MOBCASH] [HTTP_ERROR] {error_msg}",
+                    extra={
+                        'status_code': response.status_code,
+                        'response_preview': response.text[:300]
+                    }
+                )
+
+                return {
+                    'success': False,
+                    'error': error_msg,
+                    'error_type': 'http_error',
+                    'status_code': response.status_code,
+                    'raw_response': response.text[:500]
+                }
+
+        except requests.exceptions.Timeout:
+            error_msg = f"Timeout après {self.timeout}s"
+            logger.error(
+                "[MOBCASH] [TIMEOUT]",
+                extra={'timeout': self.timeout, 'url': url}
+            )
+            return {
+                'success': False,
+                'error': error_msg,
+                'error_type': 'timeout'
+            }
+
+        except requests.exceptions.ConnectionError as e:
+            error_msg = "Erreur de connexion au serveur MobCash"
+            logger.error(
+                "[MOBCASH] [CONNECTION_ERROR]",
+                extra={'error': str(e), 'url': url}
+            )
+            return {
+                'success': False,
+                'error': error_msg,
+                'error_type': 'connection_error'
+            }
+
+        except Exception as e:
+            error_msg = f"Erreur inattendue: {str(e)}"
+            logger.exception(
+                "[MOBCASH] [UNEXPECTED_ERROR]",
+                extra={'error': str(e), 'url': url}
+            )
+            return {
+                'success': False,
+                'error': error_msg,
+                'error_type': 'unexpected_error'
+            }
+        finally:
+            # Fermer les fichiers ouverts manuellement
+            if opened_file:
+                try:
+                    opened_file.close()
+                except:
+                    pass

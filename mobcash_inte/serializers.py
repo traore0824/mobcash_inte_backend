@@ -13,6 +13,7 @@ from mobcash_inte.models import (
     IDLink,
     Network,
     Notification,
+    RechargeMobcashBalance,
     Reward,
     Setting,
     Transaction,
@@ -482,3 +483,25 @@ class BonusTransactionSerializer(serializers.ModelSerializer):
         reward.save()
 
         return data
+
+
+class RechargeMobcashBalanceSerializer(serializers.ModelSerializer):
+    created_by = SmallUserSerializer(read_only=True)
+    payment_proof_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RechargeMobcashBalance
+        fields = "__all__"
+        read_only_fields = ["created_at", "created_by"]
+
+    def get_payment_proof_url(self, obj):
+        if obj.payment_proof:
+            request = self.context.get("request")
+            if request:
+                return request.build_absolute_uri(obj.payment_proof.url)
+            return obj.payment_proof.url
+        return None
+
+    def create(self, validated_data):
+        validated_data["created_by"] = self.context["request"].user
+        return super().create(validated_data)
