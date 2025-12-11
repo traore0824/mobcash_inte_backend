@@ -47,6 +47,7 @@ ALLOWED_HOSTS = [
     "api.fastxof.com",
     "api.1xpay.app",
     "api.1xstore.org",
+    "api.plrpay.net",
 ]
 
 

@@ -459,7 +459,7 @@ class BonusTransactionSerializer(serializers.ModelSerializer):
         bonus = Bonus.objects.filter(user=user, bonus_with=False, bonus_delete=False)
         amount = 0
         if bonus.exists():
-            amount = bonus.aggregate(total=Sum("amount"))["total"] or 0
+            amount = bonus.aggregate(total=Sum("amount"))["total"] or 0 
 
         # Vérifie le montant minimum
         MINIMUM_DEPOSIT = setting.reward_mini_withdrawal
