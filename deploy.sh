@@ -113,6 +113,27 @@ else
     warn "Fichier manage.py non trouvé, saut de la vérification Django"
 fi
 
+# Étape 3.5: Créer et appliquer les migrations
+info "Étape 3.5: Création et application des migrations..."
+if [ -f "manage.py" ]; then
+    # Créer les migrations
+    if python3 manage.py makemigrations; then
+        info "Migrations créées avec succès"
+    else
+        warn "Aucune nouvelle migration à créer ou erreur lors de la création"
+    fi
+    
+    # Appliquer les migrations
+    if python3 manage.py migrate; then
+        info "Migrations appliquées avec succès"
+    else
+        error "Erreur lors de l'application des migrations"
+        exit 1
+    fi
+else
+    warn "Fichier manage.py non trouvé, saut des migrations"
+fi
+
 # Étape 4: Redémarrer Gunicorn
 info "Étape 4: Redémarrage de Gunicorn..."
 if sudo systemctl restart gunicorn_mobcash.service; then
@@ -222,6 +243,8 @@ echo ""
 info "Résumé:"
 info "  - Code mis à jour depuis Git"
 info "  - Environnement virtuel activé"
+info "  - Vérification Django effectuée"
+info "  - Migrations créées et appliquées"
 info "  - Gunicorn redémarré"
 info "  - Services Supervisor redémarrés"
 info "  - Vérifications Python effectuées"
