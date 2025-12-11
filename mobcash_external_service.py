@@ -913,25 +913,19 @@ class MobCashExternalService:
         status = self.get_transaction_status(transaction_uuid)
         return status == 'FAILED'
 
-    def create_recharge_request(
+    def create_recharge_request_from_request(
         self,
-        amount: float,
-        payment_method: str,
-        payment_reference: str,
-        notes: Optional[str] = None,
-        payment_proof_file: Optional[Any] = None
+        request_data: Dict,
+        request_files: Any
     ) -> Dict[str, Any]:
         """
-        Créer une demande de recharge de balance Mobcash
+        Créer une demande de recharge de balance Mobcash en passant directement les données de la requête
 
         POST /api/v1/wallets/recharge-requests/
 
         Args:
-            amount: Montant de la recharge
-            payment_method: Méthode de paiement (MOBILE_MONEY, BANK_TRANSFER, OTHER)
-            payment_reference: Référence du paiement
-            notes: Notes optionnelles
-            payment_proof_file: Fichier de preuve de paiement (FileField ou file-like object)
+            request_data: Données de la requête (request.data)
+            request_files: Fichiers de la requête (request.FILES)
 
         Returns:
             Dict avec 'success', 'data', 'error', etc.
@@ -939,21 +933,21 @@ class MobCashExternalService:
         endpoint = "/api/v1/wallets/recharge-requests/"
         url = f"{self.base_url}{endpoint}"
 
-        # Préparer les données form-data
+        # Préparer les données form-data directement depuis request.data
         data = {
-            "amount": str(amount),
-            "payment_method": payment_method,
-            "payment_reference": payment_reference,
+            "amount": str(request_data.get('amount', '')),
+            "payment_method": request_data.get('payment_method', ''),
+            "payment_reference": request_data.get('payment_reference', ''),
         }
 
-        if notes:
-            data["notes"] = notes
+        if request_data.get('notes'):
+            data["notes"] = request_data.get('notes')
 
-        # Préparer les fichiers si fourni - le fichier est déjà un BytesIO avec le contenu binaire
+        # Préparer les fichiers directement depuis request.FILES
         files = {}
-        if payment_proof_file:
-            # Le fichier est déjà un BytesIO avec le contenu binaire (créé dans la vue)
-            # S'assurer qu'il est au début
+        if request_files and 'payment_proof' in request_files:
+            payment_proof_file = request_files['payment_proof']
+            # S'assurer que le fichier est au début
             if hasattr(payment_proof_file, 'seek'):
                 payment_proof_file.seek(0)
             
