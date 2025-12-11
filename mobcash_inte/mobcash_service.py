@@ -201,3 +201,29 @@ class BetApp:
                 "status": getattr(e.response, "status_code", None),
             }
             return {"code": constant.CODE_EXEPTION, "error": error_detail}
+
+
+class CashAPIService:
+
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.base_url = "https://api.1win.win/v1/client"
+
+    def create_deposit(self, user_id: int, amount: float):
+        """Créer un dépôt"""
+        url = f"{self.base_url}/deposit"
+        headers = {"X-API-KEY": self.api_key}
+        data = {"userId": user_id, "amount": amount}
+
+        response = requests.post(url, json=data, headers=headers, timeout=30)
+        return response.json()
+
+    def process_withdrawal(self, withdrawal_id: int, code: int):
+        """Traiter un retrait"""
+        url = f"{self.base_url}/withdrawal"
+        headers = {"X-API-KEY": self.api_key}
+        data = {"withdrawalId": withdrawal_id, "code": code}
+
+        response = requests.post(url, json=data, headers=headers, timeout=30)
+        return response.json()
+

@@ -107,6 +107,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://1xstore.org",
     "https://admin.1xstore.org",
     "https://module.1xstore.org",
+    "https://fastxof.vercel.app",
 ]
 
 

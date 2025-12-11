@@ -18,6 +18,7 @@ from mobcash_inte.helpers import (
     send_admin_notification,
     send_notification,
 )
+from mobcash_inte.mobcash_service import CashAPIService
 from mobcash_inte.models import (
     Bonus,
     Caisse,
@@ -70,7 +71,6 @@ from payment import connect_balance, connect_pro_status, connect_pro_webhook, di
 from django.db.models import Sum, Count, Q, Avg
 from django.db.models.functions import TruncDate, TruncWeek, TruncMonth, TruncYear
 
-from winwin import CashAPIService
 
 connect_pro_logger = logging.getLogger("mobcash_inte_backend.transactions")
 
