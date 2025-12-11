@@ -944,7 +944,7 @@ class MobCashExternalService:
             data["notes"] = request_data.get('notes')
 
         # Préparer les fichiers directement depuis request.FILES
-        # Lire le fichier en mode binaire pour éviter tout problème d'encodage
+        # Passer le fichier tel quel sans le lire (requests gère le binaire automatiquement)
         files = {}
         if request_files and 'payment_proof' in request_files:
             payment_proof_file = request_files['payment_proof']
@@ -953,41 +953,22 @@ class MobCashExternalService:
             if hasattr(payment_proof_file, 'seek'):
                 payment_proof_file.seek(0)
             
-            # Lire le contenu en mode binaire
-            try:
-                file_content = payment_proof_file.read()
-                # Créer un nouveau BytesIO avec le contenu binaire
-                from io import BytesIO
-                file_stream = BytesIO(file_content)
-                
-                file_name = getattr(payment_proof_file, 'name', 'payment_proof')
-                # Forcer le content_type à application/octet-stream pour éviter les problèmes d'encodage
-                content_type = 'application/octet-stream'
-                
-                files["payment_proof"] = (
-                    file_name,
-                    file_stream,
-                    content_type
-                )
-                
-                logger.debug(
-                    f"[MOBCASH] [RECHARGE_REQUEST] Fichier préparé: {file_name}, taille: {len(file_content)} bytes, type: {content_type}"
-                )
-            except Exception as e:
-                logger.error(
-                    f"[MOBCASH] [RECHARGE_REQUEST] Erreur lors de la lecture du fichier: {str(e)}",
-                    exc_info=True
-                )
-                # Fallback: essayer de passer le fichier tel quel
-                file_name = getattr(payment_proof_file, 'name', 'payment_proof')
-                content_type = getattr(payment_proof_file, 'content_type', 'application/octet-stream')
-                if hasattr(payment_proof_file, 'seek'):
-                    payment_proof_file.seek(0)
-                files["payment_proof"] = (
-                    file_name,
-                    payment_proof_file,
-                    content_type
-                )
+            file_name = getattr(payment_proof_file, 'name', 'payment_proof')
+            # Utiliser le content_type original du fichier (image/png, image/jpeg, etc.)
+            # requests gérera automatiquement l'encodage binaire
+            content_type = getattr(payment_proof_file, 'content_type', 'application/octet-stream')
+            
+            # Passer directement le fichier sans le lire
+            # requests.post avec files= gère automatiquement le mode binaire
+            files["payment_proof"] = (
+                file_name,
+                payment_proof_file,
+                content_type
+            )
+            
+            logger.debug(
+                f"[MOBCASH] [RECHARGE_REQUEST] Fichier préparé: {file_name}, type: {content_type}, classe: {type(payment_proof_file).__name__}"
+            )
 
         # Pour multipart, on génère la signature avec un body vide
         # (la signature HMAC standard ne fonctionne pas avec multipart)
@@ -1011,6 +992,17 @@ class MobCashExternalService:
         )
 
         try:
+            # Logger les détails de la requête avant l'envoi
+            logger.debug(
+                f"[MOBCASH] [RECHARGE_REQUEST] Détails de la requête",
+                extra={
+                    'data': data,
+                    'has_files': bool(files),
+                    'file_name': files.get('payment_proof', [None])[0] if files else None,
+                    'headers': {k: v for k, v in headers.items() if k != 'X-Signature'}  # Ne pas logger la signature
+                }
+            )
+            
             response = requests.post(
                 url,
                 data=data,
