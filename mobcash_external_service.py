@@ -949,19 +949,21 @@ class MobCashExternalService:
         if notes:
             data["notes"] = notes
 
-        # Préparer les fichiers si fourni - passer directement le fichier tel quel
+        # Préparer les fichiers si fourni - le fichier est déjà un BytesIO avec le contenu binaire
         files = {}
         if payment_proof_file:
-            # Le fichier vient directement du frontend (InMemoryUploadedFile ou UploadedFile)
-            # On le passe directement sans le lire ni le traiter
-            file_name = getattr(payment_proof_file, 'name', 'payment_proof')
-            # S'assurer que le fichier est au début
+            # Le fichier est déjà un BytesIO avec le contenu binaire (créé dans la vue)
+            # S'assurer qu'il est au début
             if hasattr(payment_proof_file, 'seek'):
                 payment_proof_file.seek(0)
+            
+            file_name = getattr(payment_proof_file, 'name', 'payment_proof')
+            content_type = getattr(payment_proof_file, 'content_type', 'application/octet-stream')
+            
             files["payment_proof"] = (
                 file_name,
                 payment_proof_file,
-                getattr(payment_proof_file, 'content_type', 'application/octet-stream')
+                content_type
             )
 
         # Pour multipart, on génère la signature avec un body vide

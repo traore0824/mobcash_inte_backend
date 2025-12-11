@@ -1486,16 +1486,32 @@ class RechargeMobcashBalanceView(generics.ListCreateAPIView):
         """
         Créer une recharge et envoyer la requête à l'API MobCash
         """
+        # Récupérer le fichier AVANT la validation pour éviter qu'il soit lu par Django
+        payment_proof_file = request.FILES.get('payment_proof', None)
+        
+        # Si un fichier est présent, créer une copie en mémoire avant la validation
+        if payment_proof_file:
+            from io import BytesIO
+            # Lire le contenu binaire du fichier
+            file_content = payment_proof_file.read()
+            # Créer un nouveau BytesIO avec le contenu
+            payment_proof_file_copy = BytesIO(file_content)
+            payment_proof_file_copy.name = getattr(payment_proof_file, 'name', 'payment_proof')
+            payment_proof_file_copy.content_type = getattr(payment_proof_file, 'content_type', 'application/octet-stream')
+            # Remettre le fichier original au début pour que le serializer puisse le lire
+            payment_proof_file.seek(0)
+            # Utiliser la copie pour l'API MobCash
+            payment_proof_file_for_api = payment_proof_file_copy
+        else:
+            payment_proof_file_for_api = None
+        
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        
-        # Récupérer le fichier directement depuis request.FILES avant la sauvegarde
-        payment_proof_file = request.FILES.get('payment_proof', None)
         
         # Créer l'instance
         instance = serializer.save()
         
-        # Appeler l'API MobCash avec le fichier directement depuis request.FILES
+        # Appeler l'API MobCash avec la copie du fichier
         try:
             mobcash_service = MobCashExternalService()
             result = mobcash_service.create_recharge_request(
@@ -1503,7 +1519,7 @@ class RechargeMobcashBalanceView(generics.ListCreateAPIView):
                 payment_method=instance.payment_method,
                 payment_reference=instance.payment_reference,
                 notes=instance.notes,
-                payment_proof_file=payment_proof_file  # Passer directement le fichier du frontend
+                payment_proof_file=payment_proof_file_for_api  # Passer la copie du fichier
             )
             
             connect_pro_logger.info(
