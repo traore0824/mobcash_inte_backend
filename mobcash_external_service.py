@@ -943,8 +943,7 @@ class MobCashExternalService:
         if request_data.get('notes'):
             data["notes"] = request_data.get('notes')
 
-        # Préparer les fichiers directement depuis request.FILES
-        # Passer le fichier tel quel sans le lire (requests gère le binaire automatiquement)
+        # Préparer les fichiers - essayer d'encoder en base64 pour éviter les problèmes d'encodage
         files = {}
         if request_files and 'payment_proof' in request_files:
             payment_proof_file = request_files['payment_proof']
@@ -953,34 +952,61 @@ class MobCashExternalService:
             if hasattr(payment_proof_file, 'seek'):
                 payment_proof_file.seek(0)
             
-            file_name = getattr(payment_proof_file, 'name', 'payment_proof')
-            # Utiliser le content_type original du fichier (image/png, image/jpeg, etc.)
-            # requests gérera automatiquement l'encodage binaire
-            content_type = getattr(payment_proof_file, 'content_type', 'application/octet-stream')
-            
-            # Passer directement le fichier sans le lire
-            # requests.post avec files= gère automatiquement le mode binaire
-            files["payment_proof"] = (
-                file_name,
-                payment_proof_file,
-                content_type
-            )
-            
-            logger.debug(
-                f"[MOBCASH] [RECHARGE_REQUEST] Fichier préparé: {file_name}, type: {content_type}, classe: {type(payment_proof_file).__name__}"
-            )
+            try:
+                # Lire le contenu binaire
+                file_content = payment_proof_file.read()
+                
+                # Encoder en base64 pour éviter les problèmes d'encodage UTF-8
+                import base64
+                file_base64 = base64.b64encode(file_content).decode('utf-8')
+                
+                # Ajouter le fichier encodé en base64 dans les données
+                data["payment_proof"] = file_base64
+                
+                file_name = getattr(payment_proof_file, 'name', 'payment_proof')
+                logger.debug(
+                    f"[MOBCASH] [RECHARGE_REQUEST] Fichier encodé en base64: {file_name}, taille originale: {len(file_content)} bytes, taille base64: {len(file_base64)} chars"
+                )
+            except Exception as e:
+                logger.error(
+                    f"[MOBCASH] [RECHARGE_REQUEST] Erreur lors de l'encodage du fichier en base64: {str(e)}",
+                    exc_info=True
+                )
+                # Fallback: essayer de passer le fichier en multipart
+                if hasattr(payment_proof_file, 'seek'):
+                    payment_proof_file.seek(0)
+                file_name = getattr(payment_proof_file, 'name', 'payment_proof')
+                content_type = getattr(payment_proof_file, 'content_type', 'application/octet-stream')
+                files["payment_proof"] = (
+                    file_name,
+                    payment_proof_file,
+                    content_type
+                )
 
-        # Pour multipart, on génère la signature avec un body vide
-        # (la signature HMAC standard ne fonctionne pas avec multipart)
+        # Si on a des fichiers en multipart, générer la signature avec un body vide
+        # Sinon, si le fichier est en base64 dans data, normaliser le body JSON
         timestamp = int(time.time())
-        signature = self._generate_signature('POST', endpoint, '', timestamp)
-
-        headers = {
-            'X-API-Key': self.api_key,
-            'X-Timestamp': str(timestamp),
-            'X-Signature': signature
-        }
-        # Ne pas mettre Content-Type, requests le fera automatiquement pour multipart
+        
+        if files:
+            # Multipart: signature avec body vide
+            body = ''
+            signature = self._generate_signature('POST', endpoint, body, timestamp)
+            headers = {
+                'X-API-Key': self.api_key,
+                'X-Timestamp': str(timestamp),
+                'X-Signature': signature
+            }
+            # Ne pas mettre Content-Type, requests le fera automatiquement pour multipart
+        else:
+            # JSON: normaliser le body pour la signature
+            body = self._normalize_json_body(data)
+            signature = self._generate_signature('POST', endpoint, body, timestamp)
+            headers = {
+                'Content-Type': 'application/json',
+                'X-API-Key': self.api_key,
+                'X-Timestamp': str(timestamp),
+                'X-Signature': signature
+            }
 
         logger.info(
             f"[MOBCASH] [REQUEST_START] POST {endpoint}",
@@ -1003,13 +1029,23 @@ class MobCashExternalService:
                 }
             )
             
-            response = requests.post(
-                url,
-                data=data,
-                files=files if files else None,
-                headers=headers,
-                timeout=self.timeout
-            )
+            if files:
+                # Envoyer en multipart/form-data
+                response = requests.post(
+                    url,
+                    data=data,
+                    files=files,
+                    headers=headers,
+                    timeout=self.timeout
+                )
+            else:
+                # Envoyer en JSON (fichier encodé en base64 dans data)
+                response = requests.post(
+                    url,
+                    json=data,
+                    headers=headers,
+                    timeout=self.timeout
+                )
 
             logger.info(
                 f"[MOBCASH] [RESPONSE] Status {response.status_code}",
