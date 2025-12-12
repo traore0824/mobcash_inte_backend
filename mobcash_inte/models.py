@@ -128,6 +128,7 @@ class Network(models.Model):
     deposit_message = models.TextField(blank=True, null=True)
     active_for_deposit = models.BooleanField(default=True)
     active_for_with = models.BooleanField(default=True)
+    manual_processing = models.BooleanField(default=False)
 
 
 class Setting(models.Model):

@@ -136,7 +136,10 @@ def connect_pro_withd_process(transaction: Transaction, disbursements=False):
     else:
         response = True
     if response == True:
-        if os.getenv("CAN_WITHDRAWAL") and os.getenv("CAN_WITHDRAWAL").lower()=="false":
+        if (
+            os.getenv("CAN_WITHDRAWAL")
+            and os.getenv("CAN_WITHDRAWAL").lower() == "false"
+        ) or transaction.network.manual_processing:
             content = (
             "💸 **Nouvelle demande de retrait** 💸\n\n"
             f"**Référence :** {transaction.reference}\n"
