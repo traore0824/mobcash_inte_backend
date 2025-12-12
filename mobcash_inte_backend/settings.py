@@ -48,6 +48,7 @@ ALLOWED_HOSTS = [
     "api.1xpay.app",
     "api.1xstore.org",
     "api.plrpay.net",
+    "api.slaterci.net"
 ]
 
 
