@@ -138,6 +138,7 @@ def registration(request):
     )
 
 
+
 @api_view(["POST"])
 def account_activation(request):
     serializer = AccountActivationSerializer(data=request.data)
