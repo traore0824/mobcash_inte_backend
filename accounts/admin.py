@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.utils.translation import gettext_lazy as _
-from .models import AppName, User
+from .models import AppName, TelegramUser, User
 
 
 @admin.register(User)
@@ -93,3 +93,17 @@ class AppNameAdmin(admin.ModelAdmin):
         ),
         ("Activations", {"fields": ("active_for_deposit", "active_for_with")}),
     )
+
+
+@admin.register(TelegramUser)
+class TelegramUserAdmin(admin.ModelAdmin):
+    list_display = ("telegram_user_id", "full_name", "email", "is_block", "created_at")
+    list_filter = ("is_block", "created_at")
+    search_fields = ("telegram_user_id", "first_name", "last_name", "email")
+    ordering = ("-created_at",)
+    readonly_fields = ("created_at",)
+
+    def full_name(self, obj):
+        return obj.fullname
+
+    full_name.short_description = "Nom complet"
