@@ -130,9 +130,9 @@ def registration(request):
             )
     
     # Aucun utilisateur existant, créer un nouvel utilisateur
-        serializer = UserRegistrationSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = serializer.save()
+    serializer = UserRegistrationSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    user = serializer.save()
     return Response(
         UserRegistrationSerializer(user).data, status=status.HTTP_201_CREATED
     )
