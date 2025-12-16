@@ -111,7 +111,7 @@ def send_notification(
         )
 
 
-def send_telegram_message(content, chat_id=917540842):
+def send_telegram_message(content, chat_id=os.getenv("CHAT_ID")):
     bot_token = os.getenv("TOKEN_BOT")
     api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 

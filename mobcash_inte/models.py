@@ -111,6 +111,7 @@ class Network(models.Model):
     name = models.CharField(
         max_length=100, blank=True, null=True, choices=NETWORK_CHOICES
     )
+    customer_pay_fee = models.BooleanField(default=True)
     placeholder = models.CharField(blank=True, null=True, max_length=100)
     public_name = models.CharField(max_length=100, blank=True, null=True, unique=True)
     country_code = models.CharField(max_length=100, blank=True, null=True)

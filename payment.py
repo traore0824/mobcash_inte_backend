@@ -94,6 +94,28 @@ def get_network_id(name):
         connect_pro_logger.critical(f"Erreur de recuperation de resaeu {e}")
 
 
+def fee_wave(montant):
+    """Calcule 1% arrondi au multiple de 5 supérieur"""
+    frais = montant * 0.01
+    if frais % 5 != 0:
+        frais = ((frais // 5) + 1) * 5
+    return int(frais)
+
+
+def total_amount_to_send_wave(montant_souhaite):
+    """
+    Calcule combien il faut envoyer pour que le destinataire reçoive `montant_souhaite`
+    après déduction des frais Wave.
+    """
+    montant = montant_souhaite
+    while True:
+        frais = fee_wave(montant)
+        recu = montant - frais
+        if montant_souhaite <= recu <= montant_souhaite + 1:
+            return int(montant)
+        montant += 1  # on essaie un peu plus jusqu’à atteindre la bonne valeur
+
+
 def connect_withdrawal(transaction: Transaction):
     token = connect_pro_token()
     if not token:
@@ -103,11 +125,17 @@ def connect_withdrawal(transaction: Transaction):
         "Content-Type": "application/json",
     }
     url = CONNECT_PRO_BASE_URL + "/api/payments/user/transactions/"
+
+    amount = transaction.amount
+    if transaction.network.name == "wave" and not transaction.network.customer_pay_fee:
+        transaction.net_payable_amout = total_amount_to_send_wave(amount)
+        transaction.save()
+        amount = transaction.net_payable_amout
     transaction.save()
 
     data = {
         "type": "deposit",
-        "amount": f"{transaction.amount}",
+        "amount": f"{amount}",
         "recipient_phone": (
             transaction.phone_number[3:]
             if len(transaction.phone_number) > 10
@@ -392,7 +420,7 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                     xbet_response_data = response.get("data")
                 else:
                     response = MobCashExternalService().create_deposit(transaction=transaction)
-                    connect_pro_logger.info(
+                    connect_pro_logger.info( 
                         f"Reponse de l'api de {transaction.app.name}: {response}"
                     )
                     xbet_response_data = response

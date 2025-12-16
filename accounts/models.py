@@ -46,6 +46,7 @@ class User(AbstractUser):
         max_length=256,
         unique=False,
     )
+    email = models.EmailField(unique=True, blank=True, null=True)
     otp = models.CharField(max_length=100, null=True)
     otp_created_at = models.DateTimeField(blank=True, null=True)
     is_block = models.BooleanField(default=False)
