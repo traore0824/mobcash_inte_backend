@@ -914,7 +914,7 @@ class MobCashExternalService:
         return status == 'FAILED'
 
     def create_recharge_request_from_request(
-        self, request_data: Dict, request_files: Any, payment_proof_url:str
+        self, request_data: Dict
     ) -> Dict[str, Any]:
         """
         Créer une demande de recharge de balance Mobcash en passant directement les données de la requête
