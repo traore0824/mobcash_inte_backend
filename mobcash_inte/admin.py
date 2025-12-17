@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from accounts.models import Advertisement
-from .models import Bonus, Caisse, Coupon, IDLink, Network, Notification, Reward, Setting, TestModel, Transaction, UserPhone, WebhookLog
+from .models import Bonus, Caisse, Coupon, IDLink, Network, Notification, RechargeMobcashBalance, Reward, Setting, TestModel, Transaction, UserPhone, WebhookLog
 
 
 @admin.register(Network)
@@ -344,3 +344,4 @@ admin.site.register(Advertisement)
 admin.site.register(IDLink)
 admin.site.register(Coupon)
 admin.site.register(TestModel)
+admin.site.register(RechargeMobcashBalance)
