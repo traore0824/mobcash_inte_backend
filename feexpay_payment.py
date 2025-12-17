@@ -139,17 +139,17 @@ def feexpay_deposit(transaction: Transaction):
         return
     
     # Déterminer l'URL selon le réseau
-        url = None
+    url = None
     network_name = transaction.network.name.lower() if transaction.network else None
     
     if network_name == "moov":
-            url = "https://api.feexpay.me/api/transactions/public/requesttopay/moov"
+        url = "https://api.feexpay.me/api/transactions/public/requesttopay/moov"
         connect_pro_logger.info("debut de creatuion de transaction feexpay MOOV")
     elif network_name == "mtn":
-            url = "https://api.feexpay.me/api/transactions/public/requesttopay/mtn"
+        url = "https://api.feexpay.me/api/transactions/public/requesttopay/mtn"
         connect_pro_logger.info("debut de creatuion de transaction feexpay MTN")
-        else:
-            url = "https://api.feexpay.me/api/transactions/public/requesttopay/celtiis_bj"
+    else:
+        url = "https://api.feexpay.me/api/transactions/public/requesttopay/celtiis_bj"
         connect_pro_logger.info("debut de creatuion de transaction feexpay Celtiis")
     
     if not url:
@@ -157,7 +157,7 @@ def feexpay_deposit(transaction: Transaction):
         return
     
     # Préparer les données
-        amount = int(float(transaction.amount)) if transaction.amount else 0
+    amount = int(float(transaction.amount)) if transaction.amount else 0
     if amount <= 0:
         connect_pro_logger.error(f"Montant invalide: {transaction.amount}")
         return
@@ -182,11 +182,11 @@ def feexpay_deposit(transaction: Transaction):
             full_name_parts = user.full_name().split() if user.full_name() else []
             first_name = full_name_parts[0] if full_name_parts else ""
             last_name = " ".join(full_name_parts[1:]) if len(full_name_parts) > 1 else ""
-        
-        data = {
+    
+    data = {
         "phoneNumber": phone_number,
         "amount": amount,
-            "shop": shop,
+        "shop": shop,
         "description": f"Demande de paiement - Transaction {transaction.reference}",
         "firstName": first_name,
         "lastName": last_name,
@@ -194,7 +194,7 @@ def feexpay_deposit(transaction: Transaction):
     }
     
     headers = {
-            "Content-Type": "application/json",
+        "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}",
     }
     
@@ -202,7 +202,7 @@ def feexpay_deposit(transaction: Transaction):
         response = requests.post(url=url, json=data, headers=headers, timeout=45)
         connect_pro_logger.info(f" feexpay response {response.json()}")
         
-            response_data = response.json()
+        response_data = response.json()
         
         # Sauvegarder la référence Feexpay dans la transaction
         feexpay_reference = response_data.get("reference") or response_data.get("data", {}).get("reference")
@@ -233,7 +233,7 @@ def feexpay_withdrawall_process(transaction: Transaction, disbursements=False):
         # Importer xbet_withdrawal_process depuis payment.py
         from payment import xbet_withdrawal_process
         response = xbet_withdrawal_process(transaction=transaction)
-        else:
+    else:
         response = True
     
     if response == True:
@@ -273,26 +273,26 @@ def feexpay_webhook(data):
     reference = data.get("externalId") or data.get("reference") or data.get("uid")
     transaction_status = data.get("status")
 
-        if not reference:
+    if not reference:
         connect_pro_logger.info("Webhook Feexpay reçu sans référence")
-            return
+        return
 
-        with db_transaction.atomic():
+    with db_transaction.atomic():
         # Chercher par reference ou public_id (comme Connect cherche par public_id)
         transaction = (
             Transaction.objects.filter(
                 Q(reference=reference) | Q(public_id=reference)
             )
-                .exclude(Q(status="error") | Q(status="accept"))
+            .exclude(Q(status="error") | Q(status="accept"))
             .select_for_update(nowait=True)
-                .first()
-            )
+            .first()
+        )
 
         if not transaction:
             connect_pro_logger.info(
                 f"La transaction avec reference {reference} n'existe pas ou a ete deja traiter"
             )
-                    return
+            return
                 
         transaction.wehook_receive_at = timezone.now()
         # Convertir data en string pour TextField (comme dans connect_pro_webhook)
@@ -300,7 +300,7 @@ def feexpay_webhook(data):
         transaction.webhook_data = json.dumps(data) if isinstance(data, dict) else str(data)
         connect_pro_logger.info(f"la reference qui a ete transmi {reference}")
         
-                setting = Setting.objects.first()
+        setting = Setting.objects.first()
         
         # Adapter les statuts Feexpay aux statuts Connect
         if transaction_status == "FAILED" or transaction_status == "failed" or transaction_status == "cancelled":

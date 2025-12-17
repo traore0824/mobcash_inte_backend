@@ -914,9 +914,7 @@ class MobCashExternalService:
         return status == 'FAILED'
 
     def create_recharge_request_from_request(
-        self,
-        request_data: Dict,
-        request_files: Any
+        self, request_data: Dict, request_files: Any, payment_proof_url:str
     ) -> Dict[str, Any]:
         """
         Créer une demande de recharge de balance Mobcash en passant directement les données de la requête
@@ -935,41 +933,12 @@ class MobCashExternalService:
 
         # Préparer les données form-data directement depuis request.data
         data = {
-            "amount": str(request_data.get('amount', '')),
-            "payment_method": request_data.get('payment_method', ''),
-            "payment_reference": request_data.get('payment_reference', ''),
+            "amount": str(request_data.get("amount", "")),
+            "payment_method": request_data.get("payment_method", ""),
+            "payment_reference": request_data.get("payment_reference", ""),
+            "payment_proof_url": request_data.get("payment_proof"),
         }
 
-        if request_data.get('notes'):
-            data["notes"] = request_data.get('notes')
-
-        # Préparer les fichiers en multipart/form-data
-        # S'assurer que les données textuelles sont bien encodées en UTF-8
-        files = {}
-        if request_files and 'payment_proof' in request_files:
-            payment_proof_file = request_files['payment_proof']
-            
-            # S'assurer que le fichier est au début
-            if hasattr(payment_proof_file, 'seek'):
-                payment_proof_file.seek(0)
-            
-            file_name = getattr(payment_proof_file, 'name', 'payment_proof')
-            # Utiliser le content_type original du fichier
-            content_type = getattr(payment_proof_file, 'content_type', 'application/octet-stream')
-            
-            # Passer le fichier en multipart (requests gère automatiquement le binaire)
-            files["payment_proof"] = (
-                file_name,
-                payment_proof_file,
-                content_type
-            )
-            
-            logger.debug(
-                f"[MOBCASH] [RECHARGE_REQUEST] Fichier préparé pour multipart: {file_name}, type: {content_type}"
-            )
-
-        # Pour multipart, on génère la signature avec un body vide
-        # (la signature HMAC standard ne fonctionne pas avec multipart)
         timestamp = int(time.time())
         signature = self._generate_signature('POST', endpoint, '', timestamp)
 
@@ -980,39 +949,14 @@ class MobCashExternalService:
         }
         # Ne pas mettre Content-Type, requests le fera automatiquement pour multipart
 
-        logger.info(
-            f"[MOBCASH] [REQUEST_START] POST {endpoint}",
-            extra={
-                'url': url,
-                'has_data': bool(data),
-                'has_files': bool(files)
-            }
-        )
-
         try:
-            # Logger les détails de la requête avant l'envoi
-            logger.debug(
-                f"[MOBCASH] [RECHARGE_REQUEST] Détails de la requête",
-                extra={
-                    'data': data,
-                    'has_files': bool(files),
-                    'file_name': files.get('payment_proof', [None])[0] if files else None,
-                    'headers': {k: v for k, v in headers.items() if k != 'X-Signature'}  # Ne pas logger la signature
-                }
-            )
-            
+
             # Envoyer en multipart/form-data
             # S'assurer que les données textuelles sont bien des strings UTF-8
-            data_utf8 = {}
-            for key, value in data.items():
-                if value is not None:
-                    # Convertir en string et s'assurer que c'est UTF-8
-                    data_utf8[key] = str(value).encode('utf-8').decode('utf-8')
-            
+
             response = requests.post(
                 url,
-                data=data_utf8,
-                files=files if files else None,
+                data=data,
                 headers=headers,
                 timeout=self.timeout
             )

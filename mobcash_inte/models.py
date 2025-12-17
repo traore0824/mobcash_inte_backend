@@ -351,7 +351,7 @@ class RechargeMobcashBalance(models.Model):
     )
     payment_reference = models.CharField(max_length=255)
     notes = models.TextField(blank=True, null=True)
-    payment_proof = models.FileField(upload_to="payment_proofs/", blank=True, null=True)
+    payment_proof = models.URLField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True

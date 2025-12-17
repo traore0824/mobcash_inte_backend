@@ -1488,28 +1488,27 @@ class RechargeMobcashBalanceView(generics.ListCreateAPIView):
         """
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        
+
         # Créer l'instance
         instance = serializer.save()
-        
+
         # Appeler l'API MobCash en passant directement request.data et request.FILES
         try:
             mobcash_service = MobCashExternalService()
             result = mobcash_service.create_recharge_request_from_request(
-                request_data=request.data,
-                request_files=request.FILES
+                request_data=request.data
             )
-            
+
             connect_pro_logger.info(
                 f"Réponse de l'API MobCash pour la recharge {instance.payment_reference}: {result}"
             )
-            
+
             # Si l'API retourne une erreur, on peut logger mais on garde l'instance créée
             if not result.get('success'):
                 connect_pro_logger.error(
                     f"Erreur lors de l'envoi à l'API MobCash pour {instance.payment_reference}: {result.get('error')}"
                 )
-            
+
         except Exception as e:
             connect_pro_logger.error(
                 f"Exception lors de l'appel à l'API MobCash pour {instance.payment_reference}: {str(e)}",
