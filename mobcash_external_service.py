@@ -928,7 +928,8 @@ class MobCashExternalService:
             Dict avec 'success', 'data', 'error', etc.
         """
         endpoint = "/api/v1/wallets/recharge-requests/"
-
+        request_data["payment_proof"]=None 
+        request_data["payment_proof_url"] = request_data.get("payment_proof")
         result = self._make_request("POST", endpoint, data=request_data)
 
         return result
