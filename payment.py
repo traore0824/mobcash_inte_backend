@@ -127,7 +127,7 @@ def connect_withdrawal(transaction: Transaction):
     url = CONNECT_PRO_BASE_URL + "/api/payments/user/transactions/"
 
     amount = transaction.amount
-    if transaction.network.name == "wave" and not transaction.network.customer_pay_fee:
+    if transaction.network.name.lower() == "wave" and not transaction.network.customer_pay_fee:
         transaction.net_payable_amout = total_amount_to_send_wave(amount)
         transaction.save()
         amount = transaction.net_payable_amout
