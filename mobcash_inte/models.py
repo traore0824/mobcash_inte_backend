@@ -350,7 +350,7 @@ class RechargeMobcashBalance(models.Model):
         max_length=50, choices=PAYMENT_METHOD_CHOICES, default="MOBILE_MONEY"
     )
     payment_reference = models.CharField(max_length=255)
-    notes = models.TextField(blank=True, null=True)
+    notes = models.TextField(blank=True, null=True, default="Aucune note n'a ete enregistrer")
     payment_proof = models.URLField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(
