@@ -113,7 +113,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://admin.slaterci.net",
     "https://slaterci.net",
     "https://slaterci-mobile-app.vercel.app", 
-    "https://www.slaterci.net/"
+    "https://www.slaterci.net"
 ]
 
 
