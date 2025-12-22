@@ -913,6 +913,58 @@ class MobCashExternalService:
         status = self.get_transaction_status(transaction_uuid)
         return status == 'FAILED'
 
+    # ========================================================================
+    # RÉCUPÉRER LE SOLDE DU WALLET
+    # ========================================================================
+
+    def get_wallet_balance(self) -> float:
+        """
+        Récupérer le solde du wallet MobCash
+
+        GET /api/v1/wallets/balance/
+
+        Returns:
+            float: Le solde du wallet en float, 0.0 en cas d'erreur
+        """
+        endpoint = "/api/v1/wallets/balance/"
+
+        logger.info(
+            "[MOBCASH] [GET_WALLET_BALANCE_START] Récupération du solde du wallet"
+        )
+
+        result = self._make_request("GET", endpoint)
+
+        if result.get("success"):
+            data = result.get("data", {})
+            balance_str = data.get("balance", "0.00")
+            
+            try:
+                balance = float(balance_str)
+                logger.info(
+                    "[MOBCASH] [GET_WALLET_BALANCE_SUCCESS] Solde récupéré",
+                    extra={
+                        "balance": balance,
+                        "currency": data.get("currency"),
+                        "user_email": data.get("user_email")
+                    }
+                )
+                return balance
+            except (ValueError, TypeError) as e:
+                logger.error(
+                    "[MOBCASH] [GET_WALLET_BALANCE_ERROR] Erreur de conversion du solde",
+                    extra={
+                        "error": str(e),
+                        "balance_str": balance_str
+                    }
+                )
+                return 0.0
+        else:
+            logger.error(
+                "[MOBCASH] [GET_WALLET_BALANCE_FAILED] Échec récupération solde",
+                extra={"error": result.get("error")}
+            )
+            return 0.0
+
     def create_recharge_request_from_request(
         self, request_data: Dict
     ) -> Dict[str, Any]:
@@ -933,3 +985,4 @@ class MobCashExternalService:
         result = self._make_request("POST", endpoint, data=request_data)
 
         return result
+        
