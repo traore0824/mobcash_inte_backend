@@ -78,6 +78,7 @@ def get_network_id(name):
     token = connect_pro_token()
     if not token:
         return None
+
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
@@ -85,13 +86,18 @@ def get_network_id(name):
     url = CONNECT_PRO_BASE_URL + "/api/payments/networks/"
     try:
         response = requests.get(url, headers=headers, timeout=30)
-        connect_pro_logger.debug(f"la liste des resaeu de connect {response.json()}")
-        results = response.json().get("results")
+        connect_pro_logger.debug(f"Liste des réseaux ConnectPro : {response.json()}")
+        results = response.json().get("results", [])
+
+        # Comparaison insensible à la casse
         for data in results:
-            if data.get("code") == name:
+            if data.get("code", "").lower() == name.lower():
                 return data.get("uid")
+
     except Exception as e:
-        connect_pro_logger.critical(f"Erreur de recuperation de resaeu {e}")
+        connect_pro_logger.critical(f"Erreur de récupération de réseau : {e}")
+
+    return None
 
 
 def fee_wave(montant):
