@@ -765,8 +765,31 @@ def check_solde(transaction_id):
                                 transaction.amount
                             )
                         caisse.save()
+                elif not hash_key:
+                    # Si app n'a pas de hash, utiliser MobCashExternalService
+                    connect_pro_logger.info(
+                        f"[CHECK_SOLDE] App {transaction.app.name} n'a pas de hash, utilisation de MobCashExternalService.get_wallet_balance()"
+                    )
+                    mobcash_service = MobCashExternalService()
+                    balance = mobcash_service.get_wallet_balance()
+                    if balance is not None and balance >= 0:
+                        caisse.solde = float(balance)
+                        caisse.save()
+                        connect_pro_logger.info(
+                            f"[CHECK_SOLDE] Solde récupéré via MobCashExternalService: {balance}"
+                        )
+                    else:
+                        # Fallback: ancienne logique de calcul
+                        connect_pro_logger.warning(
+                            f"[CHECK_SOLDE] Échec récupération solde via MobCashExternalService, utilisation de l'ancienne logique"
+                        )
+                        if transaction.type_trans == "deposit":
+                            caisse.solde = float(caisse.solde) - float(transaction.amount)
+                        elif transaction.type_trans == "withdrawal":
+                            caisse.solde = float(caisse.solde) + float(transaction.amount)
+                        caisse.save()
                 else:
-                    # Fallback: credentials manquants, utiliser l'ancienne logique
+                    # Fallback: credentials manquants (cashdesk_id ou cashier_pass), utiliser l'ancienne logique
                     if transaction.type_trans == "deposit":
                         caisse.solde = float(caisse.solde) - float(transaction.amount)
                     elif transaction.type_trans == "withdrawal":
@@ -779,20 +802,6 @@ def check_solde(transaction_id):
                 elif transaction.type_trans == "withdrawal":
                     caisse.solde = float(caisse.solde) + float(transaction.amount)
                 caisse.save()
-
-            setting = Setting.objects.first()
-            # if caisse.solde < setting.minimum_solde:
-            #     user = BotUser.objects.filter(chat_id=5475155671).first()
-            #     if user:
-            #         send_telegram_message(
-            #             content=(
-            #                 f"Il ne vous reste plus que {caisse.solde} FCFA "
-            #                 f"sur votre Caisse {caisse.bet_app.public_name}. "
-            #                 f"Pensez à recharger votre compte"
-            #             ),
-            #             user=user,
-            #         )
-
             transaction.fond_calculate = True
             transaction.save()
             transaction.refresh_from_db()

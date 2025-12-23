@@ -1518,4 +1518,97 @@ class RechargeMobcashBalanceView(generics.ListCreateAPIView):
             serializer.data,
             status=status.HTTP_201_CREATED,
                 )
+
+
+class UpdateCaisseBalanceView(decorators.APIView):
+    """
+    API simple pour récupérer le solde via MobCashExternalService
+    et mettre à jour la Caisse.
+    Pas de permissions requises.
+    """
+    
+    def get(self, request, *args, **kwargs):
+        try:
+            connect_pro_logger.info("[UPDATE_CAISSE_BALANCE] Début de la mise à jour du solde")
+            
+            # Récupérer le solde via MobCashExternalService
+            mobcash_service = MobCashExternalService()
+            balance = mobcash_service.get_wallet_balance()
+            
+            if balance is None or balance < 0:
+                connect_pro_logger.error(
+                    f"[UPDATE_CAISSE_BALANCE] Échec récupération solde: {balance}"
+                )
+                return Response(
+                    {
+                        "success": False,
+                        "error": "Impossible de récupérer le solde",
+                        "balance": balance
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Mettre à jour toutes les caisses avec le nouveau solde
+            caisses = Caisse.objects.all()
+            updated_count = 0
+            
+            if caisses.exists():
+                for caisse in caisses:
+                    caisse.solde = float(balance)
+                    caisse.updated_at = timezone.now()
+                    caisse.save()
+                    updated_count += 1
+                connect_pro_logger.info(
+                    f"[UPDATE_CAISSE_BALANCE] {updated_count} caisse(s) mise(s) à jour avec le solde {balance}"
+                )
+            else:
+                # Créer une caisse par défaut si aucune n'existe
+                # On a besoin d'un bet_app, donc on prend le premier disponible
+                first_app = AppName.objects.first()
+                if first_app:
+                    Caisse.objects.create(
+                        solde=float(balance),
+                        bet_app=first_app,
+                        updated_at=timezone.now()
+                    )
+                    updated_count = 1
+                    connect_pro_logger.info(
+                        f"[UPDATE_CAISSE_BALANCE] Caisse créée avec le solde {balance} pour l'app {first_app.name}"
+                    )
+                else:
+                    connect_pro_logger.error(
+                        "[UPDATE_CAISSE_BALANCE] Aucune app disponible pour créer une caisse"
+                    )
+                    return Response(
+                        {
+                            "success": False,
+                            "error": "Aucune app disponible pour créer une caisse"
+                        },
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            
+            return Response(
+                {
+                    "success": True,
+                    "balance": float(balance),
+                    "updated_caisses": updated_count,
+                    "message": f"Solde mis à jour avec succès: {balance}"
+                },
+                status=status.HTTP_200_OK
+            )
+            
+        except Exception as e:
+            connect_pro_logger.error(
+                f"[UPDATE_CAISSE_BALANCE] Erreur lors de la mise à jour: {str(e)}",
+                exc_info=True
+            )
+            return Response(
+                {
+                    "success": False,
+                    "error": str(e)
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
 # Create your views here.
