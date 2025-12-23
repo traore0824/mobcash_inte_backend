@@ -1064,7 +1064,21 @@ class StatisticsView(decorators.APIView):
         total_withdrawals_count = withdrawals.count()
 
         # Volume net
-        net_volume = total_deposits_amount - total_withdrawals_amount
+        # Récupérer toutes les caisses avec leurs apps
+        caisses = Caisse.objects.select_related('bet_app').all()
+        
+        # Vérifier si au moins une app a un hash
+        has_app_with_hash = any(caisse.bet_app.hash for caisse in caisses if caisse.bet_app)
+        
+        if has_app_with_hash:
+            # Si au moins une app a un hash, retourner la somme des soldes
+            net_volume = sum(float(caisse.solde) for caisse in caisses)
+        else:
+            # Sinon, retourner le premier solde (ou 0 si aucune caisse)
+            if caisses.exists():
+                net_volume = float(caisses.first().solde)
+            else:
+                net_volume = 0.0 
 
         # Évolution par période
         evolution_daily = (
