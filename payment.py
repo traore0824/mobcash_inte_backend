@@ -268,7 +268,14 @@ def deposit_connect(transaction: Transaction):
         connect_pro_logger.info(" Test de transaction par USSD")
         url = CONNECT_PRO_BASE_URL + "/api/payments/user/transactions/"
         amount = 0
-        if ((
+        # Vérifier si MTN_NOT_FEE est activé pour MTN en CI
+        mtn_not_fee = os.getenv("MTN_NOT_FEE", "False").lower() == "true"
+        is_mtn_ci = transaction.network.name == "mtn" and transaction.network.country_code.lower() == "ci"
+        
+        if is_mtn_ci and mtn_not_fee:
+            # Pas de fee pour MTN si MTN_NOT_FEE=True
+            amount = transaction.amount
+        elif ((
             transaction.network.name == "moov" or transaction.network.name == "mtn"
         ) or transaction.network.name == "orange") and transaction.network.country_code.lower()=="ci":
             amount = round(transaction.amount - (transaction.amount / 100))
