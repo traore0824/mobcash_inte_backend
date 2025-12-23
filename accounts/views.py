@@ -64,9 +64,9 @@ def save_user_location(request):
 
 @api_view(["POST"])
 def registration(request):
-        serializer = UserRegistrationSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = serializer.save()
+    serializer = UserRegistrationSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    user = serializer.save()
     return Response(
         UserRegistrationSerializer(user).data, status=status.HTTP_201_CREATED
     )
