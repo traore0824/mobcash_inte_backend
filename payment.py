@@ -272,8 +272,15 @@ def deposit_connect(transaction: Transaction):
         mtn_not_fee = os.getenv("MTN_NOT_FEE", "False").lower() == "true"
         is_mtn_ci = transaction.network.name == "mtn" and transaction.network.country_code.lower() == "ci"
         
+        # Vérifier si MOOV_NOT_FEE est activé pour MOOV en CI
+        moov_not_fee = os.getenv("MOOV_NOT_FEE", "False").lower() == "true"
+        is_moov_ci = transaction.network.name == "moov" and transaction.network.country_code.lower() == "ci"
+        
         if is_mtn_ci and mtn_not_fee:
             # Pas de fee pour MTN si MTN_NOT_FEE=True
+            amount = transaction.amount
+        elif is_moov_ci and moov_not_fee:
+            # Pas de fee pour MOOV si MOOV_NOT_FEE=True
             amount = transaction.amount
         elif ((
             transaction.network.name == "moov" or transaction.network.name == "mtn"
