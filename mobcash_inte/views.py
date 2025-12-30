@@ -1066,17 +1066,17 @@ class StatisticsView(decorators.APIView):
         # Volume net
         # Récupérer toutes les caisses avec leurs apps
         caisses = Caisse.objects.select_related('bet_app').all()
-        
+
         # Vérifier si au moins une app a un hash
         has_app_with_hash = any(caisse.bet_app.hash for caisse in caisses if caisse.bet_app)
-        
+
         if has_app_with_hash:
             # Si au moins une app a un hash, retourner la somme des soldes
             net_volume = sum(float(caisse.solde) for caisse in caisses)
         else:
             # Sinon, retourner le premier solde (ou 0 si aucune caisse)
             if caisses.exists():
-                net_volume = float(caisses.first().solde)
+                net_volume = MobCashExternalService().get_wallet_balance()
             else:
                 net_volume = 0.0 
 
