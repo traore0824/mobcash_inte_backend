@@ -76,6 +76,7 @@ else
     exit 1
 fi
 
+
 # Vérifier que Python est disponible
 if ! command -v python &> /dev/null && ! command -v python3 &> /dev/null; then
     error "Python n'est pas installé ou n'est pas dans le PATH"
