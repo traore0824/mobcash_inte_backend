@@ -45,7 +45,7 @@ urlpatterns = [
     path("test-views", views.TestAPIViews.as_view()),
     path("recharge-mobcash-balance", views.RechargeMobcashBalanceView.as_view()),
     path("update-caisse-balance", views.UpdateCaisseBalanceView.as_view()),
-    path("admin/process-transaction", views.ProcessTransactionView.as_view()),
-    path("admin/update-transaction-status", views.UpdateTransactionStatusView.as_view()),
-    path("admin/transaction-status-history", views.TransactionStatusHistoryView.as_view()),
+    path("process-transaction", views.ProcessTransactionView.as_view()),
+    path("update-transaction-status", views.UpdateTransactionStatusView.as_view()),
+    path("transaction-status-history", views.TransactionStatusHistoryView.as_view()),
 ]
