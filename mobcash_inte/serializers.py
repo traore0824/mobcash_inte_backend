@@ -271,6 +271,15 @@ class ChangeTransactionStatusSerializer(serializers.Serializer):
     reference = serializers.CharField()
 
 
+class ProcessTransactionSerializer(serializers.Serializer):
+    reference = serializers.CharField(required=True)
+
+
+class UpdateTransactionStatusSerializer(serializers.Serializer):
+    reference = serializers.CharField(required=True)
+    new_status = serializers.ChoiceField(choices=TRANS_STATUS, required=True)
+
+
 class BotWithdrawalTransactionSerializer(serializers.ModelSerializer):
     telegram_user = SmallBotUserSerializer(read_only=True)
 

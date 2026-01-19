@@ -237,6 +237,8 @@ class Transaction(models.Model):
     api = models.CharField(max_length=100, blank=True, null=True)
     event_send= models.BooleanField(default=False)
     fond_calculate = models.BooleanField(default=False)
+    all_status = models.JSONField(default=list, blank=True)
+    fixed_by_admin = models.BooleanField(default=False)
 
     class Meta:
         verbose_name = "Transaction"

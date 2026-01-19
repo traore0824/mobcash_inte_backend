@@ -32,6 +32,32 @@ payment_logger = logging.getLogger("Payment transaction process")
 logger = logging.getLogger(__name__)
 
 
+def track_status_change(transaction: Transaction, new_status: str, source: str = "system", admin_id: int = None):
+    """
+    Fonction utilitaire pour tracker les changements de statut d'une transaction.
+    
+    Args:
+        transaction: Instance de Transaction
+        new_status: Nouveau statut
+        source: "system" ou "admin"
+        admin_id: ID de l'admin si source="admin"
+    """
+    if not hasattr(transaction, 'all_status') or transaction.all_status is None:
+        transaction.all_status = []
+    
+    status_entry = {
+        "status": new_status,
+        "timestamp": timezone.now().isoformat(),
+        "source": source
+    }
+    
+    if source == "admin" and admin_id:
+        status_entry["admin_id"] = admin_id
+    
+    transaction.all_status.append(status_entry)
+    transaction.save(update_fields=['all_status'])
+
+
 def connect_base_url():
     setting = Setting.objects.first()
     return setting.connect_pro_base_url or "https://connect.turaincash.com"
@@ -419,6 +445,7 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
 
             try:
                 transaction.status = "init_payment"
+                track_status_change(transaction, "init_payment", source="system")
                 transaction.save()
                 app = transaction.app
                 servculAPI = init_mobcash(app_name=app)
@@ -453,6 +480,7 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                     )
                     transaction.validated_at = timezone.now()
                     transaction.status = "accept"
+                    track_status_change(transaction, "accept", source="system")
                     transaction.save()
 
                     # Appel de la tâche Celery pour les opérations lentes (notifications, bonus, etc.)
@@ -513,6 +541,7 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
             try:
                 connect_pro_logger.info(f"Operation success")
                 transaction.status = "accept"
+                track_status_change(transaction, "accept", source="system")
                 transaction.save()
 
                 # Appel de la tâche Celery pour les notifications (retrait)
@@ -538,6 +567,7 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
 def webhook_transaction_failled(transaction: Transaction):
     payment_logger.info(f"Transaction with ")
     transaction.status = "error"
+    track_status_change(transaction, "error", source="system")
     transaction.save()
     if transaction.type_trans == "reward":
         reward_failed_process(transaction=transaction)
@@ -871,6 +901,7 @@ def xbet_withdrawal_process(transaction: Transaction):
             or xbet_response_data.get("status") == 401
         ):
             transaction.status = "error"
+            track_status_change(transaction, "error", source="system")
             transaction.save()
             transaction.refresh_from_db()
             connect_pro_logger.info("L'appelle a ete success")
@@ -879,6 +910,7 @@ def xbet_withdrawal_process(transaction: Transaction):
             amount = float(xbet_response_data.get("Summa")) * (-1)
             transaction.amount = amount
             transaction.status = "init_payment"
+            track_status_change(transaction, "init_payment", source="system")
             transaction.validated_at = timezone.now()
             transaction.save()
             transaction.refresh_from_db()

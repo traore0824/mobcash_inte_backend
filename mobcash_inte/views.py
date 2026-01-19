@@ -45,6 +45,8 @@ from mobcash_inte.serializers import (
     BotWithdrawalTransactionSerializer,
     CaisseSerializer,
     ChangeTransactionStatusSerializer,
+    ProcessTransactionSerializer,
+    UpdateTransactionStatusSerializer,
     CouponSerializer,
     CreateAppNameSerializer,
     CreateSettingSerializer,
@@ -69,7 +71,7 @@ from django.db import transaction
 from django.db.models import F
 from rest_framework.response import Response
 from django.utils import timezone
-from payment import connect_balance, connect_pro_status, connect_pro_webhook, disbursment_process, payment_fonction, webhook_transaction_failled, webhook_transaction_success, feexpay_webhook
+from payment import connect_balance, connect_pro_status, connect_pro_webhook, disbursment_process, payment_fonction, webhook_transaction_failled, webhook_transaction_success, feexpay_webhook, track_status_change, connect_pro_withd_process, feexpay_withdrawall_process
 from django.db.models import Sum, Count, Q, Avg
 from django.db.models.functions import TruncDate, TruncWeek, TruncMonth, TruncYear
 
@@ -302,6 +304,7 @@ class CreateDepositTransactionViews(generics.CreateAPIView):
             type_trans="deposit",
         )
         transaction.api = transaction.network.deposit_api
+        track_status_change(transaction, transaction.status, source="system")
         transaction.save()
         payment_fonction(reference=transaction.reference)
         transaction.refresh_from_db()
@@ -329,7 +332,8 @@ class CreateBonusDepositTransactionViews(generics.CreateAPIView):
             type_trans="reward",
         )
         # transaction.api = transaction.network.deposit_api
-        # transaction.save()
+        track_status_change(transaction, transaction.status, source="system")
+        transaction.save()
         webhook_transaction_success(transaction=transaction, setting=Setting.objects.first())
         transaction.refresh_from_db()
         return Response(
@@ -370,6 +374,8 @@ class RewardTransactionViews(generics.CreateAPIView):
             user=self.request.user,
             type_trans="reward",
         )
+        track_status_change(transaction, transaction.status, source="system")
+        transaction.save()
         bonus = bonus.update(bonus_with=True)
         payment_fonction(reference=transaction.reference)
         return Response(
@@ -697,6 +703,7 @@ class ChangeTransactionStatus(decorators.APIView):
             elif transaction.status == "init_payment":
                 if transaction.type_trans == "withdrawal":
                     transaction.status = "accept"
+                    track_status_change(transaction, "accept", source="admin", admin_id=request.user.id)
                     transaction.save()
                 else:
                     webhook_transaction_success(transaction=transaction, setting=setting)
@@ -706,8 +713,11 @@ class ChangeTransactionStatus(decorators.APIView):
                 {"status": transaction.status}, status=status.HTTP_200_OK
             )
         else: 
-            transaction.status = serializer.validated_data.get("status")
-            transaction.save()
+            new_status = serializer.validated_data.get("status")
+            transaction.status = new_status
+            track_status_change(transaction, new_status, source="admin", admin_id=request.user.id)
+            transaction.fixed_by_admin = True
+            transaction.save(update_fields=['status', 'fixed_by_admin'])
             return Response(
                 {"status": transaction.status}, status=status.HTTP_200_OK
             )
@@ -750,6 +760,7 @@ class BotWithdrawalTransactionViews(generics.CreateAPIView):
             telegram_user=request.telegram_user,
         )
         transaction.api = transaction.network.withdrawal_api
+        track_status_change(transaction, transaction.status, source="system")
         transaction.save()
         payment_fonction(reference=transaction.reference)
         return Response(
@@ -772,6 +783,7 @@ class BotDepositTransactionViews(generics.CreateAPIView):
             source="bot",
         )
         transaction.api = transaction.network.deposit_api
+        track_status_change(transaction, transaction.status, source="system")
         transaction.save()
         payment_fonction(reference=transaction.reference)
         transaction.refresh_from_db()
@@ -794,6 +806,7 @@ class WithdrawalTransactionViews(generics.CreateAPIView):
             user=request.user,
         )
         transaction.api = transaction.network.withdrawal_api
+        track_status_change(transaction, transaction.status, source="system")
         transaction.save()
         payment_fonction(reference=transaction.reference)
         return Response(
@@ -1623,6 +1636,171 @@ class UpdateCaisseBalanceView(decorators.APIView):
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class ProcessTransactionView(decorators.APIView):
+    """
+    API 1: Traiter une transaction (dépôt ou retrait)
+    Permission: Admin uniquement
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, *args, **kwargs):
+        serializer = ProcessTransactionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reference = serializer.validated_data.get("reference")
+
+        transaction = Transaction.objects.filter(reference=reference).first()
+        if not transaction:
+            return Response(
+                {"error": "Transaction non trouvée"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            # Tracker le statut initial si pas encore tracké
+            if not transaction.all_status:
+                track_status_change(transaction, transaction.status, source="system")
+
+            # Traiter selon le type de transaction
+            if transaction.type_trans == "deposit" or transaction.type_trans == "reward":
+                # Pour les dépôts, utiliser webhook_transaction_success qui gère automatiquement betpay/mobcash
+                setting = Setting.objects.first()
+                webhook_transaction_success(transaction=transaction, setting=setting)
+            elif transaction.type_trans == "withdrawal":
+                # Pour les retraits, utiliser l'API appropriée selon transaction.api
+                if transaction.api == "connect":
+                    connect_pro_withd_process(transaction=transaction)
+                elif transaction.api == "feexpay":
+                    feexpay_withdrawall_process(transaction=transaction)
+                else:
+                    return Response(
+                        {"error": f"API de retrait non supportée: {transaction.api}"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            else:
+                return Response(
+                    {"error": f"Type de transaction non supporté: {transaction.type_trans}"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            transaction.refresh_from_db()
+            return Response(
+                TransactionDetailsSerializer(transaction).data,
+                status=status.HTTP_200_OK
+            )
+
+        except Exception as e:
+            connect_pro_logger.error(
+                f"Erreur lors du traitement de la transaction {reference}: {str(e)}",
+                exc_info=True
+            )
+            return Response(
+                {"error": f"Erreur lors du traitement: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class UpdateTransactionStatusView(decorators.APIView):
+    """
+    API 2: Changer le statut d'une transaction
+    Permission: Admin uniquement
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, *args, **kwargs):
+        serializer = UpdateTransactionStatusSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reference = serializer.validated_data.get("reference")
+        new_status = serializer.validated_data.get("new_status")
+
+        transaction = Transaction.objects.filter(reference=reference).first()
+        if not transaction:
+            return Response(
+                {"error": "Transaction non trouvée"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            old_status = transaction.status
+            
+            # Tracker le changement de statut avec source admin
+            track_status_change(
+                transaction=transaction,
+                new_status=new_status,
+                source="admin",
+                admin_id=request.user.id
+            )
+
+            # Mettre à jour le statut et marquer comme fixé par admin
+            transaction.status = new_status
+            transaction.fixed_by_admin = True
+            transaction.save(update_fields=['status', 'fixed_by_admin'])
+
+            transaction.refresh_from_db()
+            return Response(
+                {
+                    "message": f"Statut changé de '{old_status}' à '{new_status}'",
+                    "transaction": TransactionDetailsSerializer(transaction).data
+                },
+                status=status.HTTP_200_OK
+            )
+
+        except Exception as e:
+            connect_pro_logger.error(
+                f"Erreur lors du changement de statut pour {reference}: {str(e)}",
+                exc_info=True
+            )
+            return Response(
+                {"error": f"Erreur lors du changement de statut: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class TransactionStatusHistoryView(decorators.APIView):
+    """
+    API 3: Consulter la traçabilité des statuts d'une transaction
+    Permission: Admin uniquement
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def get(self, request, *args, **kwargs):
+        reference = request.GET.get("reference")
+        
+        if not reference:
+            return Response(
+                {"error": "Le paramètre 'reference' est requis"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        transaction = Transaction.objects.filter(reference=reference).first()
+        if not transaction:
+            return Response(
+                {"error": "Transaction non trouvée"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Retourner l'historique des statuts
+        all_status = transaction.all_status if transaction.all_status else []
+        
+        # Si pas d'historique mais que la transaction existe, ajouter le statut actuel
+        if not all_status:
+            all_status = [{
+                "status": transaction.status,
+                "timestamp": transaction.created_at.isoformat() if transaction.created_at else timezone.now().isoformat(),
+                "source": "system"
+            }]
+
+        return Response(
+            {
+                "reference": transaction.reference,
+                "current_status": transaction.status,
+                "fixed_by_admin": transaction.fixed_by_admin,
+                "status_history": all_status,
+                "total_status_changes": len(all_status)
+            },
+            status=status.HTTP_200_OK
+        )
 
 
 # Create your views here.
