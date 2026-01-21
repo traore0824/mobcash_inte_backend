@@ -117,7 +117,7 @@ class Network(models.Model):
     country_code = models.CharField(max_length=100, blank=True, null=True)
     indication = models.CharField(max_length=100, blank=True, null=True)
     image = models.TextField(blank=True, null=True)
-    withdrawal_message = models.CharField(max_length=150, blank=True, null=True)
+    withdrawal_message = models.TextField( blank=True, null=True)
     deposit_api = models.CharField(
         max_length=100, choices=API_CHOICES, default="connect"
     )
