@@ -304,9 +304,20 @@ Cette API retourne l'historique complet des statuts d'une transaction depuis sa 
 
 ### Query Parameters
 
+**Critère de recherche :**
+
 | Paramètre | Type | Requis | Description |
 |-----------|------|--------|-------------|
-| `reference` | string | Oui | Référence unique de la transaction |
+| `search` | string | Oui | Terme de recherche qui peut être une référence, un email ou un nom complet |
+
+**Note :** Le paramètre `search` recherche automatiquement dans :
+- **Référence de transaction** : Recherche partielle dans la référence (ex: "depot-ABC123XYZ")
+- **Email utilisateur** : Recherche partielle dans l'email (User ou TelegramUser)
+- **Nom complet** : Recherche partielle dans le nom complet :
+  - Si plusieurs mots fournis : premier mot dans `first_name`, reste dans `last_name`
+  - Si un seul mot : recherche dans `first_name` ou `last_name`
+
+La recherche est **insensible à la casse** et utilise une logique **OR** (si le terme correspond à n'importe quel champ, la transaction est retournée).
 
 ### Response Success (200 OK)
 
@@ -338,7 +349,25 @@ Cette API retourne l'historique complet des statuts d'une transaction depuis sa 
       "admin_id": 5
     }
   ],
-  "total_status_changes": 4
+  "total_status_changes": 4,
+  "user_email": "user@example.com",
+  "user_fullname": "Doe John",
+  "total_matching_transactions": 1
+}
+```
+
+**Si plusieurs transactions correspondent :**
+```json
+{
+  "reference": "depot-ABC123XYZ",
+  "current_status": "accept",
+  "fixed_by_admin": false,
+  "status_history": [...],
+  "total_status_changes": 3,
+  "user_email": "user@example.com",
+  "user_fullname": "Doe John",
+  "total_matching_transactions": 3,
+  "warning": "Attention: 3 transactions trouvées. Affichage de la première (référence: depot-ABC123XYZ)"
 }
 ```
 
@@ -358,7 +387,7 @@ Chaque entrée dans `status_history` contient :
 #### 400 Bad Request
 ```json
 {
-  "error": "Le paramètre 'reference' est requis"
+  "error": "Le paramètre 'search' est requis"
 }
 ```
 
@@ -369,15 +398,35 @@ Chaque entrée dans `status_history` contient :
 }
 ```
 
-### Exemple de Requête (cURL)
+### Exemples de Requêtes
 
+#### Recherche par référence
 ```bash
-curl -X GET "https://votre-domaine.com/api/admin/transaction-status-history/?reference=depot-ABC123XYZ" \
+curl -X GET "https://votre-domaine.com/api/admin/transaction-status-history/?search=depot-ABC123XYZ" \
   -H "Authorization: Token votre_token_admin"
 ```
 
-### Exemple de Requête (Python)
+#### Recherche par email
+```bash
+curl -X GET "https://votre-domaine.com/api/admin/transaction-status-history/?search=user@example.com" \
+  -H "Authorization: Token votre_token_admin"
+```
 
+#### Recherche par nom complet
+```bash
+curl -X GET "https://votre-domaine.com/api/admin/transaction-status-history/?search=John Doe" \
+  -H "Authorization: Token votre_token_admin"
+```
+
+#### Recherche partielle (un seul mot)
+```bash
+curl -X GET "https://votre-domaine.com/api/admin/transaction-status-history/?search=John" \
+  -H "Authorization: Token votre_token_admin"
+```
+
+### Exemples de Requêtes (Python)
+
+#### Recherche par référence
 ```python
 import requests
 
@@ -386,7 +435,39 @@ headers = {
     "Authorization": "Token votre_token_admin"
 }
 params = {
-    "reference": "depot-ABC123XYZ"
+    "search": "depot-ABC123XYZ"
+}
+
+response = requests.get(url, params=params, headers=headers)
+print(response.json())
+```
+
+#### Recherche par email
+```python
+import requests
+
+url = "https://votre-domaine.com/api/admin/transaction-status-history/"
+headers = {
+    "Authorization": "Token votre_token_admin"
+}
+params = {
+    "search": "user@example.com"
+}
+
+response = requests.get(url, params=params, headers=headers)
+print(response.json())
+```
+
+#### Recherche par nom complet
+```python
+import requests
+
+url = "https://votre-domaine.com/api/admin/transaction-status-history/"
+headers = {
+    "Authorization": "Token votre_token_admin"
+}
+params = {
+    "search": "John Doe"
 }
 
 response = requests.get(url, params=params, headers=headers)
@@ -452,7 +533,7 @@ POST /api/admin/process-transaction/
 }
 
 # 2. Vérifier l'historique
-GET /api/admin/transaction-status-history/?reference=depot-BLOCKED123
+GET /api/admin/transaction-status-history/?search=depot-BLOCKED123
 ```
 
 ### Cas 2 : Corriger manuellement une transaction en erreur
@@ -466,14 +547,35 @@ POST /api/admin/update-transaction-status/
 }
 
 # 2. Vérifier que fixed_by_admin est maintenant true
-GET /api/admin/transaction-status-history/?reference=depot-ERROR123
+GET /api/admin/transaction-status-history/?search=depot-ERROR123
 ```
 
 ### Cas 3 : Auditer une transaction
 
 ```bash
 # Consulter l'historique complet pour voir tous les changements
-GET /api/admin/transaction-status-history/?reference=depot-AUDIT123
+GET /api/admin/transaction-status-history/?search=depot-AUDIT123
+```
+
+### Cas 4 : Rechercher par email utilisateur
+
+```bash
+# Trouver toutes les transactions d'un utilisateur par son email
+GET /api/admin/transaction-status-history/?search=user@example.com
+```
+
+### Cas 5 : Rechercher par nom complet
+
+```bash
+# Trouver les transactions d'un utilisateur par son nom complet
+GET /api/admin/transaction-status-history/?search=John Doe
+```
+
+### Cas 6 : Recherche partielle
+
+```bash
+# Rechercher avec un seul mot (cherche dans référence, email, prénom ou nom)
+GET /api/admin/transaction-status-history/?search=John
 ```
 
 ---

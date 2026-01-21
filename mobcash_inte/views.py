@@ -1765,20 +1765,65 @@ class TransactionStatusHistoryView(decorators.APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def get(self, request, *args, **kwargs):
-        reference = request.GET.get("reference")
+        search = request.GET.get("search")
         
-        if not reference:
+        # Vérifier qu'un critère de recherche est fourni
+        if not search:
             return Response(
-                {"error": "Le paramètre 'reference' est requis"},
+                {"error": "Le paramètre 'search' est requis"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        transaction = Transaction.objects.filter(reference=reference).first()
-        if not transaction:
+        search_term = search.strip()
+        
+        # Construire la requête pour rechercher dans tous les champs pertinents
+        query = Q()
+        
+        # Recherche par référence (exacte ou partielle)
+        query |= Q(reference__icontains=search_term)
+        
+        # Recherche par email dans User ou TelegramUser
+        query |= Q(user__email__icontains=search_term) | Q(telegram_user__email__icontains=search_term)
+        
+        # Recherche par fullname (first_name + last_name) dans User ou TelegramUser
+        # Split le search_term en parties pour rechercher dans first_name et last_name
+        search_parts = search_term.split()
+        if len(search_parts) >= 2:
+            # Si plusieurs mots, chercher le premier dans first_name et le reste dans last_name
+            first_name_part = search_parts[0]
+            last_name_part = " ".join(search_parts[1:])
+            query |= (
+                Q(user__first_name__icontains=first_name_part, user__last_name__icontains=last_name_part) |
+                Q(telegram_user__first_name__icontains=first_name_part, telegram_user__last_name__icontains=last_name_part)
+            )
+        else:
+            # Si un seul mot, chercher dans first_name ou last_name
+            name_part = search_parts[0]
+            query |= (
+                Q(user__first_name__icontains=name_part) |
+                Q(user__last_name__icontains=name_part) |
+                Q(telegram_user__first_name__icontains=name_part) |
+                Q(telegram_user__last_name__icontains=name_part)
+            )
+
+        # Si plusieurs critères sont fournis, utiliser AND (tous doivent correspondre)
+        transactions = Transaction.objects.filter(query).select_related('user', 'telegram_user').distinct()
+        
+        transaction_count = transactions.count()
+        
+        if transaction_count == 0:
             return Response(
-                {"error": "Transaction non trouvée"},
+                {"error": "Aucune transaction trouvée avec les critères de recherche fournis"},
                 status=status.HTTP_404_NOT_FOUND
             )
+        
+        # Si plusieurs transactions correspondent, retourner un avertissement avec la première
+        if transaction_count > 1:
+            transaction = transactions.first()
+            warning_message = f"Attention: {transaction_count} transactions trouvées. Affichage de la première (référence: {transaction.reference})"
+        else:
+            transaction = transactions.first()
+            warning_message = None
 
         # Retourner l'historique des statuts
         all_status = transaction.all_status if transaction.all_status else []
@@ -1791,14 +1836,32 @@ class TransactionStatusHistoryView(decorators.APIView):
                 "source": "system"
             }]
 
+        # Récupérer les infos utilisateur pour la réponse
+        user_email = None
+        user_fullname = None
+        if transaction.user:
+            user_email = transaction.user.email
+            user_fullname = transaction.user.full_name()
+        elif transaction.telegram_user:
+            user_email = transaction.telegram_user.email
+            user_fullname = transaction.telegram_user.full_name()
+
+        response_data = {
+            "reference": transaction.reference,
+            "current_status": transaction.status,
+            "fixed_by_admin": transaction.fixed_by_admin,
+            "status_history": all_status,
+            "total_status_changes": len(all_status),
+            "user_email": user_email,
+            "user_fullname": user_fullname,
+            "total_matching_transactions": transaction_count
+        }
+        
+        if warning_message:
+            response_data["warning"] = warning_message
+
         return Response(
-            {
-                "reference": transaction.reference,
-                "current_status": transaction.status,
-                "fixed_by_admin": transaction.fixed_by_admin,
-                "status_history": all_status,
-                "total_status_changes": len(all_status)
-            },
+            response_data,
             status=status.HTTP_200_OK
         )
 
