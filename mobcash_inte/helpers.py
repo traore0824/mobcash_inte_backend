@@ -29,9 +29,8 @@ def get_access_token():
     credentials.refresh(request)
     return credentials.token
 
-
 def call_api(fcm_token, title, body, priority="normal", message_data=None):
-    url = "https://fcm.googleapis.com/v1/projects/turaincash-57c48/messages:send"
+    url = f"https://fcm.googleapis.com/v1/projects/{os.getenv('FIREBASE_PROJECT_ID', 'turaincash-57c48')}/messages:send"
     headers = {
         "Authorization": f"Bearer {get_access_token()}",
         "Content-Type": "application/json; UTF-8",
