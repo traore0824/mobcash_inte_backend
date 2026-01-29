@@ -240,26 +240,6 @@ def feexpay_withdrawall_process(transaction: Transaction, disbursements=False):
         feexpay_payout(transaction=transaction)
 
 
-# ⚠️ Tâche déplacée dans box.tasks.feexpay_check_status
-# Cette fonction a été supprimée - la logique complète est dans box.tasks.feexpay_check_status
-
-
-def check_status(reference):
-    url = f"https://api.feexpay.me/api/transactions/public/single/status/{reference}"
-    header = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {os.getenv('FEEXPAY_API_KEY')}",
-    }
-    try:
-        connect_pro_logger.info(f"GET {url}")
-        response = requests.get(url=url, headers=header, timeout=30)
-        connect_pro_logger.info(f"Response: {response.status_code} {response.text}")
-        return {"code": constant.CODE_SUCCESS, "data": response.json()}
-    except Exception as e:
-        connect_pro_logger.error(f"Error during GET {url}: {str(e)}")
-        return {"code": constant.CODE_EXEPTION, "erreur": f"{e}"}
-
-
 @shared_task
 def feexpay_webhook(data):
     """

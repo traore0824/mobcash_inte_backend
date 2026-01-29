@@ -1863,7 +1863,7 @@ class TransactionStatusHistoryView(decorators.APIView):
         return Response(
             response_data,
             status=status.HTTP_200_OK
-        )
+            )
 
 
 # Create your views here.

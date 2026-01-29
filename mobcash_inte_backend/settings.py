@@ -531,6 +531,14 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = "UTC"
 
+# Configuration des tâches périodiques Celery Beat
+CELERY_BEAT_SCHEDULE = {
+    "check-pending-feexpay-transactions": {
+        "task": "payment.check_pending_feexpay_transactions",
+        "schedule": 120.0,  # Toutes les 2 minutes (120 secondes)
+    },
+}
+
 # NOUVELLES LIGNES À AJOUTER
 CELERY_WORKER_CONCURRENCY = 5
 CELERY_TASK_SOFT_TIME_LIMIT = 220
