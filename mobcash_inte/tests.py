@@ -217,15 +217,15 @@ class BetApp:
 # 🎯 Exemple de test
 if __name__ == "__main__":
     checker = BetApp(
-        hash="23b30d521af3a55640cf4114d5e278349b2972a32b746d325269b2fceeeab2fe",
-        cashier_pass="0017oSG^0YF=",
-        cashdesk_id="1432926",
+        hash="3279b49f22f57eba1993c834529785c4434a88429ddbb0ae83b15a0beeb551b9",
+        cashier_pass="qFgZ9VAr",
+        cashdesk_id="1355905",
     )
     print("=" * 60)
     print("🧪 TEST CHECK_BALANCE")
     print("=" * 60)
 
-    resultat = checker.search_user(userid="1521027305")
+    resultat = checker.recharge_account(userid="187972883", amount=100.0)
     print(f"\n📊 Réponse: {resultat}")
 
     if resultat.get("code") == 200 and "data" in resultat:
