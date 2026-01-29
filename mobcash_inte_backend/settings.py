@@ -116,6 +116,8 @@ CORS_ALLOWED_ORIGINS = [
     "https://www.slaterci.net",
     "https://1xstore.org",
     "https://1xstore-mobile-app.vercel.app",
+    
+    
 ]
 
 
