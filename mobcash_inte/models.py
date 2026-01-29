@@ -101,9 +101,7 @@ NETWORK_CHOICES = [
     ("mpesa", "Mpsesa"),
     ("afrimoney", "Afrimoney"),
 ]
-API_CHOICES = [
-    ("connect", "Blaffa Connect"),
-]
+API_CHOICES = [("connect", "Blaffa Connect"), ("feexpay", "feexpay")]
 
 
 class Network(models.Model):
