@@ -41,6 +41,7 @@ DEBUG = True
 ALLOWED_HOSTS = [
     "api.turaincash.com",
     "127.0.0.1",
+    "apiv2.coobet.app",
     "api.turaincash.net",
     "api.zefast.net",
     "api.africash.io",
