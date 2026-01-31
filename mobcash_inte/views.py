@@ -71,12 +71,13 @@ from django.db import transaction
 from django.db.models import F
 from rest_framework.response import Response
 from django.utils import timezone
-from payment import connect_balance, connect_pro_status, connect_pro_webhook, disbursment_process, payment_fonction, webhook_transaction_failled, webhook_transaction_success, feexpay_webhook, track_status_change, connect_pro_withd_process, feexpay_withdrawall_process
+from payment import connect_balance, connect_pro_status, connect_pro_webhook, disbursment_process, payment_fonction, webhook_transaction_failled, webhook_transaction_success, feexpay_webhook, track_status_change, connect_pro_withd_process, feexpay_withdrawall_process, check_solde, process_transaction_notifications_and_bonus
 from django.db.models import Sum, Count, Q, Avg
 from django.db.models.functions import TruncDate, TruncWeek, TruncMonth, TruncYear
 
 
 connect_pro_logger = logging.getLogger("mobcash_inte_backend.transactions")
+payment_logger = logging.getLogger("Payment transaction process")
 
 
 class UploadFileView(generics.ListCreateAPIView):
@@ -359,25 +360,142 @@ class RewardTransactionViews(generics.CreateAPIView):
     def create(self, request, *args, **kwargs):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
-        bonus = Bonus.objects.filter(bonus_with=False, bonus_delete=False)
-        bonus_amount = bonus.aggregate(total=Sum("amount"))["total"] or 0
-        if bonus_amount < serializer.validated_data.get("amount"):
-            return Response(
-                {
-                    "details": "Votre compte bonus ne dispose pas de suffisamment de fonds pour effectuer cette opération. "
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+        
+        # ✅ SÉCURITÉ : Transaction atomique avec verrouillage
+        with transaction.atomic():
+            # 1. Verrouiller et récupérer tous les bonus disponibles
+            bonus_queryset = Bonus.objects.select_for_update().filter(
+                user=request.user, 
+                bonus_with=False, 
+                bonus_delete=False
             )
-
-        transaction = serializer.save(
-            reference=generate_reference(prefix="depot-"),
-            user=self.request.user,
-            type_trans="reward",
-        )
-        track_status_change(transaction, transaction.status, source="system")
-        transaction.save()
-        bonus = bonus.update(bonus_with=True)
-        payment_fonction(reference=transaction.reference)
+            bonus_amount = bonus_queryset.aggregate(total=Sum("amount"))["total"] or 0
+            
+            # 2. Vérifier qu'il y a au moins un bonus disponible
+            if bonus_amount <= 0:
+                return Response(
+                    {
+                        "details": "Vous n'avez aucun bonus disponible à utiliser."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            
+            # 3. Créer la transaction avec le montant total des bonus
+            transaction = serializer.save(
+                reference=generate_reference(prefix="depot-"),
+                user=request.user,
+                type_trans="reward",
+                amount=int(bonus_amount),  # Utiliser tout le solde disponible
+            )
+            track_status_change(transaction, transaction.status, source="system")
+            
+            # 4. Verrouiller la transaction pour éviter traitement simultané
+            transaction = Transaction.objects.select_for_update(nowait=True).get(id=transaction.id)
+            
+            # 5. Vérifier que la transaction n'est pas déjà traitée
+            if transaction.status != "pending":
+                return Response(
+                    {"error": "Transaction déjà traitée"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            
+            # 6. Appeler directement l'API (comme dans webhook_transaction_success)
+            setting = Setting.objects.first()
+            if not setting:
+                return Response(
+                    {"error": "Configuration système non trouvée"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+            
+            try:
+                transaction.status = "init_payment"
+                track_status_change(transaction, "init_payment", source="system")
+                transaction.save()
+                
+                app = transaction.app
+                servculAPI = init_mobcash(app_name=app)
+                amount = transaction.amount
+                
+                # Appeler l'API selon le type d'app
+                if transaction.app.hash:
+                    response = servculAPI.recharge_account(
+                        amount=float(amount), userid=transaction.user_app_id
+                    )
+                    connect_pro_logger.info(
+                        f"Reponse de l'api de {transaction.app.name}: {response}"
+                    )
+                    xbet_response_data = response.get("data")
+                else:
+                    response = MobCashExternalService().create_deposit(transaction=transaction)
+                    connect_pro_logger.info( 
+                        f"Reponse de l'api de {transaction.app.name}: {response}"
+                    )
+                    xbet_response_data = response
+                
+                # 7. Si succès : marquer tous les bonus comme utilisés et mettre status="accept"
+                if xbet_response_data.get("Success") == True:
+                    payment_logger.info(
+                        f"Transaction reward de {transaction.app.name} success"
+                    )
+                    transaction.validated_at = timezone.now()
+                    transaction.status = "accept"
+                    track_status_change(transaction, "accept", source="system")
+                    transaction.save()
+                    
+                    # Marquer TOUS les bonus comme utilisés
+                    bonus_queryset.update(bonus_with=True)
+                    
+                    # Appel de la tâche Celery pour les notifications
+                    try:
+                        process_transaction_notifications_and_bonus.delay(transaction_id=transaction.id)
+                    except Exception as e:
+                        connect_pro_logger.error(
+                            f"Erreur process_transaction_notifications_and_bonus.delay pour transaction {transaction.id}: {str(e)}",
+                            exc_info=True,
+                        )
+                    
+                    # Appeler check_solde pour les reward
+                    try:
+                        check_solde.delay(transaction_id=transaction.id)
+                    except Exception as e:
+                        connect_pro_logger.error(
+                            f"Erreur check_solde.delay pour transaction {transaction.id}: {str(e)}",
+                            exc_info=True,
+                        )
+                else:
+                    # 8. Si échec : mettre status="error" (bonus restent disponibles)
+                    transaction.status = "error"
+                    track_status_change(transaction, "error", source="system")
+                    transaction.error_message = f"Échec de l'API : {xbet_response_data}"
+                    transaction.save()
+                    
+                    return Response(
+                        {
+                            "error": "Échec du traitement de la transaction",
+                            "details": xbet_response_data
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                    
+            except Exception as e:
+                connect_pro_logger.error(
+                    f"Erreur lors du traitement de la transaction reward {transaction.id}: {str(e)}",
+                    exc_info=True,
+                )
+                transaction.status = "error"
+                track_status_change(transaction, "error", source="system")
+                transaction.error_message = str(e)
+                transaction.save()
+                
+                return Response(
+                    {
+                        "error": "Erreur lors du traitement",
+                        "details": str(e)
+                    },
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+        
+        transaction.refresh_from_db()
         return Response(
             TransactionDetailsSerializer(transaction).data,
             status=status.HTTP_201_CREATED,

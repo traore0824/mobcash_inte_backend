@@ -163,7 +163,7 @@ def feexpay_deposit(transaction: Transaction):
         return
     
     # Récupérer le numéro de téléphone
-    phone_number = transaction.phone_number or ""
+    phone_number = transaction.phone_number 
     # Nettoyer le numéro (retirer le préfixe si présent, comme dans deposit_connect)
     # if len(phone_number) > 10:
     #     phone_number = phone_number[3:] if phone_number.startswith("229") else phone_number

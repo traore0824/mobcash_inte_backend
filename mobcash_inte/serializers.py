@@ -215,11 +215,11 @@ class WithdrawalTransactionSerializer(serializers.ModelSerializer):
 class RewardTransactionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Transaction
-        fields = ["user_app_id", "app", "amount", "source"]
+        fields = ["user_app_id", "app", "source"]
         extra_kwargs = {
             "user_app_id": {"required": True},
             "app": {"required": True},
-            "amount": {"required": True},
+            "source": {"required": True},
         }
 
 

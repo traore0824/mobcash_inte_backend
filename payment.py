@@ -692,7 +692,7 @@ def process_transaction_notifications_and_bonus(transaction_id, is_error=False, 
 
         # 3. Attribution de bonus de parrainage (si applicable)
         if (
-            transaction.type_trans == "deposit" 
+            transaction.type_trans in ["deposit", "withdrawal"]
             and transaction.user 
             and transaction.user.referrer_code 
             and setting.referral_bonus
@@ -996,12 +996,6 @@ def feexpay_payout(transaction: Transaction):
 
     # Récupérer le numéro de téléphone
     phone_number = transaction.phone_number or transaction.phone or ""
-    # Nettoyer le numéro (retirer le préfixe si présent, comme dans deposit_connect)
-    if len(phone_number) > 10:
-        phone_number = phone_number[3:] if phone_number.startswith("229") else phone_number
-    elif not phone_number.startswith("229") and len(phone_number) == 10:
-        # Ajouter le préfixe si absent (pour les retraits, Feexpay peut nécessiter le format complet)
-        phone_number = f"229{phone_number}"
 
     # Déterminer le réseau depuis payment_mode ou network
     network_name = None
@@ -1093,10 +1087,7 @@ def feexpay_deposit(transaction: Transaction):
         return
     
     # Récupérer le numéro de téléphone
-    phone_number = transaction.phone_number or ""
-    # Nettoyer le numéro (retirer le préfixe si présent, comme dans deposit_connect)
-    if len(phone_number) > 10:
-        phone_number = phone_number[3:] if phone_number.startswith("229") else phone_number
+    phone_number = transaction.phone_number
     
     # Récupérer les informations utilisateur
     user = transaction.user if transaction.user else transaction.telegram_user
