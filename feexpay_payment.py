@@ -38,7 +38,6 @@ def send_event(channel_name, event_name, data):
     )
 
 
-
 def feexpay_payout(transaction: Transaction):
     """
     Fonction pour créer un retrait Feexpay
@@ -49,21 +48,21 @@ def feexpay_payout(transaction: Transaction):
     if not shop:
         connect_pro_logger.error("FEEXPAY_CUSTOMER_ID non configuré")
         return
-    
+
     api_key = os.getenv('FEEXPAY_API_KEY')
     if not api_key:
         connect_pro_logger.error("FEEXPAY_API_KEY non configuré")
         return
-    
+
     # URL pour les retraits
     url = "https://api.feexpay.me/api/payouts/public/transfer/global"
-    
+
     # Préparer les données
     amount = int(float(transaction.amount)) if transaction.amount else 0
     if amount <= 0:
         connect_pro_logger.error(f"Montant invalide: {transaction.amount}")
         return
-    
+
     # Récupérer le numéro de téléphone
     phone_number = transaction.phone_number or transaction.phone or ""
     # Nettoyer le numéro (retirer le préfixe si présent, comme dans deposit_connect)
@@ -72,26 +71,26 @@ def feexpay_payout(transaction: Transaction):
     elif not phone_number.startswith("229") and len(phone_number) == 10:
         # Ajouter le préfixe si absent (pour les retraits, Feexpay peut nécessiter le format complet)
         phone_number = f"229{phone_number}"
-    
+
     # Déterminer le réseau depuis payment_mode ou network
     network_name = None
     if transaction.payment_mode:
         network_name = transaction.payment_mode.upper()
     elif transaction.network:
         network_name = transaction.network.name.upper()
-    
+
     if not network_name:
         connect_pro_logger.error("Réseau non spécifié pour le retrait")
         return
-    
+
     data = {
-        "phoneNumber": phone_number,
+        "phoneNumber": f"229{phone_number}",
         "amount": str(amount),
         "shop": shop,
         "network": network_name,
         "motif": "Retrait de caisse",
     }
-    
+
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}",
@@ -101,9 +100,9 @@ def feexpay_payout(transaction: Transaction):
         connect_pro_logger.info("debut de creatuion de retrait feexpay")
         response = requests.post(url=url, json=data, headers=headers, timeout=45)
         connect_pro_logger.info(f" feexpay payout response {response.json()}")
-        
+
         response_data = response.json()
-        
+
         # Sauvegarder la référence Feexpay dans la transaction
         feexpay_reference = response_data.get("reference") or response_data.get("data", {}).get("reference")
         if feexpay_reference:
@@ -132,16 +131,16 @@ def feexpay_deposit(transaction: Transaction):
     if not shop:
         connect_pro_logger.error("FEEXPAY_CUSTOMER_ID non configuré")
         return
-    
+
     api_key = os.getenv('FEEXPAY_API_KEY')
     if not api_key:
         connect_pro_logger.error("FEEXPAY_API_KEY non configuré")
         return
-    
+
     # Déterminer l'URL selon le réseau
     url = None
     network_name = transaction.network.name.lower() if transaction.network else None
-    
+
     if network_name == "moov":
         url = "https://api.feexpay.me/api/transactions/public/requesttopay/moov"
         connect_pro_logger.info("debut de creatuion de transaction feexpay MOOV")
@@ -151,23 +150,23 @@ def feexpay_deposit(transaction: Transaction):
     else:
         url = "https://api.feexpay.me/api/transactions/public/requesttopay/celtiis_bj"
         connect_pro_logger.info("debut de creatuion de transaction feexpay Celtiis")
-    
+
     if not url:
         connect_pro_logger.error(f"Réseau non supporté: {network_name}")
         return
-    
+
     # Préparer les données
     amount = int(float(transaction.amount)) if transaction.amount else 0
     if amount <= 0:
         connect_pro_logger.error(f"Montant invalide: {transaction.amount}")
         return
-    
+
     # Récupérer le numéro de téléphone
     phone_number = transaction.phone_number or ""
     # Nettoyer le numéro (retirer le préfixe si présent, comme dans deposit_connect)
     if len(phone_number) > 10:
         phone_number = phone_number[3:] if phone_number.startswith("229") else phone_number
-    
+
     # Récupérer les informations utilisateur
     user = transaction.user if transaction.user else transaction.telegram_user
     first_name = ""
@@ -182,7 +181,7 @@ def feexpay_deposit(transaction: Transaction):
             full_name_parts = user.full_name().split() if user.full_name() else []
             first_name = full_name_parts[0] if full_name_parts else ""
             last_name = " ".join(full_name_parts[1:]) if len(full_name_parts) > 1 else ""
-    
+
     data = {
         "phoneNumber": f"229{phone_number}",
         "amount": amount,
@@ -192,18 +191,18 @@ def feexpay_deposit(transaction: Transaction):
         "lastName": last_name,
         "email": user.email if user and hasattr(user, 'email') and user.email else "client@mobcash.com",
     }
-    
+
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}",
     }
-    
+
     try:
         response = requests.post(url=url, json=data, headers=headers, timeout=45)
-        connect_pro_logger.info(f" feexpay response {response.json()}")
-        
+        connect_pro_logger.info(f" feexpay response {response.json()}  data data data  {data}")
+
         response_data = response.json()
-        
+
         # Sauvegarder la référence Feexpay dans la transaction
         feexpay_reference = response_data.get("reference") or response_data.get("data", {}).get("reference")
         if feexpay_reference:
@@ -213,7 +212,7 @@ def feexpay_deposit(transaction: Transaction):
             if feexpay_uid:
                 transaction.public_id = feexpay_uid
             transaction.save()
-            
+
     except requests.exceptions.Timeout as e:
         connect_pro_logger.critical(f" Erreur de creation feexpay timeout {e}")
     except requests.exceptions.RequestException as e:
@@ -291,5 +290,3 @@ def feexpay_webhook(data):
             connect_pro_logger.info("Transaction is success")
             from payment import webhook_transaction_success
             webhook_transaction_success(transaction=transaction, setting=setting)
-
-
