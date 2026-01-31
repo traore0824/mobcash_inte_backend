@@ -103,6 +103,15 @@ class CreateSettingSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
+class ValidateVersionSerializer(serializers.Serializer):
+    version = serializers.IntegerField(required=True, min_value=1)
+    
+    def validate_version(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("La version doit être un nombre positif.")
+        return value
+
+
 class BonusSerializer(serializers.ModelSerializer):
     user = SmallUserSerializer(read_only=True)
 

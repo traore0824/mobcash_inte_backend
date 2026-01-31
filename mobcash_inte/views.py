@@ -47,6 +47,7 @@ from mobcash_inte.serializers import (
     ChangeTransactionStatusSerializer,
     ProcessTransactionSerializer,
     UpdateTransactionStatusSerializer,
+    ValidateVersionSerializer,
     CouponSerializer,
     CreateAppNameSerializer,
     CreateSettingSerializer,
@@ -273,6 +274,64 @@ class SettingViews(decorators.APIView):
         return Response(ReadSettingSerializer(setting).data)
 
 
+class ValidateVersionView(decorators.APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        serializer = ValidateVersionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        user_version = serializer.validated_data.get("version")
+        setting = Setting.objects.first()
+        
+        if not setting:
+            return Response(
+                {"error": "Configuration non disponible"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+        
+        min_version = setting.min_version
+        last_version = setting.last_version
+        download_link = setting.dowload_apk_link
+        
+        # Si les versions ne sont pas configurées, on considère que tout est OK
+        if min_version is None and last_version is None:
+            return Response({
+                "valid": True,
+                "update_required": False,
+                "update_available": False,
+                "current_version": user_version,
+                "min_version": None,
+                "last_version": None,
+                "download_link": download_link
+            })
+        
+        # Déterminer si la mise à jour est obligatoire
+        update_required = False
+        if min_version is not None and user_version < min_version:
+            update_required = True
+        
+        # Déterminer si une mise à jour est disponible (optionnelle)
+        update_available = False
+        if last_version is not None and user_version < last_version:
+            update_available = True
+        
+        # La version est valide si elle est >= min_version
+        valid = True
+        if min_version is not None and user_version < min_version:
+            valid = False
+        
+        return Response({
+            "valid": valid,
+            "update_required": update_required,
+            "update_available": update_available,
+            "current_version": user_version,
+            "min_version": min_version,
+            "last_version": last_version,
+            "download_link": download_link
+        }, status=status.HTTP_200_OK)
+
+
 class GetBonus(generics.ListAPIView):
     pagination_class = CustomPagination
     serializer_class = BonusSerializer
@@ -362,7 +421,7 @@ class RewardTransactionViews(generics.CreateAPIView):
         serializer.is_valid(raise_exception=True)
         
         # ✅ SÉCURITÉ : Transaction atomique avec verrouillage
-        with transaction.atomic():
+        with db_transaction.atomic():
             # 1. Verrouiller et récupérer tous les bonus disponibles
             bonus_queryset = Bonus.objects.select_for_update().filter(
                 user=request.user, 
