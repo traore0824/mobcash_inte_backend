@@ -1056,16 +1056,16 @@ def feexpay_deposit(transaction: Transaction):
     if not shop:
         connect_pro_logger.error("FEEXPAY_CUSTOMER_ID non configuré")
         return
-    
+
     api_key = os.getenv('FEEXPAY_API_KEY')
     if not api_key:
         connect_pro_logger.error("FEEXPAY_API_KEY non configuré")
         return
-    
+
     # Déterminer l'URL selon le réseau
     url = None
     network_name = transaction.network.name.lower() if transaction.network else None
-    
+
     if network_name == "moov":
         url = "https://api.feexpay.me/api/transactions/public/requesttopay/moov"
         connect_pro_logger.info("debut de creatuion de transaction feexpay MOOV")
@@ -1075,20 +1075,20 @@ def feexpay_deposit(transaction: Transaction):
     else:
         url = "https://api.feexpay.me/api/transactions/public/requesttopay/celtiis_bj"
         connect_pro_logger.info("debut de creatuion de transaction feexpay Celtiis")
-    
+
     if not url:
         connect_pro_logger.error(f"Réseau non supporté: {network_name}")
         return
-    
+
     # Préparer les données
     amount = int(float(transaction.amount)) if transaction.amount else 0
     if amount <= 0:
         connect_pro_logger.error(f"Montant invalide: {transaction.amount}")
         return
-    
+
     # Récupérer le numéro de téléphone
     phone_number = transaction.phone_number
-    
+
     # Récupérer les informations utilisateur
     user = transaction.user if transaction.user else transaction.telegram_user
     first_name = ""
@@ -1103,28 +1103,36 @@ def feexpay_deposit(transaction: Transaction):
             full_name_parts = user.full_name().split() if user.full_name() else []
             first_name = full_name_parts[0] if full_name_parts else ""
             last_name = " ".join(full_name_parts[1:]) if len(full_name_parts) > 1 else ""
-    
+
     data = {
-        "phoneNumber": phone_number,
+        "phoneNumber": (
+            phone_number if len(phone_number) == 10 else f"229{phone_number}"
+        ),
         "amount": amount,
         "shop": shop,
         "description": f"Demande de paiement - Transaction {transaction.reference}",
         "firstName": first_name,
         "lastName": last_name,
-        "email": user.email if user and hasattr(user, 'email') and user.email else "client@mobcash.com",
+        "email": (
+            user.email
+            if user and hasattr(user, "email") and user.email
+            else "client@mobcash.com"
+        ),
     }
-    
+
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}",
     }
-    
+
     try:
         response = requests.post(url=url, json=data, headers=headers, timeout=45)
-        connect_pro_logger.info(f" feexpay response 22 {response.json()} data === {data}")
-        
+        connect_pro_logger.info(
+            f" feexpay response 22 {response.json()} data === {data}"
+        )
+
         response_data = response.json()
-        
+
         # Sauvegarder la référence Feexpay dans la transaction
         feexpay_reference = response_data.get("reference") or response_data.get("data", {}).get("reference")
         if feexpay_reference:
@@ -1134,7 +1142,7 @@ def feexpay_deposit(transaction: Transaction):
             if feexpay_uid:
                 transaction.public_id = feexpay_uid
             transaction.save()
-            
+
     except requests.exceptions.Timeout as e:
         connect_pro_logger.critical(f" Erreur de creation feexpay timeout {e}")
     except requests.exceptions.RequestException as e:
