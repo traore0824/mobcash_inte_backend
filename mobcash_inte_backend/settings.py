@@ -101,7 +101,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://module.zefast.net",
     "https://africash.io",
     "https://africash-mobile-app.vercel.app",
-    "https://coobet-admin.vercel.app/login", "https://admin.africash.io",
+    "https://coobet-admin.vercel.app", "https://admin.africash.io",
     "https://africash-mobile-app.vercel.app",
     "https://module.africash.io",
     "https://admin.fastxof.com",
