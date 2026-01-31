@@ -502,6 +502,39 @@ class RewardTransactionViews(generics.CreateAPIView):
         )
 
 
+class GetRewardView(decorators.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        """
+        Récupère le solde Reward de l'utilisateur authentifié.
+        Retourne le solde Reward total et la somme des bonus disponibles.
+        """
+        user = request.user
+        
+        # Récupérer le Reward de l'utilisateur
+        reward, _ = Reward.objects.get_or_create(user=user)
+        reward_amount = float(reward.amount) if reward.amount else 0.0
+        
+        # Calculer la somme des bonus disponibles
+        bonus_queryset = Bonus.objects.filter(
+            user=user,
+            bonus_with=False,
+            bonus_delete=False
+        )
+        bonus_total = bonus_queryset.aggregate(total=Sum("amount"))["total"] or 0
+        bonus_total = float(bonus_total) if bonus_total else 0.0
+        
+        return Response(
+            {
+                "reward_amount": reward_amount,
+                "available_bonus_total": bonus_total,
+                "total_available": reward_amount + bonus_total
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class ConnectProWebhook(decorators.APIView):
     def post(self, request, *args, **kwargs):
         try:
