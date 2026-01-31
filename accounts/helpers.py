@@ -56,5 +56,5 @@ def send_mails(subject, to_email, template_name, context={}, body=None):
 class CustomPagination(PageNumberPagination):
     page_size = 10
     page_size_query_param = "page_size"
-    max_page_size = 25
+    max_page_size = 1000
     page_query_param = "page"

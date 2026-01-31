@@ -933,6 +933,60 @@ class HistoryTransactionViews(generics.ListAPIView):
         return Transaction.objects.filter(telegram_user=self.request.telegram_user)
 
 
+class TransactionDetailView(decorators.APIView):
+    """
+    Récupère les détails complets d'une transaction par ID ou référence.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        transaction_id = request.GET.get("id")
+        reference = request.GET.get("reference")
+
+        if not transaction_id and not reference:
+            return Response(
+                {"error": "Le paramètre 'id' ou 'reference' est requis"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Construire la requête
+        query = {}
+        if transaction_id:
+            query["id"] = transaction_id
+        if reference:
+            query["reference"] = reference
+
+        # Récupérer la transaction
+        transaction = Transaction.objects.filter(**query).first()
+
+        if not transaction:
+            return Response(
+                {"error": "Transaction non trouvée"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Vérifier les permissions (utilisateur non-admin ne peut voir que ses transactions)
+        if not request.user.is_staff:
+            if request.user.is_authenticated:
+                if transaction.user != request.user:
+                    return Response(
+                        {"error": "Vous n'avez pas accès à cette transaction"},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+            else:
+                # Pour les utilisateurs Telegram
+                if hasattr(request, "telegram_user") and transaction.telegram_user != request.telegram_user:
+                    return Response(
+                        {"error": "Vous n'avez pas accès à cette transaction"},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_200_OK
+        )
+
+
 def custom_404(request, exception):
     return render(request, "404.html", status=404)
 
