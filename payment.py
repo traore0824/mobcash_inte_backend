@@ -1121,7 +1121,7 @@ def feexpay_deposit(transaction: Transaction):
     
     try:
         response = requests.post(url=url, json=data, headers=headers, timeout=45)
-        connect_pro_logger.info(f" feexpay response {response.json()}")
+        connect_pro_logger.info(f" feexpay response 22 {response.json()} data === {data}")
         
         response_data = response.json()
         
