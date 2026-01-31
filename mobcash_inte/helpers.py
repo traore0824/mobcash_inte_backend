@@ -29,28 +29,42 @@ def get_access_token():
     credentials.refresh(request)
     return credentials.token
 
-def call_api(fcm_token, title, body, priority="normal", message_data=None):
-    url = f"https://fcm.googleapis.com/v1/projects/{os.getenv('FIREBASE_PROJECT_ID', 'turaincash-57c48')}/messages:send"
+
+def call_api(fcm_token, title, body, message_data=None, image_url=None, priority=None):
+    url = "https://fcm.googleapis.com/v1/projects/box-6ec90/messages:send"
     headers = {
         "Authorization": f"Bearer {get_access_token()}",
-        "Content-Type": "application/json; UTF-8",
+        "Content-Type": "application/json",
     }
-    data = {
+
+    # Notification visuelle
+    notification = {"title": title, "body": body}
+    if image_url:
+        notification["image"] = image_url
+
+    payload = {
         "message": {
             "token": fcm_token,
-            "notification": {"title": title, "body": body},
+            "notification": notification,
             "data": message_data or {},
-            "android": {"priority": priority},
-            "apns": {
-                "headers": {"apns-priority": "10" if priority == "high" else "5"},
-            },
-            "webpush": {
-                "headers": {"Urgency": priority.lower()},
+            "android": {
+                "priority": "HIGH",
+                "notification": {
+                    "channel_id": os.getenv("NOTIFICATION_CHANNEL"),
+                    "sound": "default",
+                },
             },
         }
     }
-    response = requests.post(url=url, headers=headers, json=data, timeout=10)
-    return response.json()
+
+    try:
+        LoggerService.i(f"POST {url} data={payload}")
+        response = requests.post(url, headers=headers, json=payload)
+        LoggerService.i(f"Response: {response.status_code} {response.text}")
+        return response.json()
+    except Exception as e:
+        LoggerService.e(f"Error during POST {url}: {str(e)}")
+        return str(e)
 
 
 def send_push_noti(user: User, title, body, data=None):

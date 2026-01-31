@@ -577,7 +577,7 @@ def webhook_transaction_failled(transaction: Transaction):
     try:
         if transaction.type_trans == "deposit":
             error_message = (
-                f"Une erreur est survenue lors de votre dépôt de {transaction.amount} FCFA} sur "
+                f"Une erreur est survenue lors de votre dépôt de {transaction.amount} FCFA sur "
                 f"{transaction.app.name.upper() if transaction.app else 'l\'application'}. "
                 f"Référence de la transaction : {transaction.reference}"
             )
