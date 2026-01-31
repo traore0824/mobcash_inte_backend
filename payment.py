@@ -572,6 +572,43 @@ def webhook_transaction_failled(transaction: Transaction):
     if transaction.type_trans == "reward":
         reward_failed_process(transaction=transaction)
     transaction.refresh_from_db()
+    
+    # Envoyer une notification d'erreur à l'utilisateur
+    try:
+        if transaction.type_trans == "deposit":
+            error_message = (
+                f"Une erreur est survenue lors de votre dépôt de {transaction.amount} FCFA} sur "
+                f"{transaction.app.name.upper() if transaction.app else 'l\'application'}. "
+                f"Référence de la transaction : {transaction.reference}"
+            )
+        elif transaction.type_trans == "withdrawal":
+            error_message = (
+                f"Une erreur est survenue lors de votre retrait de {transaction.amount} FCFA sur "
+                f"{transaction.app.name.upper() if transaction.app else 'l\'application'}. "
+                f"Référence de la transaction : {transaction.reference}"
+            )
+        elif transaction.type_trans == "reward":
+            error_message = (
+                f"Une erreur est survenue lors de l'utilisation de vos rewards de {transaction.amount} FCFA sur "
+                f"{transaction.app.name.upper() if transaction.app else 'l\'application'}. "
+                f"Référence de la transaction : {transaction.reference}"
+            )
+        else:
+            error_message = (
+                f"Une erreur est survenue lors de votre transaction de {transaction.amount} FCFA. "
+                f"Référence de la transaction : {transaction.reference}"
+            )
+        
+        process_transaction_notifications_and_bonus.delay(
+            transaction_id=transaction.id,
+            is_error=True,
+            error_message=error_message
+        )
+    except Exception as e:
+        connect_pro_logger.error(
+            f"Erreur envoi notification échec transaction {transaction.id}: {str(e)}",
+            exc_info=True,
+        )
 
 
 def reward_failed_process(transaction: Transaction):

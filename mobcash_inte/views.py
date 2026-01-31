@@ -528,6 +528,24 @@ class RewardTransactionViews(generics.CreateAPIView):
                     transaction.error_message = f"Échec de l'API : {xbet_response_data}"
                     transaction.save()
                     
+                    # Envoyer une notification d'erreur à l'utilisateur
+                    try:
+                        error_message = (
+                            f"Une erreur est survenue lors de l'utilisation de vos rewards de {transaction.amount} FCFA sur "
+                            f"{transaction.app.name.upper() if transaction.app else 'l\'application'}. "
+                            f"Référence de la transaction : {transaction.reference}"
+                        )
+                        process_transaction_notifications_and_bonus.delay(
+                            transaction_id=transaction.id,
+                            is_error=True,
+                            error_message=error_message
+                        )
+                    except Exception as e:
+                        connect_pro_logger.error(
+                            f"Erreur envoi notification échec reward transaction {transaction.id}: {str(e)}",
+                            exc_info=True,
+                        )
+                    
                     return Response(
                         {
                             "error": "Échec du traitement de la transaction",
