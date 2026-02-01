@@ -1279,46 +1279,44 @@ def check_pending_feexpay_transactions():
     Cette fonction est appelée toutes les 2 minutes par Celery Beat.
     """
     connect_pro_logger.info("Début de la vérification des transactions Feexpay pending")
-    
+
     # Récupérer toutes les transactions pending avec api="feexpay"
     # Exclure celles qui sont déjà acceptées ou en erreur (pour éviter de retraiter)
-    pending_transactions = Transaction.objects.filter(
-        status="pending",
-        api="feexpay"
-    ).exclude(
-        Q(public_id__isnull=True) | Q(public_id="")
-    ).exclude(
-        Q(status="accept") | Q(status="error")
+    pending_transactions = (
+        Transaction.objects.filter(
+            Q(status="pending") | Q(status="init_payment"), api="feexpay"
+        )
+        .exclude(Q(public_id__isnull=True) | Q(public_id=""))
     )
-    
+
     if not pending_transactions.exists():
         connect_pro_logger.info("Aucune transaction Feexpay pending à vérifier")
         return
-    
+
     count = pending_transactions.count()
     connect_pro_logger.info(f"Vérification de {count} transaction(s) Feexpay pending")
-    
+
     processed_count = 0
     error_count = 0
-    
+
     for transaction in pending_transactions:
         try:
             # Vérifier le statut avec feexpay_check_status
             # feexpay_check_status utilise public_id dans l'URL, donc on doit utiliser public_id uniquement
             public_id = transaction.public_id
-            
+
             if not public_id:
                 connect_pro_logger.warning(
                     f"Transaction {transaction.id} n'a pas de public_id, ignorée"
                 )
                 continue
-            
+
             connect_pro_logger.info(
                 f"Vérification du statut pour transaction {transaction.id} (reference: {transaction.reference}) avec public_id: {public_id}"
             )
-            
+
             status_result = feexpay_check_status(public_id)
-            
+
             # Vérifier si la vérification a réussi
             if status_result.get("code") != constant.CODE_SUCCESS:
                 connect_pro_logger.error(
@@ -1326,16 +1324,16 @@ def check_pending_feexpay_transactions():
                 )
                 error_count += 1
                 continue
-            
+
             # Récupérer les données de statut
             status_data = status_result.get("data", {})
-            
+
             if not status_data:
                 connect_pro_logger.warning(
                     f"Aucune donnée retournée pour transaction {transaction.id}"
                 )
                 continue
-            
+
             # Formater les données comme un webhook Feexpay
             # Le webhook Feexpay attend un format avec reference/externalId et status
             webhook_data = {
@@ -1345,15 +1343,15 @@ def check_pending_feexpay_transactions():
                 "status": status_data.get("status") or status_data.get("transactionStatus"),
                 **status_data  # Inclure toutes les autres données
             }
-            
+
             # Appeler feexpay_webhook pour traiter la transaction
             connect_pro_logger.info(
                 f"Traitement de la transaction {transaction.id} via feexpay_webhook avec status: {webhook_data.get('status')}"
             )
-            
+
             feexpay_webhook(webhook_data)
             processed_count += 1
-            
+
         except Exception as e:
             connect_pro_logger.error(
                 f"Erreur lors du traitement de la transaction {transaction.id}: {str(e)}",
@@ -1361,11 +1359,11 @@ def check_pending_feexpay_transactions():
             )
             error_count += 1
             continue
-    
+
     connect_pro_logger.info(
         f"Vérification terminée: {processed_count} transaction(s) traitée(s), {error_count} erreur(s)"
     )
-    
+
     return {
         "total": count,
         "processed": processed_count,
