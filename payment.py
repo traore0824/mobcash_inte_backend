@@ -4,7 +4,6 @@ import os
 from accounts.models import User
 import constant
 from dotenv import load_dotenv
-from django.db import transaction as db_transaction
 
 from mobcash_external_service import MobCashExternalService
 load_dotenv()
@@ -904,12 +903,12 @@ def payment_fonction(reference):
     if not transaction:
         connect_pro_logger.info(f"Transaction avec reference {reference} non trouver")
         return
-
+    
     if transaction.type_trans == "deposit" or transaction.type_trans == "reward":
         if transaction.api == "connect":
             deposit_connect(transaction=transaction)
         elif transaction.api == "feexpay":
-            feexpay_deposit.delay(transaction_id=transaction.id)
+            feexpay_deposit(transaction=transaction)
     elif transaction.type_trans == "withdrawal":
         if transaction.api == "connect":
             connect_pro_withd_process(transaction=transaction)
@@ -1006,7 +1005,7 @@ def disbursment_process(transaction: Transaction):
 
 
 # ==================== FEEXPAY FUNCTIONS ====================
-@shared_task
+
 def feexpay_payout(transaction: Transaction):
     """
     Fonction pour créer un retrait Feexpay
@@ -1084,11 +1083,7 @@ def feexpay_payout(transaction: Transaction):
         connect_pro_logger.critical(f" Erreur de creation feexpay payout {e}")
 
 
-@shared_task
-def feexpay_deposit(transaction_id):
-    transaction = Transaction.objects.filter(id=transaction_id).first()
-    if not transaction:
-        return
+def feexpay_deposit(transaction: Transaction):
     """
     Fonction pour créer une demande de paiement Feexpay
     Suit le même pattern que deposit_connect
@@ -1147,7 +1142,9 @@ def feexpay_deposit(transaction_id):
             last_name = " ".join(full_name_parts[1:]) if len(full_name_parts) > 1 else ""
 
     data = {
-        "phoneNumber": phone_number,
+        "phoneNumber": (
+            phone_number if len(phone_number) == 10 else f"229{phone_number}"
+        ),
         "amount": amount,
         "shop": shop,
         "description": f"Demande de paiement - Transaction {transaction.reference}",
@@ -1284,104 +1281,160 @@ def check_pending_feexpay_transactions():
     Cette fonction est appelée toutes les 2 minutes par Celery Beat.
     """
     connect_pro_logger.info("Début de la vérification des transactions Feexpay pending")
-
+    
     # Récupérer toutes les transactions pending avec api="feexpay"
-    pending_transactions = (
-        Transaction.objects.filter(
-            status__in=["pending", "init_payment"],
-            api="feexpay"
-        )
-        .exclude(Q(public_id__isnull=True) | Q(public_id=""))
-        .select_for_update(skip_locked=True)  # 🔒 Verrouillage avec skip des lignes déjà verrouillées
+    # Exclure celles qui sont déjà acceptées ou en erreur (pour éviter de retraiter)
+    pending_transactions = Transaction.objects.filter(
+        status="pending",
+        api="feexpay"
+    ).exclude(
+        Q(public_id__isnull=True) | Q(public_id="")
+    ).exclude(
+        Q(status="accept") | Q(status="error")
     )
-
+    
+    if not pending_transactions.exists():
+        connect_pro_logger.info("Aucune transaction Feexpay pending à vérifier")
+        return
+    
+    count = pending_transactions.count()
+    connect_pro_logger.info(f"Vérification de {count} transaction(s) Feexpay pending")
+    
     processed_count = 0
     error_count = 0
-
-    # Utiliser une transaction atomique
-    with db_transaction.atomic():
-        # Évaluer le queryset pour acquérir les verrous
-        transactions_list = list(pending_transactions)
-        
-        if not transactions_list:
-            connect_pro_logger.info("Aucune transaction Feexpay pending à vérifier")
-            return
-
-        count = len(transactions_list)
-        connect_pro_logger.info(f"Vérification de {count} transaction(s) Feexpay pending")
-
-        for trans in transactions_list:
-            try:
-                # Vérifier à nouveau le statut (au cas où il aurait changé)
-                trans.refresh_from_db()
-                
-                if trans.status not in ["pending", "init_payment"]:
-                    connect_pro_logger.info(
-                        f"Transaction {trans.id} déjà traitée (status: {trans.status}), ignorée"
-                    )
-                    continue
-
-                public_id = trans.public_id
-
-                if not public_id:
-                    connect_pro_logger.warning(
-                        f"Transaction {trans.id} n'a pas de public_id, ignorée"
-                    )
-                    continue
-
-                connect_pro_logger.info(
-                    f"Vérification du statut pour transaction {trans.id} (reference: {trans.reference}) avec public_id: {public_id}"
+    
+    for transaction in pending_transactions:
+        try:
+            # Vérifier le statut avec feexpay_check_status
+            # feexpay_check_status utilise public_id dans l'URL, donc on doit utiliser public_id uniquement
+            public_id = transaction.public_id
+            
+            if not public_id:
+                connect_pro_logger.warning(
+                    f"Transaction {transaction.id} n'a pas de public_id, ignorée"
                 )
-
-                status_result = feexpay_check_status(public_id)
-
-                if status_result.get("code") != constant.CODE_SUCCESS:
-                    connect_pro_logger.error(
-                        f"Erreur lors de la vérification du statut pour transaction {trans.id}: {status_result.get('erreur')}"
-                    )
-                    error_count += 1
-                    continue
-
-                status_data = status_result.get("data", {})
-
-                if not status_data:
-                    connect_pro_logger.warning(
-                        f"Aucune donnée retournée pour transaction {trans.id}"
-                    )
-                    continue
-
-                webhook_data = {
-                    "reference": status_data.get("reference") or public_id,
-                    "externalId": trans.reference or public_id,
-                    "uid": public_id,
-                    "status": status_data.get("status") or status_data.get("transactionStatus"),
-                    **status_data
-                }
-
-                connect_pro_logger.info(
-                    f"Traitement de la transaction {trans.id} via feexpay_webhook avec status: {webhook_data.get('status')}"
-                )
-
-                feexpay_webhook(webhook_data)
-                processed_count += 1
-
-            except Exception as e:
+                continue
+            
+            connect_pro_logger.info(
+                f"Vérification du statut pour transaction {transaction.id} (reference: {transaction.reference}) avec public_id: {public_id}"
+            )
+            
+            status_result = feexpay_check_status(public_id)
+            
+            # Vérifier si la vérification a réussi
+            if status_result.get("code") != constant.CODE_SUCCESS:
                 connect_pro_logger.error(
-                    f"Erreur lors du traitement de la transaction {trans.id}: {str(e)}",
-                    exc_info=True
+                    f"Erreur lors de la vérification du statut pour transaction {transaction.id}: {status_result.get('erreur')}"
                 )
                 error_count += 1
                 continue
-
+            
+            # Récupérer les données de statut
+            status_data = status_result.get("data", {})
+            
+            if not status_data:
+                connect_pro_logger.warning(
+                    f"Aucune donnée retournée pour transaction {transaction.id}"
+                )
+                continue
+            
+            # Formater les données comme un webhook Feexpay
+            # Le webhook Feexpay attend un format avec reference/externalId et status
+            webhook_data = {
+                "reference": status_data.get("reference") or public_id,
+                "externalId": transaction.reference or public_id,
+                "uid": public_id,
+                "status": status_data.get("status") or status_data.get("transactionStatus"),
+                **status_data  # Inclure toutes les autres données
+            }
+            
+            # Appeler feexpay_webhook pour traiter la transaction
+            feexpay_status = webhook_data.get('status')
+            connect_pro_logger.info(
+                f"Traitement de la transaction {transaction.id} via feexpay_webhook avec status: {feexpay_status}"
+            )
+            
+            # Sauvegarder l'ID de la transaction avant l'appel
+            transaction_id = transaction.id
+            
+            # Vérifier si la transaction a déjà été tentée dans webhook_transaction_success
+            transaction_already_attempted = (
+                transaction.status == "init_payment" or 
+                transaction.webhook_data is not None or 
+                transaction.wehook_receive_at is not None
+            )
+            
+            feexpay_webhook(webhook_data)
+            
+            # Recharger la transaction depuis la DB pour voir son statut actuel
+            transaction.refresh_from_db()
+            
+            # Vérifier si Feexpay dit SUCCESSFUL mais la transaction n'est pas accept
+            if (
+                feexpay_status in ["SUCCESSFUL", "success", "confirmed"] and
+                transaction.status != "accept" and
+                transaction_already_attempted
+            ):
+                # C'est un 2ème appel qui a échoué - envoyer notification Telegram
+                try:
+                    user_info = ""
+                    if transaction.user:
+                        user_info = f"User: {transaction.user.email} (ID: {transaction.user.id})"
+                    elif transaction.telegram_user:
+                        user_info = f"Telegram User: {transaction.telegram_user.telegram_user_id}"
+                    else:
+                        user_info = "User inconnu"
+                    
+                    app_name = transaction.app.name if transaction.app else "Application inconnue"
+                    
+                    message = (
+                        f"⚠️ ALERTE: Transaction Feexpay SUCCESSFUL mais non traitée\n\n"
+                        f"Référence: {transaction.reference}\n"
+                        f"Numero: {transaction.phone_number}\n"
+                        f"Reseau: {transaction.network.public_name}\n"
+                        f"Montant: {transaction.amount} FCFA\n"
+                        f"Type: {transaction.type_trans}\n"
+                        f"Application: {app_name}\n"
+                        f"{user_info}\n"
+                        f"Statut Feexpay: {feexpay_status}\n"
+                        f"Statut actuel DB: {transaction.status}\n"
+                        
+                        f"Timestamp: {timezone.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                        f"⚠️ Cette transaction a déjà été tentée dans webhook_transaction_success mais n'a pas été acceptée."
+                    )
+                    
+                    send_telegram_message(content=message)
+                    connect_pro_logger.warning(
+                        f"Notification Telegram envoyée pour transaction {transaction_id} - "
+                        f"Feexpay SUCCESSFUL mais status DB: {transaction.status}"
+                    )
+                except Exception as e:
+                    connect_pro_logger.error(
+                        f"Erreur envoi notification Telegram pour transaction {transaction_id}: {str(e)}",
+                        exc_info=True
+                    )
+            
+            processed_count += 1
+            
+        except Exception as e:
+            connect_pro_logger.error(
+                f"Erreur lors du traitement de la transaction {transaction.id}: {str(e)}",
+                exc_info=True
+            )
+            error_count += 1
+            continue
+    
     connect_pro_logger.info(
         f"Vérification terminée: {processed_count} transaction(s) traitée(s), {error_count} erreur(s)"
     )
-
+    
     return {
         "total": count,
         "processed": processed_count,
         "errors": error_count
     }
+
+
 def connect_balance():
     url = f"{CONNECT_PRO_BASE_URL}/api/payments/user/account/"
     token = connect_pro_token()

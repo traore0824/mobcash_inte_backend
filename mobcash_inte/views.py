@@ -41,6 +41,7 @@ from mobcash_inte.serializers import (
     AdvertisementSerializer,
     BonusSerializer,
     BonusTransactionSerializer,
+    CreateBonusSerializer,
     BotDepositTransactionSerializer,
     BotWithdrawalTransactionSerializer,
     CaisseSerializer,
@@ -346,6 +347,36 @@ class GetBonus(generics.ListAPIView):
                 user=self.request.user, bonus_with=False, bonus_delete=False
             )
         return queryset
+
+
+class CreateBonusView(generics.CreateAPIView):
+    serializer_class = CreateBonusSerializer
+    permission_classes = [permissions.IsAdminUser]
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        bonus = serializer.save()
+        
+        # Mettre à jour le Reward de l'utilisateur
+        try:
+            reward, _ = Reward.objects.get_or_create(user=bonus.user)
+            from decimal import Decimal
+            reward.amount = Decimal(str(reward.amount)) + Decimal(str(bonus.amount))
+            reward.save()
+            connect_pro_logger.info(
+                f"Reward mis à jour pour utilisateur {bonus.user.id}: +{bonus.amount} FCFA (nouveau solde: {reward.amount})"
+            )
+        except Exception as e:
+            connect_pro_logger.error(
+                f"Erreur mise à jour Reward pour bonus {bonus.id}: {str(e)}",
+                exc_info=True,
+            )
+        
+        return Response(
+            BonusSerializer(bonus).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class CreateDepositTransactionViews(generics.CreateAPIView):

@@ -28,6 +28,7 @@ urlpatterns = [
     path("transaction-reward", views.RewardTransactionViews.as_view()),
     path("reward", views.GetRewardView.as_view()),
     path("bonus", views.GetBonus.as_view()),
+    path("create-bonus", views.CreateBonusView.as_view()),
     path("transaction-history", views.HistoryTransactionViews.as_view()),
     path("transaction-detail", views.TransactionDetailView.as_view()),
     path("change-transaction", views.ChangeTransactionStatus.as_view()),

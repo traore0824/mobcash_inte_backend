@@ -124,6 +124,38 @@ class BonusSerializer(serializers.ModelSerializer):
         ]
 
 
+class CreateBonusSerializer(serializers.ModelSerializer):
+    email = serializers.EmailField(write_only=True, required=True)
+    user = SmallUserSerializer(read_only=True)
+
+    class Meta:
+        model = Bonus
+        fields = ["id", "email", "user", "amount", "reason_bonus", "transaction", "created_at"]
+        read_only_fields = ["id", "user", "created_at"]
+
+    def validate_email(self, value):
+        from accounts.models import User
+        try:
+            user = User.objects.get(email=value)
+            return value
+        except User.DoesNotExist:
+            raise serializers.ValidationError("Utilisateur non trouvé avec cet email.")
+        except User.MultipleObjectsReturned:
+            raise serializers.ValidationError("Plusieurs utilisateurs trouvés avec cet email.")
+
+    def validate_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Le montant doit être supérieur à 0.")
+        return value
+
+    def create(self, validated_data):
+        from accounts.models import User
+        email = validated_data.pop("email")
+        user = User.objects.get(email=email)
+        validated_data["user"] = user
+        return super().create(validated_data)
+
+
 class TransactionDetailsSerializer(serializers.ModelSerializer):
     user = SmallUserSerializer()
     app_details = serializers.SerializerMethodField()
