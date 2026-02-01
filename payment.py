@@ -1142,9 +1142,7 @@ def feexpay_deposit(transaction: Transaction):
             last_name = " ".join(full_name_parts[1:]) if len(full_name_parts) > 1 else ""
 
     data = {
-        "phoneNumber": (
-            phone_number if len(phone_number) == 10 else f"229{phone_number}"
-        ),
+        "phoneNumber": phone_number,
         "amount": amount,
         "shop": shop,
         "description": f"Demande de paiement - Transaction {transaction.reference}",
