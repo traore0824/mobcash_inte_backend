@@ -2208,7 +2208,7 @@ class ChangeTransactionStatusManuelViews(decorators.APIView):
             transaction=transaction,
             new_status=new_status,
             source="admin",
-            admin_id=request.user.id
+            admin_id=str(request.user.id)
         )
 
         transaction.status = new_status
