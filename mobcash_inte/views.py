@@ -1005,6 +1005,7 @@ class TransactionStatus(decorators.APIView):
             return Response(data, status=status.HTTP_200_OK)
         elif transaction.api=="feexpay":
             data = feexpay_check_status(public_id=transaction.public_id)
+            return Response(data, status=status.HTTP_200_OK)
         return Response(status=status.HTTP_200_OK)
 
 class BotWithdrawalTransactionViews(generics.CreateAPIView):
@@ -2081,7 +2082,7 @@ class TransactionStatusHistoryView(decorators.APIView):
 
     def get(self, request, *args, **kwargs):
         search = request.GET.get("search")
-        
+
         # Vérifier qu'un critère de recherche est fourni
         if not search:
             return Response(
@@ -2090,16 +2091,16 @@ class TransactionStatusHistoryView(decorators.APIView):
             )
 
         search_term = search.strip()
-        
+
         # Construire la requête pour rechercher dans tous les champs pertinents
         query = Q()
-        
+
         # Recherche par référence (exacte ou partielle)
         query |= Q(reference__icontains=search_term)
-        
+
         # Recherche par email dans User ou TelegramUser
         query |= Q(user__email__icontains=search_term) | Q(telegram_user__email__icontains=search_term)
-        
+
         # Recherche par fullname (first_name + last_name) dans User ou TelegramUser
         # Split le search_term en parties pour rechercher dans first_name et last_name
         search_parts = search_term.split()
@@ -2123,15 +2124,15 @@ class TransactionStatusHistoryView(decorators.APIView):
 
         # Si plusieurs critères sont fournis, utiliser AND (tous doivent correspondre)
         transactions = Transaction.objects.filter(query).select_related('user', 'telegram_user').distinct()
-        
+
         transaction_count = transactions.count()
-        
+
         if transaction_count == 0:
             return Response(
                 {"error": "Aucune transaction trouvée avec les critères de recherche fournis"},
                 status=status.HTTP_404_NOT_FOUND
             )
-        
+
         # Si plusieurs transactions correspondent, retourner un avertissement avec la première
         if transaction_count > 1:
             transaction = transactions.first()
@@ -2142,7 +2143,7 @@ class TransactionStatusHistoryView(decorators.APIView):
 
         # Retourner l'historique des statuts
         all_status = transaction.all_status if transaction.all_status else []
-        
+
         # Si pas d'historique mais que la transaction existe, ajouter le statut actuel
         if not all_status:
             all_status = [{
@@ -2171,7 +2172,7 @@ class TransactionStatusHistoryView(decorators.APIView):
             "user_fullname": user_fullname,
             "total_matching_transactions": transaction_count
         }
-        
+
         if warning_message:
             response_data["warning"] = warning_message
 
@@ -2179,6 +2180,45 @@ class TransactionStatusHistoryView(decorators.APIView):
             response_data,
             status=status.HTTP_200_OK
             )
+
+
+class ChangeTransactionStatusManuelViews(decorators.APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, *args, **kwargs):
+        serializer = ChangeTransactionStatusSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reference = serializer.validated_data.get("reference")
+        new_status = serializer.validated_data.get("status")
+
+        transaction = Transaction.objects.filter(reference=reference).first()
+        if not transaction:
+            return Response(
+                {"error": "Transaction non trouvée"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if not new_status:
+            return Response(
+                {"error": "Le statut est obligatoire"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        track_status_change(
+            transaction=transaction,
+            new_status=new_status,
+            source="admin",
+            admin_id=request.user.id
+        )
+
+        transaction.status = new_status
+        transaction.fixed_by_admin = True
+        transaction.save(update_fields=['status', 'fixed_by_admin'])
+
+        return Response(
+            TransactionDetailsSerializer(transaction).data, 
+            status=status.HTTP_200_OK
+        )
 
 
 # Create your views here.

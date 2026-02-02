@@ -53,4 +53,5 @@ urlpatterns = [
     path("process-transaction", views.ProcessTransactionView.as_view()),
     path("update-transaction-status", views.UpdateTransactionStatusView.as_view()),
     path("transaction-status-history", views.TransactionStatusHistoryView.as_view()),
+    path("change-transaction-status-manuel", views.ChangeTransactionStatusManuelViews.as_view()),
 ]
