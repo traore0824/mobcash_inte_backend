@@ -73,7 +73,7 @@ from django.db import transaction
 from django.db.models import F
 from rest_framework.response import Response
 from django.utils import timezone
-from payment import connect_balance, connect_pro_status, connect_pro_webhook, disbursment_process, payment_fonction, webhook_transaction_failled, webhook_transaction_success, feexpay_webhook, track_status_change, connect_pro_withd_process, feexpay_withdrawall_process, check_solde, process_transaction_notifications_and_bonus
+from payment import connect_balance, connect_pro_status, connect_pro_webhook, disbursment_process, feexpay_check_status, payment_fonction, webhook_transaction_failled, webhook_transaction_success, feexpay_webhook, track_status_change, connect_pro_withd_process, feexpay_withdrawall_process, check_solde, process_transaction_notifications_and_bonus
 from django.db.models import Sum, Count, Q, Avg
 from django.db.models.functions import TruncDate, TruncWeek, TruncMonth, TruncYear
 
@@ -1003,6 +1003,8 @@ class TransactionStatus(decorators.APIView):
                     ),
                 )
             return Response(data, status=status.HTTP_200_OK)
+        elif transaction.api=="feexpay":
+            data = feexpay_check_status(public_id=transaction.public_id)
         return Response(status=status.HTTP_200_OK)
 
 class BotWithdrawalTransactionViews(generics.CreateAPIView):
