@@ -351,6 +351,19 @@ class MobCashExternalService:
                 },
             )
 
+            try:
+                if str(raw_response.get("Success")).lower() == "true":
+                    transaction.message = "Dépôt effectué avec succès."
+                    transaction.save()
+                else:
+                    transaction.message = raw_response.get("Message")
+                    transaction.save()
+            except Exception as e:
+                logger.error(
+                    "[MOBCASH] [DEPOSIT_MESSAGE_ERROR] Erreur lors de la traduction/sauvegarde du message",
+                    extra={"error": str(e), "transaction_id": str(transaction.id)},
+                )
+
             return {
                 "Summa": raw_response.get("Summa"),
                 "OperationId": raw_response.get("OperationId"),
@@ -410,6 +423,18 @@ class MobCashExternalService:
                     "summa": raw_response.get("Summa"),
                 },
             )
+            try:
+                if str(raw_response.get("Success")).lower() == "true":
+                    transaction.message = "Retrait effectué avec succès."
+                    transaction.save()
+                else:
+                    transaction.message = raw_response.get("Message")
+                    transaction.save()
+            except Exception as e:
+                logger.error(
+                    "[MOBCASH] [WITHDRAWAL_MESSAGE_ERROR] Erreur lors de la traduction/sauvegarde du message",
+                    extra={"error": str(e), "transaction_id": str(transaction.id)},
+                )
 
             return {
                 "Summa": raw_response.get("Summa"),
@@ -937,7 +962,7 @@ class MobCashExternalService:
         if result.get("success"):
             data = result.get("data", {})
             balance_str = data.get("balance", "0.00")
-            
+
             try:
                 balance = float(balance_str)
                 logger.info(
@@ -985,4 +1010,3 @@ class MobCashExternalService:
         result = self._make_request("POST", endpoint, data=request_data)
 
         return result
-        

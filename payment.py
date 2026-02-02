@@ -519,6 +519,8 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                         f"{transaction.app.name.upper() if transaction.app else ''} Message: {xbet_response_data.get('Message')}. "
                         f"Référence de la transaction {transaction.reference}"
                     )
+                    transaction.message=xbet_response_data.get('Message')
+                    transaction.save()
                     try:
                         process_transaction_notifications_and_bonus.delay(
                             transaction_id=transaction.id,
@@ -939,8 +941,16 @@ def xbet_withdrawal_process(transaction: Transaction):
         ):
             transaction.status = "error"
             track_status_change(transaction, "error", source="system")
+            transaction.message=xbet_response_data.get('Message')
             transaction.save()
             transaction.refresh_from_db()
+            error_message = (
+                f"Une erreur est survenue lors de votre retrait de {transaction.amount} FCFA sur "
+                f"{transaction.app.name.upper() if transaction.app else 'l\'application'}. "
+                f"{transaction.app.name.upper() if transaction.app else ''} Message: {xbet_response_data.get('Message')}. "
+                f"Référence de la transaction {transaction.reference}"
+            )
+            send_notification(user=transaction.user, content=error_message, title="Erreur de transaction")
             connect_pro_logger.info("L'appelle a ete success")
         elif str(xbet_response_data.get("Success")).lower() == "true":
             connect_pro_logger.info("app BET step suvccess 11111111")

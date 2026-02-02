@@ -211,6 +211,7 @@ class Transaction(models.Model):
     user_app_id = models.CharField(max_length=120, blank=True, null=True)
     withdriwal_code = models.CharField(max_length=50, blank=True, null=True)
     error_message = models.TextField(blank=True, null=True)
+    message = models.TextField(default="Transaction en cours")
     transaction_link = models.TextField(blank=True, null=True)
     net_payable_amout = models.PositiveIntegerField(blank=True, null=True)
     otp_code = models.CharField(max_length=20, blank=True, null=True)
