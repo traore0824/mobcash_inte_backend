@@ -922,49 +922,48 @@ def xbet_withdrawal_process(transaction: Transaction):
     connect_pro_logger.info("Demarraage de retrait avec l'app de mobcash ")
     app_name = transaction.app
     servculAPI = init_mobcash(app_name=app_name)
-    return True
-
-    # if transaction.type_trans == "withdrawal":
-    #     if transaction.app.hash:
-    #         response = servculAPI.withdraw_from_account(
-    #             userid=transaction.user_app_id, code=transaction.withdriwal_code
-    #         )
-    #         xbet_response_data = response.get("data")
-    #     else:
-    #         response = MobCashExternalService().create_withdrawal(transaction=transaction)
-    #         connect_pro_logger.info(
-    #                     f"Reponse de l'api de {transaction.app.name}: {response}"
-    #                 )
-    #         xbet_response_data = response
-    #     connect_pro_logger.info(f"La reponse de retrait de mobcash{response}")
-    #     if (
-    #         str(xbet_response_data.get("Success")).lower() == "false"
-    #         or xbet_response_data.get("status") == 401
-    #     ):
-    #         transaction.status = "error"
-    #         track_status_change(transaction, "error", source="system")
-    #         transaction.message=xbet_response_data.get('Message')
-    #         transaction.save()
-    #         transaction.refresh_from_db()
-    #         error_message = (
-    #             f"Une erreur est survenue lors de votre retrait de {transaction.amount} FCFA sur "
-    #             f"{transaction.app.name.upper() if transaction.app else 'l\'application'}. "
-    #             f"{transaction.app.name.upper() if transaction.app else ''} Message: {xbet_response_data.get('Message')}. "
-    #             f"Référence de la transaction {transaction.reference}"
-    #         )
-    #         send_notification(user=transaction.user, content=error_message, title="Erreur de transaction")
-    #         connect_pro_logger.info("L'appelle a ete success")
-    #     elif str(xbet_response_data.get("Success")).lower() == "true":
-    #         connect_pro_logger.info("app BET step suvccess 11111111")
-    #         amount = float(xbet_response_data.get("Summa")) * (-1)
-    #         transaction.amount = amount
-    #         transaction.status = "init_payment"
-    #         track_status_change(transaction, "init_payment", source="system")
-    #         transaction.validated_at = timezone.now()
-    #         transaction.save()
-    #         transaction.refresh_from_db()
-    #         connect_pro_logger.info("L'appelle a ete echec")
-    #         return True
+    
+    if transaction.type_trans == "withdrawal":
+        if transaction.app.hash:
+            response = servculAPI.withdraw_from_account(
+                userid=transaction.user_app_id, code=transaction.withdriwal_code
+            )
+            xbet_response_data = response.get("data")
+        else:
+            response = MobCashExternalService().create_withdrawal(transaction=transaction)
+            connect_pro_logger.info(
+                        f"Reponse de l'api de {transaction.app.name}: {response}"
+                    )
+            xbet_response_data = response
+        connect_pro_logger.info(f"La reponse de retrait de mobcash{response}")
+        if (
+            str(xbet_response_data.get("Success")).lower() == "false"
+            or xbet_response_data.get("status") == 401
+        ):
+            transaction.status = "error"
+            track_status_change(transaction, "error", source="system")
+            transaction.message=xbet_response_data.get('Message')
+            transaction.save()
+            transaction.refresh_from_db()
+            error_message = (
+                f"Une erreur est survenue lors de votre retrait de {transaction.amount} FCFA sur "
+                f"{transaction.app.name.upper() if transaction.app else 'l\'application'}. "
+                f"{transaction.app.name.upper() if transaction.app else ''} Message: {xbet_response_data.get('Message')}. "
+                f"Référence de la transaction {transaction.reference}"
+            )
+            send_notification(user=transaction.user, content=error_message, title="Erreur de transaction")
+            connect_pro_logger.info("L'appelle a ete success")
+        elif str(xbet_response_data.get("Success")).lower() == "true":
+            connect_pro_logger.info("app BET step suvccess 11111111")
+            amount = float(xbet_response_data.get("Summa")) * (-1)
+            transaction.amount = amount
+            transaction.status = "init_payment"
+            track_status_change(transaction, "init_payment", source="system")
+            transaction.validated_at = timezone.now()
+            transaction.save()
+            transaction.refresh_from_db()
+            connect_pro_logger.info("L'appelle a ete echec")
+            return True
 
 
 def send_event(channel_name, event_name, data):
@@ -1204,18 +1203,20 @@ def feexpay_withdrawall_process(transaction: Transaction, disbursements=False):
     Suit le même pattern que connect_pro_withd_process
     """
     connect_pro_logger.info("Demarrage dans la fonction de retrait feexpay")
-    
-    if transaction.type_trans == "withdrawal" and not disbursements:
-        response = xbet_withdrawal_process(transaction=transaction)
-    else:
-        response = True
-    
-    if response == True:
-        connect_pro_logger.info(f"feexpay a retourner success {response}")
-        feexpay_payout(transaction=transaction)
-    else:
-        connect_pro_logger.info(f"feexpay a retourner failled {response}")
 
+    try:
+        if transaction.type_trans == "withdrawal" and not disbursements:
+            response = xbet_withdrawal_process(transaction=transaction)
+        else:
+            response = True
+
+        if response == True:
+            connect_pro_logger.info(f"feexpay a retourner success {response}")
+            feexpay_payout(transaction=transaction)
+        else:
+            connect_pro_logger.info(f"feexpay a retourner failled {response}")
+    except Exception as e:
+        connect_pro_logger.info(f"une eerreur es survenue dans la page with process plateform {e}")
 
 def feexpay_check_status(public_id):
     """
