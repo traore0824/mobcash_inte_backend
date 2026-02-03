@@ -121,7 +121,10 @@ def send_notification(
             send_telegram_message(content=content, chat_id=user.telegram_user_id)
         elif isinstance(user, User):
             # ✅ Notification via push et base de données
-            response = send_push_noti(user=user, title=title, body=content, data=data)
+            try:
+                response = send_push_noti(user=user, title=title, body=content, data=data)
+            except Exception as e:
+                connect_pro_logger.error("token expirer ou invalide ")
             connect_pro_logger.warning(
                 f"send_notification: 1111111111111 ({response})"
             )
