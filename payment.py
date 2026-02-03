@@ -951,6 +951,7 @@ def xbet_withdrawal_process(transaction: Transaction):
                 f"{transaction.app.name.upper() if transaction.app else ''} Message: {xbet_response_data.get('Message')}. "
                 f"Référence de la transaction {transaction.reference}"
             )
+            
             send_notification(user=transaction.user, content=error_message, title="Erreur de transaction")
             connect_pro_logger.info("L'appelle a ete success")
         elif str(xbet_response_data.get("Success")).lower() == "true":
