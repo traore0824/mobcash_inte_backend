@@ -1043,14 +1043,12 @@ def feexpay_payout(transaction: Transaction):
         return
 
     # Récupérer le numéro de téléphone
-    phone_number = transaction.phone_number or transaction.phone or ""
+    phone_number = transaction.phone_number 
 
     # Déterminer le réseau depuis payment_mode ou network
     network_name = None
-    if transaction.payment_mode:
-        network_name = transaction.payment_mode.upper()
-    elif transaction.network:
-        network_name = transaction.network.name.upper()
+    
+    network_name = transaction.network.name.upper()
 
     if not network_name:
         connect_pro_logger.error("Réseau non spécifié pour le retrait")
