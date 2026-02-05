@@ -2221,4 +2221,33 @@ class ChangeTransactionStatusManuelViews(decorators.APIView):
         )
 
 
+class FinalizeDepositTransaction(decorators.APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, *args, **kwargs):
+        reference = self.request.data.get("reference")
+        transaction = Transaction.objects.filter(reference=reference).exclude(status="accept").first()
+        if not transaction:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        response = MobCashExternalService().create_deposit(transaction=transaction)
+        xbet_response_data = response
+        connect_pro_logger.info(
+            f"MobCash deposit response | response={response} | xbet_response_data={xbet_response_data}",
+        )
+
+        if xbet_response_data.get("Success") == True:
+            transaction.status = "accept"
+            transaction.mobcash_response = str(response)
+            transaction.save()
+
+            check_solde.delay(transaction_id=transaction.id)
+            send_notification(
+                user=transaction.user,
+                title="Opération réussie avec succès",
+                content=f"Vous avez effectué un dépôt de {transaction.amount} FCFA sur votre compte {transaction.app.name if transaction.app else 'plateforme'}",
+            )
+        return Response(TransactionDetailsSerializer(transaction).data)
+
+
 # Create your views here.

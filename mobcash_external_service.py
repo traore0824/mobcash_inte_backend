@@ -354,10 +354,11 @@ class MobCashExternalService:
             try:
                 if str(raw_response.get("Success")).lower() == "true":
                     transaction.message = "Dépôt effectué avec succès."
-                    transaction.save()
                 else:
                     transaction.message = raw_response.get("Message")
-                    transaction.save()
+
+                transaction.mobcash_response = str(raw_response)
+                transaction.save()
             except Exception as e:
                 logger.error(
                     "[MOBCASH] [DEPOSIT_MESSAGE_ERROR] Erreur lors de la traduction/sauvegarde du message",
@@ -426,10 +427,10 @@ class MobCashExternalService:
             try:
                 if str(raw_response.get("Success")).lower() == "true":
                     transaction.message = "Retrait effectué avec succès."
-                    transaction.save()
                 else:
                     transaction.message = raw_response.get("Message")
-                    transaction.save()
+                transaction.mobcash_response = str(raw_response)
+                transaction.save()
             except Exception as e:
                 logger.error(
                     "[MOBCASH] [WITHDRAWAL_MESSAGE_ERROR] Erreur lors de la traduction/sauvegarde du message",

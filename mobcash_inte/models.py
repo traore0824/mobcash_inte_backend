@@ -238,6 +238,7 @@ class Transaction(models.Model):
     fond_calculate = models.BooleanField(default=False)
     all_status = models.JSONField(default=list, blank=True)
     fixed_by_admin = models.BooleanField(default=False)
+    mobcash_response = models.TextField(blank=True, null=True)
 
     class Meta:
         verbose_name = "Transaction"
