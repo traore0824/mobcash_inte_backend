@@ -1,5 +1,6 @@
 import logging
 import os
+from django.forms import ValidationError
 from django.shortcuts import render
 from datetime import timedelta
 from django.conf.urls import handler404
@@ -1806,65 +1807,114 @@ class MobCashBalance(decorators.APIView):
         return result
 from dotenv import load_dotenv
 load_dotenv()
+
+from celery import shared_task
+
+@shared_task
+def feexpay_payout_task( amount: int, phone_number: str, network_name: str):
+    """
+    Task Celery pour créer un retrait Feexpay
+    """
+
+    connect_pro_logger.info("=== FEEXPAY PAYOUT TASK START ===")
+
+    # Variables d'environnement
+    shop = os.getenv("FEEXPAY_CUSTOMER_ID")
+    api_key = os.getenv("FEEXPAY_API_KEY")
+
+    if not shop:
+        connect_pro_logger.error("FEEXPAY_CUSTOMER_ID non configuré")
+        raise ValidationError("FEEXPAY_CUSTOMER_ID non configuré")
+
+    if not api_key:
+        connect_pro_logger.error("FEEXPAY_API_KEY non configuré")
+        raise ValidationError("FEEXPAY_API_KEY non configuré")
+
+    url = "https://api.feexpay.me/api/payouts/public/transfer/global"
+
+    connect_pro_logger.info(
+        f"Initialisation retrait | amount={amount} | phone={phone_number} | network={network_name}"
+    )
+
+    data = {
+        "phoneNumber": phone_number,
+        "amount": str(amount),
+        "shop": shop,
+        "network": network_name,
+        "motif": "Retrait de caisse",
+    }
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+
+    try:
+        connect_pro_logger.info("Envoi requête Feexpay payout")
+
+        response = requests.post(url=url, json=data, headers=headers, timeout=2)
+
+        connect_pro_logger.info(
+            f"Réponse Feexpay | status={response.status_code} | body={response.text}"
+        )
+
+        response.raise_for_status()
+
+        response_data = response.json()
+
+        connect_pro_logger.info("=== FEEXPAY PAYOUT TASK SUCCESS ===")
+        return response_data
+
+    except requests.exceptions.RequestException as e:
+        connect_pro_logger.error(
+            f"Erreur HTTP Feexpay payout | {str(e)}", exc_info=True
+        )
+        raise
+
+    except Exception as e:
+        connect_pro_logger.critical(
+            f"Erreur inconnue Feexpay payout | {str(e)}", exc_info=True
+        )
+        raise
+
+
 class TestAPIViews(decorators.APIView):
+
     def post(self, request, *args, **kwargs):
-        # def feexpay_payout(transaction: Transaction):
-        """
-        Fonction pour créer un retrait Feexpay
-        Suit le même pattern que feexpay_deposit
-        """
-        # Vérifier les variables d'environnement
-        shop = os.getenv("FEEXPAY_CUSTOMER_ID")
-        if not shop:
-            connect_pro_logger.error("FEEXPAY_CUSTOMER_ID non configuré")
-            return
+        connect_pro_logger.info("API payout appelée")
 
-        api_key = os.getenv('FEEXPAY_API_KEY')
-        if not api_key:
-            connect_pro_logger.error("FEEXPAY_API_KEY non configuré")
-            return
-
-        # URL pour les retraits
-        url = "https://api.feexpay.me/api/payouts/public/transfer/global"
-
-        # Préparer les données
         amount = 100
-        
-
-        # Récupérer le numéro de téléphone
-        phone_number = "2290155187395" 
-
-        # Déterminer le réseau depuis payment_mode ou network
-        network_name = None
-        
+        phone_number = "2290155187395"
         network_name = "MOOV"
 
-        if not network_name:
-            connect_pro_logger.error("Réseau non spécifié pour le retrait")
-            return
-
-        data = {
-            "phoneNumber": phone_number,
-            "amount": str(amount),
-            "shop": shop,
-            "network": network_name,
-            "motif": "Retrait de caisse",
-        }
-
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        }
-
         try:
-            connect_pro_logger.info("debut de creatuion de retrait feexpay")
-            response = requests.post(url=url, json=data, headers=headers, timeout=45)
-            connect_pro_logger.info(f" feexpay payout response {response.json()}")
+            task = feexpay_payout_task.delay(
+                amount=amount,
+                phone_number=phone_number,
+                network_name=network_name,
+            )
 
-            response_data = response.json()
-            return Response({"data": response_data})
+            connect_pro_logger.info(
+                f"Task Celery feexpay_payout lancée | task_id={task.id}"
+            )
+
+            return Response(
+                {
+                    "message": "Retrait en cours de traitement",
+                    "task_id": task.id,
+                },
+                status=status.HTTP_202_ACCEPTED,
+            )
+
         except Exception as e:
-            return Response({"data": e})
+            connect_pro_logger.error(
+                f"Erreur lancement task Celery | {str(e)}", exc_info=True
+            )
+
+            return Response(
+                {"error": "Impossible de lancer le retrait"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 class RechargeMobcashBalanceView(generics.ListCreateAPIView):
