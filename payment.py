@@ -18,7 +18,7 @@ from mobcash_inte.models import Bonus, Caisse, Reward, Setting, Transaction
 from django.utils import timezone
 from dateutil.relativedelta import relativedelta
 import logging
-from django.db import transaction as db_transaction
+from django.db import OperationalError, transaction as db_transaction
 from django.db.models import Q
 from mobcash_inte.serializers import TransactionDetailsSerializer
 from mobcash_inte_backend.settings import BASE_URL
@@ -1196,26 +1196,90 @@ def feexpay_deposit(transaction: Transaction):
         connect_pro_logger.critical(f" Erreur de creation feexpay {e}")
 
 
+from django.db import transaction as db_transaction
 def feexpay_withdrawall_process(transaction: Transaction, disbursements=False):
     """
-    Traite le retrait Feexpay après création de la transaction
-    Suit le même pattern que connect_pro_withd_process
+    Traite le retrait Feexpay de manière atomique
+    Empêche le double traitement même avec Celery
     """
-    connect_pro_logger.info("Demarrage dans la fonction de retrait feexpay")
+
+    connect_pro_logger.info(
+        f"[FEEXPAY_WITHDRAW] Début process | transaction_id={transaction.id}"
+    )
 
     try:
-        if transaction.type_trans == "withdrawal" and not disbursements:
-            response = xbet_withdrawal_process(transaction=transaction)
-        else:
-            response = True
+        with db_transaction.atomic():
+            # 🔒 Lock de la transaction en base
+            trx = (
+                Transaction.objects
+                .select_for_update()
+                .get(id=transaction.id)
+            )
 
-        if response == True:
-            connect_pro_logger.info(f"feexpay a retourner success {response}")
-            feexpay_payout(transaction=transaction)
-        else:
-            connect_pro_logger.info(f"feexpay a retourner failled {response}")
+            # 🛑 Sécurité anti double traitement
+            if trx.payout_started:
+                connect_pro_logger.warning(
+                    f"[FEEXPAY_WITHDRAW] Déjà en cours | transaction_id={trx.id}"
+                )
+                return False
+
+            if trx.payout_done:
+                connect_pro_logger.warning(
+                    f"[FEEXPAY_WITHDRAW] Déjà traité | transaction_id={trx.id}"
+                )
+                return False
+
+            # Marquer comme démarré AVANT tout appel externe
+            trx.payout_started = True
+            trx.save(update_fields=["payout_started"])
+
+            connect_pro_logger.info(
+                f"[FEEXPAY_WITHDRAW] Lock OK | transaction_id={trx.id}"
+            )
+
+            # 🔁 Traitement métier
+            if trx.type_trans == "withdrawal" and not disbursements:
+                response = xbet_withdrawal_process(transaction=trx)
+            else:
+                response = True
+
+            if response is not True:
+                raise Exception("Echec du process xbet_withdrawal")
+
+        # ⚠️ On sort volontairement du atomic ici
+        # 👉 appel externe (Feexpay)
+        connect_pro_logger.info(
+            f"[FEEXPAY_WITHDRAW] Appel payout Feexpay | transaction_id={trx.id}"
+        )
+
+        feexpay_payout(transaction=trx)
+
+        # ✅ Finalisation
+        with db_transaction.atomic():
+            trx = Transaction.objects.select_for_update().get(id=trx.id)
+            trx.payout_done = True
+            trx.save(update_fields=["payout_done"])
+
+            connect_pro_logger.info(
+                f"[FEEXPAY_WITHDRAW] Succès final | transaction_id={trx.id}"
+            )
+
+        return True
+
+    except OperationalError as e:
+        connect_pro_logger.error(
+            f"[FEEXPAY_WITHDRAW] Lock DB échoué | transaction_id={transaction.id} | {e}",
+            exc_info=True
+        )
+        return False
+
     except Exception as e:
-        connect_pro_logger.info(f"une eerreur es survenue dans la page with process plateform {e}")
+        connect_pro_logger.error(
+            f"[FEEXPAY_WITHDRAW] Erreur critique | transaction_id={transaction.id} | {e}",
+            exc_info=True
+        )
+        return False
+
 
 def feexpay_check_status(public_id):
     """
