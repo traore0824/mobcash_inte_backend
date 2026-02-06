@@ -1852,7 +1852,7 @@ def feexpay_payout_task( amount: int, phone_number: str, network_name: str):
     try:
         connect_pro_logger.info("Envoi requête Feexpay payout")
 
-        response = requests.post(url=url, json=data, headers=headers, timeout=2)
+        response = requests.post(url=url, json=data, headers=headers, timeout=90)
 
         connect_pro_logger.info(
             f"Réponse Feexpay | status={response.status_code} | body={response.text}"
