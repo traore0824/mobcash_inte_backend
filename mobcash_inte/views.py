@@ -1,7 +1,9 @@
 import logging
+import os
 from django.shortcuts import render
 from datetime import timedelta
 from django.conf.urls import handler404
+import requests
 from rest_framework.permissions import BasePermission
 from rest_framework import generics, permissions, status, decorators, viewsets
 from accounts.helpers import CustomPagination
@@ -1802,12 +1804,67 @@ class MobCashBalance(decorators.APIView):
             )
 
         return result
-
+from dotenv import load_dotenv
+load_dotenv()
 class TestAPIViews(decorators.APIView):
     def post(self, request, *args, **kwargs):
-        api = CashAPIService(api_key="ebfad3fbccb250211271dd519da8b9e9c10d4797a9ea6f772ee34245c4e6ee0f")
-        result = api.create_deposit(user_id=339966934, amount=500)
-        return Response({"data": result})
+        # def feexpay_payout(transaction: Transaction):
+        """
+        Fonction pour créer un retrait Feexpay
+        Suit le même pattern que feexpay_deposit
+        """
+        # Vérifier les variables d'environnement
+        shop = os.getenv("FEEXPAY_CUSTOMER_ID")
+        if not shop:
+            connect_pro_logger.error("FEEXPAY_CUSTOMER_ID non configuré")
+            return
+
+        api_key = os.getenv('FEEXPAY_API_KEY')
+        if not api_key:
+            connect_pro_logger.error("FEEXPAY_API_KEY non configuré")
+            return
+
+        # URL pour les retraits
+        url = "https://api.feexpay.me/api/payouts/public/transfer/global"
+
+        # Préparer les données
+        amount = 100
+        
+
+        # Récupérer le numéro de téléphone
+        phone_number = "2290155187395" 
+
+        # Déterminer le réseau depuis payment_mode ou network
+        network_name = None
+        
+        network_name = "MOOV"
+
+        if not network_name:
+            connect_pro_logger.error("Réseau non spécifié pour le retrait")
+            return
+
+        data = {
+            "phoneNumber": phone_number,
+            "amount": str(amount),
+            "shop": shop,
+            "network": network_name,
+            "motif": "Retrait de caisse",
+        }
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        }
+
+        try:
+            connect_pro_logger.info("debut de creatuion de retrait feexpay")
+            response = requests.post(url=url, json=data, headers=headers, timeout=45)
+            connect_pro_logger.info(f" feexpay payout response {response.json()}")
+
+            response_data = response.json()
+            return Response({"data": response_data})
+        except Exception as e:
+            return Response({"data": e})
 
 
 class RechargeMobcashBalanceView(generics.ListCreateAPIView):
