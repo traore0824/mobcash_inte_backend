@@ -23,6 +23,7 @@ from mobcash_inte.helpers import (
 )
 from mobcash_inte.mobcash_service import CashAPIService
 from mobcash_inte.models import (
+    TYPE_TRANS,
     Bonus,
     Caisse,
     Coupon,
@@ -1624,12 +1625,23 @@ class StatisticsView(decorators.APIView):
         # Transactions par application
         transactions_by_app = {}
         apps = AppName.objects.all()
+
         for app in apps:
-            app_transactions = transactions.filter(app=app, status="accept")
-            transactions_by_app[app.name] = {
-                "count": app_transactions.count(),
-                "total_amount": float(app_transactions.aggregate(total=Sum("amount"))["total"] or 0)
-            }
+            transactions_by_app[app.name] = {}
+
+            for type_key, _ in TYPE_TRANS:
+                app_transactions = transactions.filter(
+                    app=app,
+                    status="accept",
+                    type_trans=type_key
+                )
+
+                transactions_by_app[app.name][type_key] = {
+                    "count": app_transactions.count(),
+                    "total_amount": float(
+                        app_transactions.aggregate(total=Sum("amount"))["total"] or 0
+                    ),
+                }
 
         # Balance Bizao (Solde de caisse total)
         total_balance_bizao = Caisse.objects.aggregate(
