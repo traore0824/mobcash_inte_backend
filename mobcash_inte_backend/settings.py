@@ -536,7 +536,7 @@ CELERY_TIMEZONE = "UTC"
 CELERY_BEAT_SCHEDULE = {
     "check-pending-feexpay-transactions": {
         "task": "payment.check_pending_feexpay_transactions",
-        "schedule": 120.0,  # Toutes les 2 minutes (120 secondes)
+        "schedule": 60.0,  # Toutes les 2 minutes (120 secondes)
     },
 }
 
