@@ -398,7 +398,7 @@ def connect_pro_webhook(data):
         )
         if not transaction:
             connect_pro_logger.info(
-                f"La transaction avec public id {data.get("uid")} n'existe pas ou a ete deja traiter"
+                f"La transaction avec public id {data.get('uid')} n'existe pas ou a ete deja traiter"
             )
             return
             # data = None
