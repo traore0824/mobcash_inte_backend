@@ -22,6 +22,16 @@ else
 fi
 
 # --------------------------
+# Vérifie les certificats SSL
+# --------------------------
+if [ ! -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
+  echo "❌ Certificats SSL introuvables pour $DOMAIN !"
+  echo "Veuillez générer les certificats avec certbot AVANT de lancer ce script :"
+  echo "sudo certbot certonly --standalone -d $DOMAIN"
+  exit 1
+fi
+
+# --------------------------
 # Génère nginx.conf avec le domaine
 # --------------------------
 echo "Génération du nginx.conf pour $DOMAIN..."
