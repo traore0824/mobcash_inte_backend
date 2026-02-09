@@ -1197,7 +1197,7 @@ def feexpay_deposit(transaction: Transaction):
 from django.db import transaction as db_transaction
 @shared_task(
     bind=True,
-    time_limit=600,  # Override explicite au niveau de la tâche
+    time_limit=600,  
     soft_time_limit=570,
 )
 def feexpay_withdrawall_process(transaction_id, disbursements=False):
