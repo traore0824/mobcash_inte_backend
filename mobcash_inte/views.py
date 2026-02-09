@@ -565,12 +565,12 @@ class RewardTransactionViews(generics.CreateAPIView):
                     
                     # Envoyer une notification d'erreur à l'utilisateur
                     try:
-                            app_name = transaction.app.name.upper() if transaction.app else "l'application"
-                            error_message = (
-                                f"Une erreur est survenue lors de l'utilisation de vos rewards de {transaction.amount} FCFA sur "
-                                f"{app_name}. "
-                                f"Référence de la transaction : {transaction.reference}"
-                            )
+                        app_name = transaction.app.name.upper() if transaction.app else "l'application"
+                        error_message = (
+                            f"Une erreur est survenue lors de l'utilisation de vos rewards de {transaction.amount} FCFA sur "
+                            f"{app_name}. "
+                            f"Référence de la transaction : {transaction.reference}"
+                        )
                         process_transaction_notifications_and_bonus.delay(
                             transaction_id=transaction.id,
                             is_error=True,
