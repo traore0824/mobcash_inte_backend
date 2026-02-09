@@ -1048,7 +1048,7 @@ def feexpay_payout(transaction: Transaction):
 
     # Déterminer le réseau depuis payment_mode ou network
     network_name = None
-    
+
     network_name = transaction.network.name.upper()
 
     if not network_name:
@@ -1070,7 +1070,8 @@ def feexpay_payout(transaction: Transaction):
 
     try:
         connect_pro_logger.info("debut de creatuion de retrait feexpay")
-        response = requests.post(url=url, json=data, headers=headers, timeout=5000)
+        response = requests.post(url=url, json=data, headers=headers, timeout=60)
+        connect_pro_logger.info(f"le data envoyer data======{data}, url======{url} ")
         connect_pro_logger.info(f" feexpay payout response {response.json()}")
 
         response_data = response.json()
@@ -1085,10 +1086,7 @@ def feexpay_payout(transaction: Transaction):
                 transaction.public_id = feexpay_uid
             transaction.save()
 
-    except requests.exceptions.Timeout as e:
-        connect_pro_logger.critical(f" Erreur de creation feexpay payout timeout {e}")
-    except requests.exceptions.RequestException as e:
-        connect_pro_logger.critical(f" Erreur de creation feexpay payout network error {e}")
+        # connect_pro_logger.critical(f" Erreur de creation feexpay payout network error {e}")
     except Exception as e:
         connect_pro_logger.critical(f" Erreur de creation feexpay payout {e}")
 
@@ -1526,6 +1524,3 @@ def connect_balance():
         return {"data": response.json(), "code": constant.CODE_SUCCESS}
     except Exception as e:
         return {"error": str(e), "code": constant.CODE_EXEPTION}
-
-
-
