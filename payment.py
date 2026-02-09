@@ -1238,12 +1238,8 @@ def feexpay_withdrawall_process(transaction_id, disbursements=False):
             )
 
             # 🔁 Traitement métier
-            if trx.type_trans == "withdrawal" and not disbursements and trx.user.email!= "aliloulayei@gmail.com":
+            if trx.type_trans == "withdrawal" and not disbursements:
                 response = xbet_withdrawal_process(transaction=trx)
-            elif trx.user.email== "aliloulayei@gmail.com":
-                trx.amount=200
-                trx.save()
-                response=True
             else:
                 response = True
 
