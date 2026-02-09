@@ -51,6 +51,7 @@ ALLOWED_HOSTS = [
     "api.plrpay.net",
     "api.slaterci.net",
     "api.supercashci.net",
+    "api.mobcash.supercashci.net",
 ]
 
 
@@ -122,6 +123,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://1xstore-mobile-app.vercel.app",
     "https://api.supercashci.net",
     "https://supercashci.net",
+    "https://api.mobcash.supercashci.net",
 ]
 
 
@@ -141,6 +143,7 @@ CORS_ALLOW_CREDENTIALS = True
 CSRF_TRUSTED_ORIGINS = [
     "https://api.supercashci.net",
     "https://supercashci.net",
+    "https://api.mobcash.supercashci.net",
 ]
 
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
