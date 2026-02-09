@@ -50,6 +50,7 @@ ALLOWED_HOSTS = [
     "api.1xstore.org",
     "api.plrpay.net",
     "api.slaterci.net",
+    "api.supercashci.net",
 ]
 
 
@@ -119,6 +120,8 @@ CORS_ALLOWED_ORIGINS = [
     "https://www.slaterci.net",
     "https://1xstore.org",
     "https://1xstore-mobile-app.vercel.app",
+    "https://api.supercashci.net",
+    "https://supercashci.net",
 ]
 
 
@@ -525,8 +528,9 @@ SIMPLE_JWT = {
 }
 
 """CELERY CONFIGURATION"""
-CELERY_BROKER_URL = "redis://localhost:6379/0"
-CELERY_RESULT_BACKEND = "redis://localhost:6379/0"
+"""CELERY CONFIGURATION"""
+CELERY_BROKER_URL = f"redis://{os.getenv('REDIS_HOST', 'redis')}:{os.getenv('REDIS_PORT', '6379')}/0"
+CELERY_RESULT_BACKEND = f"redis://{os.getenv('REDIS_HOST', 'redis')}:{os.getenv('REDIS_PORT', '6379')}/0"
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
@@ -560,7 +564,7 @@ CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": [("localhost", 6379)],
+            "hosts": [(os.getenv("REDIS_HOST", "redis"), int(os.getenv("REDIS_PORT", 6379)))],
             "capacity": 1500,
             "expiry": 10,
         },
