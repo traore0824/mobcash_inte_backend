@@ -42,8 +42,9 @@ docker compose exec web python manage.py check
 # --------------------------
 # Collectstatic et migrations
 # --------------------------
-echo "Collectstatic et migrations..."
+echo "Collectstatic, Makemigrations et migrations..."
 docker compose exec web python manage.py collectstatic --noinput
+docker compose exec web python manage.py makemigrations
 docker compose exec web python manage.py migrate
 
 echo "✅ Déploiement terminé pour $DOMAIN !"

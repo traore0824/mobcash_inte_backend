@@ -147,8 +147,8 @@ minforeveal/settings.py
 /key/*
 #_migrations/*
 #!_migrations/__init__.py
-# **/migrations/**
-# !**/migrations
-# !**/migrations/__init__.py
+**/migrations/**
+!**/migrations
+!**/migrations/__init__.py
 mobcash.json
 #**/migrations/*
