@@ -513,10 +513,11 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                         )
                 else:
                     # Handle transaction failure - Appel de la tâche Celery pour les notifications d'erreur
+                    app_name = transaction.app.name.upper() if transaction.app else "l'application"
                     error_message = (
                         f"Une erreur est survenue lors de votre dépôt de {transaction.amount} FCFA sur "
-                        f"{transaction.app.name.upper() if transaction.app else 'l\'application'}. "
-                        f"{transaction.app.name.upper() if transaction.app else ''} Message: {xbet_response_data.get('Message')}. "
+                        f"{app_name}. "
+                        f"{app_name} Message: {xbet_response_data.get('Message')}. "
                         f"Référence de la transaction {transaction.reference}"
                     )
                     transaction.message=xbet_response_data.get('Message')
@@ -577,22 +578,23 @@ def webhook_transaction_failled(transaction: Transaction):
     
     # Envoyer une notification d'erreur à l'utilisateur
     try:
+        app_name = transaction.app.name.upper() if transaction.app else "l'application"
         if transaction.type_trans == "deposit":
             error_message = (
                 f"Une erreur est survenue lors de votre dépôt de {transaction.amount} FCFA sur "
-                f"{transaction.app.name.upper() if transaction.app else 'l\'application'}. "
+                f"{app_name}. "
                 f"Référence de la transaction : {transaction.reference}"
             )
         elif transaction.type_trans == "withdrawal":
             error_message = (
                 f"Une erreur est survenue lors de votre retrait de {transaction.amount} FCFA sur "
-                f"{transaction.app.name.upper() if transaction.app else 'l\'application'}. "
+                f"{app_name}. "
                 f"Référence de la transaction : {transaction.reference}"
             )
         elif transaction.type_trans == "reward":
             error_message = (
                 f"Une erreur est survenue lors de l'utilisation de vos rewards de {transaction.amount} FCFA sur "
-                f"{transaction.app.name.upper() if transaction.app else 'l\'application'}. "
+                f"{app_name}. "
                 f"Référence de la transaction : {transaction.reference}"
             )
         else:
@@ -706,11 +708,11 @@ def process_transaction_notifications_and_bonus(transaction_id, is_error=False, 
         # 1. Notification à l'utilisateur pour transaction réussie
         if transaction.type_trans in ["deposit", "reward"]:
             try:
-                user = transaction.user if transaction.user else transaction.telegram_user
                 if user:
+                    app_name = transaction.app.name if transaction.app else "l'application"
                     send_notification(
                         title="Opération réussie avec succès",
-                        content=f"Vous avez effectué un dépôt de {transaction.amount} FCFA sur votre compte {transaction.app.name if transaction.app else 'l\'application'}",
+                        content=f"Vous avez effectué un dépôt de {transaction.amount} FCFA sur votre compte {app_name}",
                         user=user,
                     )
             except Exception as e:
@@ -774,16 +776,17 @@ def process_transaction_notifications_and_bonus(transaction_id, is_error=False, 
         # 4. Notification pour retrait
         if transaction.type_trans == "withdrawal":
             try:
+                app_name = transaction.app.name if transaction.app else "l'application"
                 if transaction.user:
                     send_notification(
                         title="Opération réussie",
-                        content=f"Vous avez effectué un retrait de {transaction.amount} FCFA sur {transaction.app.name if transaction.app else 'l\'application'}",
+                        content=f"Vous avez effectué un retrait de {transaction.amount} FCFA sur {app_name}",
                         user=transaction.user,
                     )
                 elif transaction.telegram_user:
                     send_telegram_message(
                         chat_id=transaction.telegram_user.telegram_user_id,
-                        content=f"Vous avez effectué un retrait de {transaction.amount} FCFA sur {transaction.app.name if transaction.app else 'l\'application'}",
+                        content=f"Vous avez effectué un retrait de {transaction.amount} FCFA sur {app_name}",
                     )
             except Exception as e:
                 connect_pro_logger.error(
@@ -945,10 +948,11 @@ def xbet_withdrawal_process(transaction: Transaction):
             transaction.message=xbet_response_data.get('Message')
             transaction.save()
             transaction.refresh_from_db()
+            app_name = transaction.app.name.upper() if transaction.app else "l'application"
             error_message = (
                 f"Une erreur est survenue lors de votre retrait de {transaction.amount} FCFA sur "
-                f"{transaction.app.name.upper() if transaction.app else 'l\'application'}. "
-                f"{transaction.app.name.upper() if transaction.app else ''} Message: {xbet_response_data.get('Message')}. "
+                f"{app_name}. "
+                f"{app_name} Message: {xbet_response_data.get('Message')}. "
                 f"Référence de la transaction {transaction.reference}"
             )
             
