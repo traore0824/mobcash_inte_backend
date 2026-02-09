@@ -1070,7 +1070,7 @@ def feexpay_payout(transaction: Transaction):
 
     try:
         connect_pro_logger.info("debut de creatuion de retrait feexpay")
-        response = requests.post(url=url, json=data, headers=headers, timeout=60)
+        response = requests.post(url=url, json=data, headers=headers, timeout=90)
         connect_pro_logger.info(f"le data envoyer data======{data}, url======{url} ")
         connect_pro_logger.info(f" feexpay payout response {response.json()}")
 
