@@ -915,7 +915,7 @@ def payment_fonction(reference):
         if transaction.api == "connect":
             connect_pro_withd_process(transaction=transaction)
         elif transaction.api == "feexpay":
-            feexpay_withdrawall_process.delay(transaction_id=transaction.id)
+            feexpay_withdrawall_process(transaction_id=transaction.id)
 
 
 def xbet_withdrawal_process(transaction: Transaction):
