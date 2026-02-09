@@ -6,6 +6,7 @@ services:
     volumes:
       - static:/var/www/mobcash/static
       - media:/var/www/mobcash/media
+      - ./logs:/app/logs
     depends_on:
       - postgres
       - redis
@@ -14,6 +15,8 @@ services:
     build: .
     command: daphne -b 0.0.0.0 -p 8001 mobcash_inte_backend.asgi:application
     env_file: .env
+    volumes:
+      - ./logs:/app/logs
     depends_on:
       - web
 
@@ -23,6 +26,7 @@ services:
     env_file: .env
     volumes:
       - media:/var/www/mobcash/media
+      - ./logs:/app/logs
     depends_on:
       - postgres
       - redis
