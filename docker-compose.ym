@@ -1,0 +1,61 @@
+version: "3.9"
+
+services:
+  web:
+    build: .
+    command: gunicorn mobcash_inte_backend.wsgi:application --bind 0.0.0.0:8000
+    env_file: .env
+    volumes:
+      - static:/var/www/mobcash/static
+      - media:/var/www/mobcash/media
+    depends_on:
+      - postgres
+      - redis
+
+  daphne:
+    build: .
+    command: daphne -b 0.0.0.0 -p 8001 mobcash_inte_backend.asgi:application
+    env_file: .env
+    depends_on:
+      - web
+
+  celery:
+    build: .
+    command: celery -A mobcash_inte_backend worker --loglevel=info
+    env_file: .env
+    volumes:
+      - media:/var/www/mobcash/media
+    depends_on:
+      - postgres
+      - redis
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: ${DATABASE_NAME}
+      POSTGRES_USER: ${DATABASE_USER}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+      - static:/var/www/mobcash/static
+      - media:/var/www/mobcash/media
+      - /etc/letsencrypt:/etc/letsencrypt
+    depends_on:
+      - web
+      - daphne
+
+volumes:
+  pgdata:
+  static:
+  media:
