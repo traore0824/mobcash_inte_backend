@@ -66,6 +66,11 @@ EMAIL_PASSWORD=votre_mot_de_passe
 
 # Base URL
 BASE_URL=https://votre-domaine.com
+
+# Ports internes (Multi-projets)
+# Utilisez des ports différents pour chaque projet sur le même VPS
+APP_PORT=8000       # Port pour Django/Gunicorn
+WS_PORT=8001        # Port pour WebSockets/Daphne
 ```
 
 2. **Nom de domaine** pointant vers votre serveur

@@ -128,21 +128,21 @@ success "PostgreSQL démarré et activé au démarrage"
 
 # Charger les variables d'environnement
 if [ -f .env ]; then
-    source .env
+    # Nettoyer les espaces et exporter les variables pour le script
+    export $(grep -v '^#' .env | xargs)
     success "Fichier .env chargé"
 else
     error "Fichier .env introuvable!"
-    info "Créez un fichier .env avec les variables suivantes:"
-    echo "DATABASE_NAME=mobcash_db"
-    echo "DATABASE_USER=mobcash_user"
-    echo "DATABASE_PASSWORD=votre_mot_de_passe"
-    echo "DATABASE_HOST=localhost"
-    echo "DATABASE_PORT=5432"
-    echo "REDIS_HOST=localhost"
-    echo "REDIS_PORT=6379"
-    echo "SECRET_KEY=votre_secret_key"
     exit 1
 fi
+
+# Configuration des ports (Multi-projets)
+GUNICORN_PORT=${APP_PORT:-8000}
+DAPHNE_PORT=${WS_PORT:-8001}
+
+info "Configuration des ports internes:"
+info "  - Gunicorn: $GUNICORN_PORT"
+info "  - Daphne: $DAPHNE_PORT"
 
 # Créer la base de données et l'utilisateur
 info "Configuration de la base de données PostgreSQL..."
@@ -346,7 +346,7 @@ Environment="PATH=$VENV_PATH/bin"
 EnvironmentFile=$PROJECT_DIR/.env
 ExecStart=$VENV_PATH/bin/gunicorn \\
     --workers 4 \\
-    --bind 127.0.0.1:8000 \\
+    --bind 127.0.0.1:$GUNICORN_PORT \\
     --timeout 120 \\
     --access-logfile $PROJECT_DIR/logs/gunicorn_access.log \\
     --error-logfile $PROJECT_DIR/logs/gunicorn_error.log \\
@@ -368,7 +368,7 @@ success "Gunicorn démarré et activé au démarrage"
 
 # Vérifier le statut
 if sudo systemctl is-active --quiet gunicorn_mobcash; then
-    success "Gunicorn fonctionne correctement sur le port 8000"
+    success "Gunicorn fonctionne correctement sur le port $GUNICORN_PORT"
 else
     error "Gunicorn n'a pas démarré correctement"
     sudo systemctl status gunicorn_mobcash
@@ -394,7 +394,7 @@ Environment="PATH=$VENV_PATH/bin"
 EnvironmentFile=$PROJECT_DIR/.env
 ExecStart=$VENV_PATH/bin/daphne \\
     -b 127.0.0.1 \\
-    -p 8001 \\
+    -p $DAPHNE_PORT \\
     mobcash_inte_backend.asgi:application
 
 [Install]
@@ -412,7 +412,7 @@ success "Daphne démarré et activé au démarrage"
 
 # Vérifier le statut
 if sudo systemctl is-active --quiet daphne_mobcash; then
-    success "Daphne fonctionne correctement sur le port 8001"
+    success "Daphne fonctionne correctement sur le port $DAPHNE_PORT"
 else
     error "Daphne n'a pas démarré correctement"
     sudo systemctl status daphne_mobcash
@@ -523,7 +523,7 @@ server {
 
     # WebSocket (Daphne)
     location /ws/ {
-        proxy_pass http://127.0.0.1:8001;
+        proxy_pass http://127.0.0.1:$DAPHNE_PORT;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -536,7 +536,7 @@ server {
 
     # Application Django (Gunicorn)
     location / {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://127.0.0.1:$GUNICORN_PORT;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -569,7 +569,7 @@ server {
     }
 
     location /ws/ {
-        proxy_pass http://127.0.0.1:8001;
+        proxy_pass http://127.0.0.1:$DAPHNE_PORT;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -580,7 +580,7 @@ server {
     }
 
     location / {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://127.0.0.1:$GUNICORN_PORT;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -638,14 +638,14 @@ fi
 
 # Vérifier Gunicorn
 if sudo systemctl is-active --quiet gunicorn_mobcash; then
-    success "✓ Gunicorn: actif (port 8000)"
+    success "✓ Gunicorn: actif (port $GUNICORN_PORT)"
 else
     error "✗ Gunicorn: inactif"
 fi
 
 # Vérifier Daphne
 if sudo systemctl is-active --quiet daphne_mobcash; then
-    success "✓ Daphne: actif (port 8001)"
+    success "✓ Daphne: actif (port $DAPHNE_PORT)"
 else
     error "✗ Daphne: inactif"
 fi
@@ -671,8 +671,8 @@ echo "  • Python: $PYTHON_VERSION"
 echo "  • PostgreSQL: installé et configuré"
 echo "  • Redis: installé et configuré"
 echo "  • Nginx: installé et configuré"
-echo "  • Gunicorn: actif sur le port 8000"
-echo "  • Daphne: actif sur le port 8001"
+echo "  • Gunicorn: actif sur le port $GUNICORN_PORT"
+echo "  • Daphne: actif sur le port $DAPHNE_PORT"
 echo "  • Celery: actif (worker + beat)"
 if [ "$HAS_SSL" = true ]; then
     echo "  • SSL: configuré avec Let's Encrypt"
