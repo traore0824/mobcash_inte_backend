@@ -52,6 +52,7 @@ ALLOWED_HOSTS = [
     "api.slaterci.net",
     "api.supercashci.net",
     "api.mobcash.supercashci.net",
+    "api.i-cashci.net"
 ]
 
 
