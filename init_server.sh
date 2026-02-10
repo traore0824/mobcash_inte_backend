@@ -156,6 +156,9 @@ sudo -u postgres psql -c "ALTER ROLE ${DATABASE_USER} SET client_encoding TO 'ut
 sudo -u postgres psql -c "ALTER ROLE ${DATABASE_USER} SET default_transaction_isolation TO 'read committed';"
 sudo -u postgres psql -c "ALTER ROLE ${DATABASE_USER} SET timezone TO 'UTC';"
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE ${DATABASE_NAME} TO ${DATABASE_USER};"
+# Correction pour les erreurs de permission sur le schéma public (PostgreSQL 15+)
+sudo -u postgres psql -d ${DATABASE_NAME} -c "GRANT ALL ON SCHEMA public TO ${DATABASE_USER};"
+sudo -u postgres psql -c "ALTER USER ${DATABASE_USER} WITH SUPERUSER;"
 
 success "Base de données PostgreSQL configurée"
 

@@ -23,6 +23,7 @@ Le script effectue automatiquement :
 ### 3. **Configuration de la base de données**
 - ✅ Création de la base de données PostgreSQL
 - ✅ Création de l'utilisateur avec les bons droits
+- ✅ **Correction des permissions sur le dossier `public` (ALTER USER ... WITH SUPERUSER)**
 - ✅ Application des migrations Django
 
 ### 4. **Configuration SSL**
