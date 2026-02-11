@@ -125,6 +125,8 @@ CORS_ALLOWED_ORIGINS = [
     "https://api.supercashci.net",
     "https://supercashci.net",
     "https://api.mobcash.supercashci.net",
+    "https://www.i-cashci.net",
+    "https://icash-site.vercel.app",
 ]
 
 
