@@ -1342,11 +1342,23 @@ class CreateCoupon(generics.ListCreateAPIView):
 
     def get_queryset(self):
         """Afficher uniquement les coupons de moins de 24 heures"""
+        setting = Setting.objects.first()
         if self.request.user.is_staff:
             return Coupon.objects.all()
         else:
             last_24h = timezone.now() - relativedelta(hours=24)
-            return Coupon.objects.filter(created_at__gte=last_24h)
+            if not setting.requires_deposit_to_view_coupon:
+                return Coupon.objects.filter(created_at__gte=last_24h)
+            else:
+                total_deposit = Transaction.objects.filter(
+                    type_trans="deposit", status="accept"
+                ).aggregate(total=Sum("amount"))["total"] or 0
+                if total_deposit>= setting.minimun_deposit_before_view_coupon:
+                    return Coupon.objects.filter(created_at__gte=last_24h)
+                
+        return Coupon.objects.none()
+            
+                    
 
 
 class CouponDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
