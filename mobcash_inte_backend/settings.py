@@ -130,7 +130,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://icash-mobile-app.vercel.app",
     "https://admin.i-cashci.net",
     "https://admin.supercashci.net",
-    
+    "https://www.supercashci.net",
 ]
 
 
