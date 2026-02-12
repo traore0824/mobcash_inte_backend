@@ -222,8 +222,8 @@ class Transaction(models.Model):
     source = models.CharField(
         max_length=120, blank=True, null=True, choices=SOURCE_CHOICE
     )
-    # payout_started = models.BooleanField(default=False)
-    # payout_done = models.BooleanField(default=False)
+    payout_started = models.BooleanField(default=False)
+    payout_done = models.BooleanField(default=False)
 
     network = models.ForeignKey(
         Network, on_delete=models.CASCADE, blank=True, null=True
