@@ -137,7 +137,7 @@ def transaction_post_save(sender, instance, created, **kwargs):
         LoggerService.d(
             f"Statut de transaction {instance.id} changé de '{old_status}' à '{instance.status}'"
         )
-        send_transaction_event_once(instance)
+        # send_transaction_event_once(instance)
     else:
         logger.info(f"signal non envoyer {instance.status}")
         LoggerService.d(
