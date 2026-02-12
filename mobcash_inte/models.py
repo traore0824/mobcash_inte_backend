@@ -167,8 +167,8 @@ class Setting(models.Model):
     mobcash_api_key = models.URLField(blank=True, null=True)
     mobcash_api_secret = models.URLField(blank=True, null=True)
     bf_orange_marchand_phone = models.CharField(max_length=250, blank=True, null=True)
-    # requires_deposit_to_view_coupon = models.BooleanField(default=False)
-    # minimun_deposit_before_view_coupon = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    requires_deposit_to_view_coupon = models.BooleanField(default=False)
+    minimun_deposit_before_view_coupon = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
     def __str__(self):
         return str(self.id)
