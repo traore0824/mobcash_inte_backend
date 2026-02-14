@@ -8,7 +8,7 @@ from asgiref.sync import async_to_sync
 
 from logger import LoggerService
 from mobcash_inte.mobcash_service import BetApp
-from mobcash_inte.models import BotMessage, Notification
+from mobcash_inte.models import BotMessage, Notification, Transaction
 from mobcash_inte.serializers import NotificationSerializer
 from google.oauth2 import service_account
 from fcm_django.models import FCMDevice
@@ -181,3 +181,29 @@ def generate_reference(prefix, rand_digits=3):
     millis = int(time.time() * 1_000)
     rnd = secrets.randbelow(10**rand_digits)
     return f"{prefix}{millis:013d}{rnd:0{rand_digits}d}"
+
+
+def generate_ussd_code(transaction :Transaction):
+    """
+    Génère le code USSD formaté pour une transaction de dépôt.
+    """
+    
+    network = transaction.network
+    if not network or not network.ussd_code:
+        return None
+    if not network.payment_by_ussd_code:
+        return None
+    amount = transaction.amount
+    if network.reduce_fee and network.fee_payin:
+        # Calcul du montant après réduction (arrondi à l'entier le plus proche)
+        amount = int(amount - (amount * (float(network.fee_payin) / 100)))
+
+    # Formatage du code USSD en remplaçant {amount}
+    try:
+        formatted_ussd = network.ussd_code.format(amount=amount)
+        transaction.ussd_code = formatted_ussd
+        transaction.save(update_fields=["ussd_code"])
+        return formatted_ussd
+    except (KeyError, ValueError, IndexError) as e:
+        # logger.error(f"Erreur de formatage USSD pour la transaction {transaction.id}: {e}")
+        return None

@@ -60,7 +60,11 @@ class NetworkAdmin(admin.ModelAdmin):
                     "deposit_api",
                     "withdrawal_api",
                     "payment_by_link",
+                    "payment_by_ussd_code",
                     "otp_required",
+                    "reduce_fee",
+                    "ussd_code",
+                    "fee_payin",
                 )
             },
         ),

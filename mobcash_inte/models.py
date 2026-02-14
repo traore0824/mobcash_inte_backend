@@ -123,11 +123,15 @@ class Network(models.Model):
         max_length=100, choices=API_CHOICES, default="connect"
     )
     payment_by_link = models.BooleanField(default=False)
+    payment_by_ussd_code = models.BooleanField(default=False)
     otp_required = models.BooleanField(default=False)
     deposit_message = models.TextField(blank=True, null=True)
     active_for_deposit = models.BooleanField(default=True)
     active_for_with = models.BooleanField(default=True)
     manual_processing = models.BooleanField(default=False)
+    ussd_code = models.CharField(max_length=200, blank=True, null=True)
+    reduce_fee = models.BooleanField(default=False)
+    fee_payin = models.DecimalField(decimal_places=2, max_digits=10, blank=True, null=True)
 
 
 class Setting(models.Model):
@@ -244,6 +248,7 @@ class Transaction(models.Model):
     all_status = models.JSONField(default=list, blank=True)
     fixed_by_admin = models.BooleanField(default=False)
     mobcash_response = models.TextField(blank=True, null=True)
+    ussd_code = models.CharField(max_length=200, blank=True, null=True)
 
     class Meta:
         verbose_name = "Transaction"

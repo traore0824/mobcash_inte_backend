@@ -421,6 +421,10 @@ class CreateDepositTransactionViews(generics.CreateAPIView):
         transaction.api = transaction.network.deposit_api
         track_status_change(transaction, transaction.status, source="system")
         transaction.save()
+        if transaction.network.payment_by_ussd_code:
+            from .helpers import generate_ussd_code
+            generate_ussd_code(transaction)
+            
         payment_fonction(reference=transaction.reference)
         transaction.refresh_from_db()
         return Response(
@@ -1101,6 +1105,10 @@ class BotDepositTransactionViews(generics.CreateAPIView):
         transaction.api = transaction.network.deposit_api
         track_status_change(transaction, transaction.status, source="system")
         transaction.save()
+        if transaction.network.payment_by_ussd_code:
+            from .helpers import generate_ussd_code
+            generate_ussd_code(transaction)
+            
         payment_fonction(reference=transaction.reference)
         transaction.refresh_from_db()
         return Response(
