@@ -2258,7 +2258,7 @@ class UpdateTransactionStatusView(decorators.APIView):
                 transaction=transaction,
                 new_status=new_status,
                 source="admin",
-                admin_id=request.user.id,
+                admin_id=str(request.user.id),
             )
 
             # Mettre à jour le statut et marquer comme fixé par admin
