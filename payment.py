@@ -634,6 +634,7 @@ def accept_bonus_transaction(transaction: Transaction):
 
 @shared_task
 def process_transaction_notifications_and_bonus(transaction_id, is_error=False, error_message=None):
+    user = transaction.user if transaction.user else transaction.telegram_user
     """
     Tâche Celery pour traiter les notifications et bonus après une transaction.
     Cette fonction gère toutes les opérations lentes de manière asynchrone.
