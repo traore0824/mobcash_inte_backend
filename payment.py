@@ -393,7 +393,7 @@ def connect_pro_webhook(data):
         transaction = (
             Transaction.objects.filter(public_id=data.get("uid"))
             .exclude(Q(status="error") | Q(status="accept"))
-            .select_for_update(nowait=True)
+            .select_for_update()
             .first()
         )
         if not transaction:
@@ -1329,7 +1329,7 @@ def feexpay_webhook(data):
                 Q(reference=reference) | Q(public_id=reference)
             )
             .exclude(Q(status="error") | Q(status="accept"))
-            .select_for_update(nowait=True)
+            .select_for_update()
             .first()
         )
 

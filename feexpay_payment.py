@@ -267,7 +267,7 @@ def feexpay_webhook(data):
                 Q(reference=reference) | Q(public_id=reference)
             )
             .exclude(Q(status="error") | Q(status="accept"))
-            .select_for_update(nowait=True)
+            .select_for_update()
             .first()
         )
 

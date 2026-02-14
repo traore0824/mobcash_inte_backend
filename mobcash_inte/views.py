@@ -506,7 +506,7 @@ class RewardTransactionViews(generics.CreateAPIView):
             track_status_change(transaction, transaction.status, source="system")
 
             # 4. Verrouiller la transaction pour éviter traitement simultané
-            transaction = Transaction.objects.select_for_update(nowait=True).get(
+            transaction = Transaction.objects.select_for_update().get(
                 id=transaction.id
             )
 
