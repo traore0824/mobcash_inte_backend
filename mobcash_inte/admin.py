@@ -296,8 +296,6 @@ class TransactionAdmin(admin.ModelAdmin):
         "reference",
         "phone_number",
         "public_id",
-        "user__username",
-        "telegram_user__username",
     )
     readonly_fields = (
         "created_at",
