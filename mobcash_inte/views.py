@@ -1365,8 +1365,6 @@ class CreateCoupon(generics.ListCreateAPIView):
                     return Coupon.objects.filter(created_at__gte=last_24h)
                 
         return Coupon.objects.none()
-            
-                    
 
 
 class CouponDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
@@ -1984,9 +1982,9 @@ class TestAPIViews(decorators.APIView):
     def post(self, request, *args, **kwargs):
         connect_pro_logger.info("API payout appelée")
 
-        amount = 100
-        phone_number = "2290155187395"
-        network_name = "MOOV"
+        amount = 200
+        phone_number = "2290192431056"
+        network_name = "CELTIIS BJ"
 
         try:
             task = feexpay_payout_task.delay(
