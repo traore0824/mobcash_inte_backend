@@ -1046,7 +1046,7 @@ def feexpay_payout(transaction: Transaction):
     network_name = None
     if transaction.network.name == "sbin":
         url= "https://api.feexpay.me/api/payouts/public/celtiis_bj"
-        network_name="	CELTIIS BJ"
+        network_name = "	CELTIIS BJ"
     else:
         url = "https://api.feexpay.me/api/payouts/public/transfer/global"
         network_name = transaction.network.name.upper()
