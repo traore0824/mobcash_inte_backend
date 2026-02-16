@@ -126,26 +126,29 @@ def get_network_id(name):
     return None
 
 
-def fee_wave(montant):
-    """Calcule 1% arrondi au multiple de 5 supérieur"""
-    frais = montant * 0.01
-    if frais % 5 != 0:
-        frais = ((frais // 5) + 1) * 5
-    return int(frais)
+import math
+def fee_wave(montant: int) -> int:
+    """Calcule les frais Wave : 1% du montant envoyé, arrondi au multiple de 5 supérieur."""
+    return math.ceil(montant * 0.01 / 5) * 5
 
 
-def total_amount_to_send_wave(montant_souhaite):
+def total_amount_to_send_wave(montant_souhaite: int) -> int:
     """
-    Calcule combien il faut envoyer pour que le destinataire reçoive `montant_souhaite`
-    après déduction des frais Wave.
+    Calcule le montant total que l'expéditeur doit payer pour que
+    le destinataire reçoive au moins `montant_souhaite` (tolérance +1 F max).
+
+    Retourne uniquement : total_expediteur
     """
-    montant = montant_souhaite
+    montant_envoye = montant_souhaite
     while True:
-        frais = fee_wave(montant)
-        recu = montant - frais
-        if montant_souhaite <= recu <= montant_souhaite + 1:
-            return int(montant)
-        montant += 1  # on essaie un peu plus jusqu’à atteindre la bonne valeur
+        frais = fee_wave(montant_envoye)
+        recu = montant_envoye  # le destinataire reçoit le montant envoyé
+        total_expediteur = montant_envoye + frais
+
+        if recu >= montant_souhaite:
+            return total_expediteur  # juste le total payé par l'expéditeur
+
+        montant_envoye += 1  # on teste le prochain montant
 
 
 def connect_withdrawal(transaction: Transaction):
