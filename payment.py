@@ -234,11 +234,17 @@ def deposit_connect(transaction: Transaction):
         "Content-Type": "application/json",
     }
     url = None
+    amount=None 
+    if transaction.network.reduce_fee:
+        amount = int(amount - (amount * (float(transaction.network.fee_payin) / 100)))
+    else:
+        amount = transaction.amount
+
     if transaction.network.name == "wave":
         connect_pro_logger.info("debut de creatuion de transaction wave")
         url = CONNECT_PRO_BASE_URL + "/api/payments/wave-business-transactions/"
         data = {
-            "amount": transaction.amount,
+            "amount": amount,
             "recipient_phone": (
                 transaction.phone_number[3:]
                 if len(transaction.phone_number) > 10
@@ -251,7 +257,7 @@ def deposit_connect(transaction: Transaction):
             connect_pro_logger.info(f" connect pro  response {response.json()}")
             transaction.public_id = response.json().get("data").get("uid")
             transaction.transaction_link = (
-                setting.wave_default_link + f"?amount={transaction.amount}"
+                setting.wave_default_link + f"?amount={amount}"
             )
             transaction.save()
         except Exception as e:
@@ -264,7 +270,7 @@ def deposit_connect(transaction: Transaction):
         )
         url = CONNECT_PRO_BASE_URL + "/api/payments/momo-pay-transactions/"
         data = {
-            "amount": transaction.amount,
+            "amount": amount,
             "recipient_phone": (
                 transaction.phone_number[3:]
                 if len(transaction.phone_number) > 10
@@ -279,13 +285,12 @@ def deposit_connect(transaction: Transaction):
             transaction.public_id = response.json().get("data").get("uid")
             if transaction.network.name == "orange":
                 transaction.transaction_link = (
-                    setting.orange_default_link
-                    + f"&amount={transaction.amount}"
+                    setting.orange_default_link + f"&amount={amount}"
                 )
             else:
                 transaction.transaction_link = (
                     setting.mtn_default_link
-                    + f"?amount={transaction.amount}&reference={transaction.reference}"
+                    + f"?amount={amount}&reference={transaction.reference}"
                 )
             transaction.save()
         except Exception as e:
@@ -296,27 +301,6 @@ def deposit_connect(transaction: Transaction):
     else:
         connect_pro_logger.info(" Test de transaction par USSD")
         url = CONNECT_PRO_BASE_URL + "/api/payments/user/transactions/"
-        amount = 0
-        # Vérifier si MTN_NOT_FEE est activé pour MTN en CI
-        mtn_not_fee = os.getenv("MTN_NOT_FEE", "False").lower() == "true"
-        is_mtn_ci = transaction.network.name == "mtn" and transaction.network.country_code.lower() == "ci"
-        
-        # Vérifier si MOOV_NOT_FEE est activé pour MOOV en CI
-        moov_not_fee = os.getenv("MOOV_NOT_FEE", "False").lower() == "true"
-        is_moov_ci = transaction.network.name == "moov" and transaction.network.country_code.lower() == "ci"
-        
-        if is_mtn_ci and mtn_not_fee:
-            # Pas de fee pour MTN si MTN_NOT_FEE=True
-            amount = transaction.amount
-        elif is_moov_ci and moov_not_fee:
-            # Pas de fee pour MOOV si MOOV_NOT_FEE=True
-            amount = transaction.amount
-        elif ((
-            transaction.network.name == "moov" or transaction.network.name == "mtn"
-        ) or transaction.network.name == "orange") and transaction.network.country_code.lower()=="ci":
-            amount = round(transaction.amount - (transaction.amount / 100))
-        else:
-            amount = transaction.amount
         transaction.net_payable_amout = amount
         full_name = (
             transaction.user.full_name()
