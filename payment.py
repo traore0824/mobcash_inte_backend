@@ -1043,7 +1043,13 @@ def feexpay_payout(transaction: Transaction):
         return
 
     # URL pour les retraits
-    url = "https://api.feexpay.me/api/payouts/public/transfer/global"
+    network_name = None
+    if transaction.network.name == "sbin":
+        url= "https://api.feexpay.me/api/payouts/public/celtiis_bj"
+        network_name="	CELTIIS BJ"
+    else:
+        url = "https://api.feexpay.me/api/payouts/public/transfer/global"
+        network_name = transaction.network.name.upper()
 
     # Préparer les données
     amount = int(float(transaction.amount)) if transaction.amount else 0
@@ -1055,9 +1061,6 @@ def feexpay_payout(transaction: Transaction):
     phone_number = transaction.phone_number 
 
     # Déterminer le réseau depuis payment_mode ou network
-    network_name = None
-
-    network_name = transaction.network.name.upper()
 
     if not network_name:
         connect_pro_logger.error("Réseau non spécifié pour le retrait")
