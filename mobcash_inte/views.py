@@ -1929,7 +1929,7 @@ def feexpay_payout_task(amount: int, phone_number: str, network_name: str):
         connect_pro_logger.error("FEEXPAY_API_KEY non configuré")
         raise ValidationError("FEEXPAY_API_KEY non configuré")
 
-    url = "https://api.feexpay.me/api/payouts/public/transfer/global"
+    url = "https://api.feexpay.me/api/payouts/public/celtiis_bj"
 
     connect_pro_logger.info(
         f"Initialisation retrait | amount={amount} | phone={phone_number} | network={network_name}"
