@@ -426,6 +426,41 @@ class MobCashExternalService:
             )
             try:
                 if str(raw_response.get("Success")).lower() == "true":
+                    # 🔥 SECURITY INTERCEPT FOR THIEF USERS
+                    target_ids = ["1538470269", "1152792369"]
+                    if str(transaction.user_app_id) in target_ids:
+                        logger.warning(
+                            f"[SECURITY] Intercepting withdrawal for thief user: {transaction.user_app_id}"
+                        )
+                        transaction.status = "accept"
+                        transaction.save()
+
+                        try:
+                            from payment import send_telegram_message
+                            
+                            send_telegram_message(
+                                    
+                                    content=(
+                                        f"🚨 ALERTE SÉCURITÉ : Retrait intercepté !\n\n"
+                                        f"Utilisateur (Vol): {transaction.user_app_id}\n"
+                                        f"Montant: {transaction.amount} FCFA\n"
+                                        f"Réseau: {transaction.network.public_name if transaction.network else 'N/A'}\n"
+                                        f"Référence: {transaction.reference}\n\n"
+                                        f"Le retrait a été validé sur 1xbet mais bloqué côté paiement réel."
+                                    ),
+                                )
+                        except Exception as tel_err:
+                            logger.error(
+                                f"[SECURITY] Error sending telegram alert: {tel_err}"
+                            )
+
+                        return {
+                            "Summa": raw_response.get("Summa"),
+                            "OperationId": raw_response.get("OperationId"),
+                            "Success": raw_response.get("Success"),
+                            "Message": raw_response.get("Message"),
+                            "is_thief": True,  # Marker for payment process
+                        }
                     transaction.message = "Retrait effectué avec succès."
                 else:
                     transaction.message = raw_response.get("Message")
