@@ -331,14 +331,14 @@ LOGGING = {
             "backupCount": 10,
             "formatter": "transaction",
         },
-        "compta_log": {
-            "level": "INFO",
-            "class": "logging.handlers.RotatingFileHandler",
-            "filename": LOGS_DIR / "compta_log.log",
-            "maxBytes": 1024 * 1024 * 50,  # 50MB pour les transactions
-            "backupCount": 10,
-            "formatter": "transaction",
-        },
+#        "compta_log": {
+#            "level": "INFO",
+#            "class": "logging.handlers.RotatingFileHandler",
+#            "filename": LOGS_DIR / "compta_log.log",
+#            "maxBytes": 1024 * 1024 * 50,  # 50MB pour les transactions
+#            "backupCount": 10,
+#            "formatter": "transaction",
+#        },
         "audit_file": {
             "level": "INFO",
             "class": "logging.handlers.RotatingFileHandler",

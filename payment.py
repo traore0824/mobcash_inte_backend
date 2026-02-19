@@ -42,7 +42,7 @@ def track_status_change(transaction: Transaction, new_status: str, source: str =
         source: "system" ou "admin"
         admin_id: ID de l'admin si source="admin"
     """
-    if not hasattr(transaction, 'all_status') or transaction.all_status is None:
+    if not isinstance(transaction.all_status, list):
         transaction.all_status = []
     
     status_entry = {
@@ -54,7 +54,10 @@ def track_status_change(transaction: Transaction, new_status: str, source: str =
     if source == "admin" and admin_id:
         status_entry["admin_id"] = admin_id
     
-    transaction.all_status.append(status_entry)
+    # Force re-assignment to ensure JSONField detects the change
+    temp_status = list(transaction.all_status)
+    temp_status.append(status_entry)
+    transaction.all_status = temp_status
     transaction.save(update_fields=['all_status'])
 
 
@@ -176,7 +179,11 @@ def connect_withdrawal(transaction: Transaction):
             if len(transaction.phone_number) > 10
             else transaction.phone_number
         ),
-        "recipient_name": transaction.user.full_name(),
+        "recipient_name": (
+            transaction.user.full_name() 
+            if transaction.user 
+            else (transaction.telegram_user.fullname if transaction.telegram_user else "N/A")
+        ),
         "objet": "Turnaincash deposit",
         "network": get_network_id(
             name=f"{transaction.network.name.upper()}-{transaction.network.country_code.upper()}"
@@ -461,41 +468,47 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                         f"Reponse de l'api de {transaction.app.name}: {response}"
                     )
                     xbet_response_data = response
-                if xbet_response_data.get("Success") == True:
-                    payment_logger.info(
-                        f"Transaction de {transaction.app.name} success"
+                if xbet_response_data.get("Success") == True or str(xbet_response_data.get("Success")).lower() == "true":
+                    connect_pro_logger.info(
+                        f"Transaction de {transaction.app.name} success - passage au statut accept"
                     )
                     transaction.validated_at = timezone.now()
                     transaction.status = "accept"
                     transaction.save()
+                    connect_pro_logger.info(f"Transaction {transaction.id} sauvegardée avec succès au statut accept")
+                    
                     track_status_change(transaction, "accept", source="system")
+                    connect_pro_logger.info(f"Status change tracked pour transaction {transaction.id}")
 
                     # Appel de la tâche Celery pour les opérations lentes (notifications, bonus, etc.)
                     try:
-                        process_transaction_notifications_and_bonus.delay(transaction_id=transaction.id)
+                        connect_pro_logger.info(f"Planification notification task pour transaction {transaction.id} après commit")
+                        db_transaction.on_commit(lambda: process_transaction_notifications_and_bonus.delay(transaction_id=transaction.id))
                     except Exception as e:
                         connect_pro_logger.error(
-                            f"Erreur process_transaction_notifications_and_bonus.delay pour transaction {transaction.id}: {str(e)}",
+                            f"Erreur planification process_transaction_notifications_and_bonus pour transaction {transaction.id}: {str(e)}",
                             exc_info=True,
                         )
 
                     # Si c'est une reward, on doit aussi appeler check_solde
                     if transaction.type_trans == "reward":
                         try:
-                            check_solde.delay(transaction_id=transaction.id)
+                            connect_pro_logger.info(f"Planification check_solde task pour transaction {transaction.id} (reward) après commit")
+                            db_transaction.on_commit(lambda: check_solde.delay(transaction_id=transaction.id))
                         except Exception as e:
                             connect_pro_logger.error(
-                                f"Erreur check_solde.delay pour transaction {transaction.id}: {str(e)}",
+                                f"Erreur planification check_solde pour transaction {transaction.id}: {str(e)}",
                                 exc_info=True,
                             )
                         return 
 
                     # Pour les dépôts normaux, on appelle aussi check_solde
                     try:
-                        check_solde.delay(transaction_id=transaction.id)
+                        connect_pro_logger.info(f"Planification check_solde task pour transaction {transaction.id} (deposit) après commit")
+                        db_transaction.on_commit(lambda: check_solde.delay(transaction_id=transaction.id))
                     except Exception as e:
                         connect_pro_logger.error(
-                            f"Erreur check_solde.delay pour transaction {transaction.id}: {str(e)}",
+                            f"Erreur planification check_solde pour transaction {transaction.id}: {str(e)}",
                             exc_info=True,
                         )
                 else:
@@ -532,14 +545,16 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                 connect_pro_logger.info(f"Operation success")
                 transaction.status = "accept"
                 transaction.save()
+                connect_pro_logger.info(f"Retrait {transaction.id} sauvegardé avec succès au statut accept")
                 track_status_change(transaction, "accept", source="system")
 
                 # Appel de la tâche Celery pour les notifications (retrait)
                 try:
-                    process_transaction_notifications_and_bonus.delay(transaction_id=transaction.id)
+                    connect_pro_logger.info(f"Planification notification task pour retrait {transaction.id} après commit")
+                    db_transaction.on_commit(lambda: process_transaction_notifications_and_bonus.delay(transaction_id=transaction.id))
                 except Exception as e:
                     connect_pro_logger.error(
-                        f"Erreur process_transaction_notifications_and_bonus.delay pour transaction {transaction.id}: {str(e)}",
+                        f"Erreur planification process_transaction_notifications_and_bonus pour retrait {transaction.id}: {str(e)}",
                         exc_info=True,
                     )
             except Exception as e:
@@ -946,7 +961,7 @@ def xbet_withdrawal_process(transaction: Transaction):
             )
             
             send_notification(user=transaction.user, content=error_message, title="Erreur de transaction")
-            connect_pro_logger.info("L'appelle a ete success")
+            connect_pro_logger.info("L'appelle a l'API betting a échoué (échec traitement)")
         elif str(xbet_response_data.get("Success")).lower() == "true":
             connect_pro_logger.info("app BET step suvccess 11111111")
             amount = float(xbet_response_data.get("Summa")) * (-1)
@@ -956,7 +971,7 @@ def xbet_withdrawal_process(transaction: Transaction):
             transaction.validated_at = timezone.now()
             transaction.save()
             transaction.refresh_from_db()
-            connect_pro_logger.info("L'appelle a ete success")
+            connect_pro_logger.info("L'appelle a l'API betting a réussi (init_payment)")
             return True
 
 

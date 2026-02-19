@@ -1109,7 +1109,8 @@ class BotDepositTransactionViews(generics.CreateAPIView):
             from .helpers import generate_ussd_code
             generate_ussd_code(transaction)
             
-        payment_fonction(reference=transaction.reference)
+        from django.db import transaction as db_transaction
+        db_transaction.on_commit(lambda: payment_fonction.delay(reference=transaction.reference))
         transaction.refresh_from_db()
         return Response(
             TransactionDetailsSerializer(transaction).data,

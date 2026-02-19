@@ -59,7 +59,7 @@ def send_transaction(transaction: Transaction):
 
             if str(response.status_code).startswith("2"):
                 transaction.event_send = True
-                transaction.save()
+                transaction.save(update_fields=['event_send'])
         except Exception as e:
             TestModel.objects.create(name=f"Renvoie de comptat error {e}")
 
