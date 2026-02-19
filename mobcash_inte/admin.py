@@ -173,65 +173,88 @@ class SettingAdmin(admin.ModelAdmin):
     search_fields = ("whatsapp_phone", "connect_pro_email")
     list_filter = ("referral_bonus", "deposit_reward")
     readonly_fields = ("id",)
-    # fieldsets = (
-    #     # ("Info General", {"fields": ("moov_marchand_phone")}),
-    #     (
-    #         "Montants minimaux",
-    #         {
-    #             "fields": (
-    #                 "minimum_deposit",
-    #                 "minimum_withdrawal",
-    #                 "reward_mini_withdrawal",
-    #                 "minimum_solde",
-    #                 "moov_marchand_phone",
-    #             )
-    #         },
-    #     ),
-    #     (
-    #         "Bonus et Récompenses",
-    #         {
-    #             "fields": (
-    #                 "bonus_percent",
-    #                 "referral_bonus",
-    #                 "deposit_reward",
-    #                 "deposit_reward_percent",
-    #             )
-    #         },
-    #     ),
-    #     (
-    #         "Versions et APK",
-    #         {
-    #             "fields": (
-    #                 "min_version",
-    #                 "last_version",
-    #                 "dowload_apk_link",
-    #             )
-    #         },
-    #     ),
-    #     (
-    #         "Liens par défaut",
-    #         {
-    #             "fields": (
-    #                 "wave_default_link",
-    #                 "orange_default_link",
-    #                 "mtn_default_link",
-    #             )
-    #         },
-    #     ),
-    #     ("WhatsApp et Contact", {"fields": ("whatsapp_phone",)}),
-    #     (
-    #         "Connect Pro",
-    #         {
-    #             "fields": (
-    #                 "connect_pro_email",
-    #                 "connect_pro_password",
-    #                 "connect_pro_token",
-    #                 "connect_pro_refresh",
-    #                 "expired_connect_pro_token",
-    #             )
-    #         },
-    #     ),
-    # )
+    fieldsets = (
+        (
+            "Montants minimaux",
+            {
+                "fields": (
+                    "minimum_deposit",
+                    "minimum_withdrawal",
+                    "reward_mini_withdrawal",
+                    "minimum_solde",
+                )
+            },
+        ),
+        (
+            "Bonus et Récompenses",
+            {
+                "fields": (
+                    "bonus_percent",
+                    "referral_bonus",
+                    "deposit_reward",
+                    "deposit_reward_percent",
+                    "requires_deposit_to_view_coupon",
+                    "minimun_deposit_before_view_coupon",
+                )
+            },
+        ),
+        (
+            "Versions et APK",
+            {
+                "fields": (
+                    "min_version",
+                    "last_version",
+                    "dowload_apk_link",
+                )
+            },
+        ),
+        (
+            "Réseaux par défaut & Marchands",
+            {
+                "fields": (
+                    "wave_default_link",
+                    "orange_default_link",
+                    "mtn_default_link",
+                    "moov_marchand_phone",
+                    "mtn_marchand_phone",
+                    "orange_marchand_phone",
+                    "bf_moov_marchand_phone",
+                    "bf_orange_marchand_phone",
+                )
+            },
+        ),
+        (
+            "WhatsApp & Social",
+            {
+                "fields": (
+                    "whatsapp_phone",
+                    "telegram",
+                )
+            },
+        ),
+        (
+            "Connect Pro",
+            {
+                "fields": (
+                    "connect_pro_email",
+                    "connect_pro_password",
+                    "connect_pro_token",
+                    "connect_pro_refresh",
+                    "expired_connect_pro_token",
+                    "connect_pro_base_url",
+                )
+            },
+        ),
+        (
+            "Mobcash API",
+            {
+                "fields": (
+                    "mobcash_api_key",
+                    "mobcash_api_secret",
+                )
+            },
+        ),
+    )
 
 
 @admin.register(Bonus)
@@ -308,12 +331,95 @@ class TransactionAdmin(admin.ModelAdmin):
         "validated_at",
         "wehook_receive_at",
         "webhook_data",
+        "mobcash_response",
         "error_message",
         "transaction_link",
+        "all_status",
     )
     ordering = ("-created_at",)
     date_hierarchy = "created_at"
     autocomplete_fields = ("user", "app", "network")
+
+    fieldsets = (
+        (
+            "Informations de base",
+            {
+                "fields": (
+                    "user",
+                    "telegram_user",
+                    "amount",
+                    "net_payable_amout",
+                    "deposit_reward_amount",
+                    "reference",
+                    "public_id",
+                    "user_app_id",
+                    "phone_number",
+                )
+            },
+        ),
+        (
+            "Type & Statut",
+            {
+                "fields": (
+                    "type_trans",
+                    "status",
+                    "source",
+                    "api",
+                    "network",
+                    "app",
+                    "withdriwal_code",
+                    "otp_code",
+                )
+            },
+        ),
+        (
+            "Suivi Webhook & État interne",
+            {
+                "fields": (
+                    "already_process",
+                    "payout_started",
+                    "payout_done",
+                    "event_send",
+                    "fond_calculate",
+                    "fixed_by_admin",
+                )
+            },
+        ),
+        (
+            "Confirmation Webhook (Booléens)",
+            {
+                "fields": (
+                    "success_webhook_send",
+                    "fail_webhook_send",
+                    "pending_webhook_send",
+                    "timeout_webhook_send",
+                )
+            },
+        ),
+        (
+            "Historique & Logs",
+            {
+                "fields": (
+                    "all_status",
+                    "webhook_data",
+                    "mobcash_response",
+                    "error_message",
+                    "message",
+                    "transaction_link",
+                )
+            },
+        ),
+        (
+            "Dates",
+            {
+                "fields": (
+                    "created_at",
+                    "validated_at",
+                    "wehook_receive_at",
+                )
+            },
+        ),
+    )
 
 
 @admin.register(Reward)
@@ -348,7 +454,16 @@ class RewardAdmin(admin.ModelAdmin):
     share_link_display.allow_tags = True
     share_link_display.short_description = "Lien de partage"
 
-admin.site.register(Advertisement)
+@admin.register(Advertisement)
+class AdvertisementAdmin(admin.ModelAdmin):
+    list_display = ("id", "enable", "created_at")
+    list_filter = ("enable", "created_at")
+    readonly_fields = ("id", "created_at")
+    fieldsets = (
+        (None, {"fields": ("id", "enable", "image")}),
+        ("Metadata", {"fields": ("created_at",)}),
+    )
+
 admin.site.register(IDLink)
 admin.site.register(Coupon)
 admin.site.register(TestModel)

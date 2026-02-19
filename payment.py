@@ -242,6 +242,7 @@ def deposit_connect(transaction: Transaction):
     }
     url = None
     amount=None 
+    amount = transaction.amount
     if transaction.network.reduce_fee:
         amount = int(amount - (amount * (float(transaction.network.fee_payin) / 100)))
     else:

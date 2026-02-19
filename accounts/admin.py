@@ -73,7 +73,9 @@ class AppNameAdmin(admin.ModelAdmin):
     list_filter = ("enable", "active_for_deposit", "active_for_with", "city")
     search_fields = ("name", "city", "street")
     ordering = ("order",)
+    readonly_fields = ("id",)
     fieldsets = (
+        ("Identifiant", {"fields": ("id",)}),
         ("Informations principales", {"fields": ("name", "image", "enable", "order")}),
         ("Localisation", {"fields": ("city", "street")}),
         ("Paramètres de caisse", {"fields": ("cashdeskid", "cashierpass", "hash")}),
@@ -101,7 +103,13 @@ class TelegramUserAdmin(admin.ModelAdmin):
     list_filter = ("is_block", "created_at")
     search_fields = ("telegram_user_id", "first_name", "last_name", "email")
     ordering = ("-created_at",)
-    readonly_fields = ("created_at",)
+    readonly_fields = ("id", "created_at")
+    fieldsets = (
+        ("Identifiants", {"fields": ("id", "telegram_user_id")}),
+        ("Informations personnelles", {"fields": ("first_name", "last_name", "email")}),
+        ("Statut", {"fields": ("is_block",)}),
+        ("Metadata", {"fields": ("created_at",)}),
+    )
 
     def full_name(self, obj):
         return obj.fullname
