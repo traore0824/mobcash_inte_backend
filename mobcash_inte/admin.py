@@ -17,6 +17,8 @@ class NetworkAdmin(admin.ModelAdmin):
         "otp_required",
         "active_for_deposit",
         "active_for_with",
+        "customer_pay_fee",
+        "manual_processing",
         "created_at",
     )
     list_filter = (
@@ -26,6 +28,8 @@ class NetworkAdmin(admin.ModelAdmin):
         "payment_by_link",
         "active_for_deposit",
         "active_for_with",
+        "customer_pay_fee",
+        "manual_processing",
         "country_code",
     )
     search_fields = (
@@ -65,6 +69,8 @@ class NetworkAdmin(admin.ModelAdmin):
                     "reduce_fee",
                     "ussd_code",
                     "fee_payin",
+                    "customer_pay_fee",
+                    "manual_processing",
                 )
             },
         ),
