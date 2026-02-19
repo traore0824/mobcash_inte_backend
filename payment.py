@@ -467,8 +467,8 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                     )
                     transaction.validated_at = timezone.now()
                     transaction.status = "accept"
-                    track_status_change(transaction, "accept", source="system")
                     transaction.save()
+                    track_status_change(transaction, "accept", source="system")
 
                     # Appel de la tâche Celery pour les opérations lentes (notifications, bonus, etc.)
                     try:
@@ -531,8 +531,8 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
             try:
                 connect_pro_logger.info(f"Operation success")
                 transaction.status = "accept"
-                track_status_change(transaction, "accept", source="system")
                 transaction.save()
+                track_status_change(transaction, "accept", source="system")
 
                 # Appel de la tâche Celery pour les notifications (retrait)
                 try:
@@ -621,7 +621,6 @@ def accept_bonus_transaction(transaction: Transaction):
 
 @shared_task
 def process_transaction_notifications_and_bonus(transaction_id, is_error=False, error_message=None):
-    user = transaction.user if transaction.user else transaction.telegram_user
     """
     Tâche Celery pour traiter les notifications et bonus après une transaction.
     Cette fonction gère toutes les opérations lentes de manière asynchrone.
@@ -641,6 +640,8 @@ def process_transaction_notifications_and_bonus(transaction_id, is_error=False, 
                 f"Transaction {transaction_id} non trouvée dans process_transaction_notifications_and_bonus"
             )
             return
+
+        user = transaction.user if transaction.user else transaction.telegram_user
 
         setting = Setting.objects.first()
         if not setting:
@@ -886,7 +887,7 @@ def check_solde(transaction_id):
                     caisse.solde = float(caisse.solde) + float(transaction.amount)
                 caisse.save()
             transaction.fond_calculate = True
-            transaction.save()
+            transaction.save(update_fields=["fond_calculate"])
             transaction.refresh_from_db()
 
 
@@ -955,7 +956,7 @@ def xbet_withdrawal_process(transaction: Transaction):
             transaction.validated_at = timezone.now()
             transaction.save()
             transaction.refresh_from_db()
-            connect_pro_logger.info("L'appelle a ete echec")
+            connect_pro_logger.info("L'appelle a ete success")
             return True
 
 
