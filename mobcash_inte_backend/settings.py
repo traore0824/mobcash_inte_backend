@@ -131,7 +131,8 @@ CORS_ALLOWED_ORIGINS = [
     "https://admin.i-cashci.net",
     "https://admin.supercashci.net",
     "https://www.supercashci.net",
-    "https://supercash-user.vercel.app"
+    "https://supercash-user.vercel.app",
+    "https://coobet-web.vercel.app"
 ]
 
 
