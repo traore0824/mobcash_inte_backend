@@ -98,6 +98,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://turnaicash-mobile-app-1.vercel.app",
     "https://admin.zefast.net",
     "https://zefast.net",
+    "https://coobet-web.vercel.app",
     "https://zefast-mobile-app.vercel.app",
     "https://admin.zefast.net",
     "https://zefast-mobile-app.vercel.app",
@@ -112,6 +113,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://www.fastxof.com",
     "https://1xstore-mobile-app.vercel.app",
     "https://admin2.coobet.app",
+    "https://www.coobet.app",
     "https://1xstore.org",
     "https://admin.1xstore.org",
     "https://module.1xstore.org",
@@ -132,7 +134,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://admin.supercashci.net",
     "https://www.supercashci.net",
     "https://supercash-user.vercel.app",
-    "https://coobet-web.vercel.app"
+    
 ]
 
 
