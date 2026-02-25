@@ -52,7 +52,8 @@ ALLOWED_HOSTS = [
     "api.slaterci.net",
     "api.supercashci.net",
     "api.mobcash.supercashci.net",
-    "api.i-cashci.net"
+    "api.i-cashci.net",
+    "api.cashika.net",
 ]
 
 
@@ -134,7 +135,11 @@ CORS_ALLOWED_ORIGINS = [
     "https://admin.supercashci.net",
     "https://www.supercashci.net",
     "https://supercash-user.vercel.app",
-    
+    "https://module.cashika.net",
+    "https://dashboard.cashika.net",
+    "https://admin.cashika.net",
+    "https://www.cashika.net",
+    "https://cashika.net",
 ]
 
 

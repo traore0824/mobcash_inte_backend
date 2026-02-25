@@ -247,7 +247,7 @@ def deposit_connect(transaction: Transaction):
         amount = int(amount - (amount * (float(transaction.network.fee_payin) / 100)))
     else:
         amount = transaction.amount
-
+    
     if transaction.network.name == "wave":
         connect_pro_logger.info("debut de creatuion de transaction wave")
         url = CONNECT_PRO_BASE_URL + "/api/payments/wave-business-transactions/"
@@ -913,7 +913,6 @@ def payment_fonction(reference):
     if not transaction:
         connect_pro_logger.info(f"Transaction avec reference {reference} non trouver")
         return
-    
     if transaction.type_trans == "deposit" or transaction.type_trans == "reward":
         if transaction.api == "connect":
             deposit_connect(transaction=transaction)
