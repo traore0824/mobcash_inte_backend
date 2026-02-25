@@ -100,6 +100,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://turnaicash-mobile-app-1.vercel.app",
     "https://admin.zefast.net",
     "https://zefast.net",
+    "https://www.zefast.net",
     "https://coobet-web.vercel.app",
     "https://zefast-mobile-app.vercel.app",
     "https://admin.zefast.net",
