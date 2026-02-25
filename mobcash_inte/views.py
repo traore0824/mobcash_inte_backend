@@ -2489,5 +2489,115 @@ class FinalizeDepositTransaction(decorators.APIView):
             )
         return Response(TransactionDetailsSerializer(transaction).data)
 
+class LastTransactionView(generics.RetrieveAPIView):
+    """
+    Récupère la dernière transaction de l'utilisateur.
+    """
+    serializer_class = TransactionDetailsSerializer
+    permission_classes = [IsAuthenticated]
 
-# Create your views here.
+    def get_object(self):
+        user = self.request.user
+        if user and user.is_authenticated:
+            return Transaction.objects.filter(user=user).order_by("-created_at").first()
+        
+        # Pour les utilisateurs Telegram (via le header X-USER-ID géré par IsAuthenticated)
+        telegram_user = getattr(self.request, "telegram_user", None)
+        if telegram_user:
+            return Transaction.objects.filter(telegram_user=telegram_user).order_by("-created_at").first()
+        
+        return None
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if not instance:
+            return Response({"detail": "Aucune transaction trouvée."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
+
+
+class CancelTransactionView(decorators.APIView):
+    """
+    Change le statut d'une transaction en 'annuler' via sa référence.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        reference = request.data.get("reference")
+        if not reference:
+            return Response({"error": "La référence est requise."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        transaction = Transaction.objects.filter(reference=reference).first()
+        if not transaction:
+            return Response({"error": "Transaction non trouvée."}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Vérification optionnelle : s'assurer que la transaction appartient à l'utilisateur
+        # (IsAuthenticated peuple soit request.user soit request.telegram_user)
+        is_owner = False
+        if request.user and request.user.is_authenticated:
+            if transaction.user == request.user:
+                is_owner = True
+        elif hasattr(request, "telegram_user"):
+            if transaction.telegram_user == request.telegram_user:
+                is_owner = True
+        
+        if not is_owner and not request.user.is_staff:
+             return Response({"error": "Vous n'avez pas la permission d'annuler cette transaction."}, status=status.HTTP_403_FORBIDDEN)
+
+        if transaction.status in ["accept", "annuler"]:
+            return Response({"error": f"Impossible d'annuler une transaction déjà {transaction.status}."}, status=status.HTTP_400_BAD_REQUEST)
+
+        transaction.status = "annuler"
+        track_status_change(transaction, "annuler", source="user")
+        transaction.save()
+
+        return Response({
+            "message": "Transaction annulée avec succès.",
+            "transaction": TransactionDetailsSerializer(transaction).data
+        })
+
+class FinalizeDepositTransactionByUser(decorators.APIView):
+    """
+    Permet à l'utilisateur de finaliser/relancer un dépôt.
+    Génère une nouvelle référence et lance le processus de paiement.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        old_reference = request.data.get("reference")
+        if not old_reference:
+            return Response({"error": "La référence est requise."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        transaction = Transaction.objects.filter(reference=old_reference).first()
+        if not transaction:
+            return Response({"error": "Transaction non trouvée."}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Vérification de l'appartenance
+        is_owner = False
+        if request.user and request.user.is_authenticated:
+            if transaction.user == request.user:
+                is_owner = True
+        elif hasattr(request, "telegram_user"):
+            if transaction.telegram_user == request.telegram_user:
+                is_owner = True
+        
+        if not is_owner:
+             return Response({"error": "Vous n'avez pas la permission de modifier cette transaction."}, status=status.HTTP_403_FORBIDDEN)
+
+        if transaction.status == "accept":
+            return Response({"error": "Cette transaction est déjà acceptée."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Mise à jour de la transaction
+        transaction.status = "pending"
+        new_reference = generate_reference(prefix="depot-")
+        transaction.reference = new_reference
+        transaction.save()
+        
+        # Tracking du changement de statut
+        track_status_change(transaction, "pending", source="user")
+        
+        # Lancement du processus de paiement
+        payment_fonction(reference=new_reference)
+        
+        transaction.refresh_from_db()
+        return Response(TransactionDetailsSerializer(transaction).data)

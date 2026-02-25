@@ -58,4 +58,7 @@ urlpatterns = [
         views.ChangeTransactionStatusManuelViews.as_view(),
     ),
     path("finalize-transaction", views.FinalizeDepositTransaction.as_view()),
+    path("last-transaction", views.LastTransactionView.as_view(), name="last-transaction"),
+    path("cancel-transaction", views.CancelTransactionView.as_view(), name="cancel-transaction"),
+    path("finalize-transaction-user", views.FinalizeDepositTransactionByUser.as_view(), name="finalize-transaction-user"),
 ]
