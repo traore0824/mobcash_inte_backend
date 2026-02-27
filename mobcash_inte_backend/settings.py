@@ -144,6 +144,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://www.cashika.net",
     "https://cashika.net",
     "https://turnaicash.vercel.app",
+    "https://mobile.cashika.net",
 ]
 
 
