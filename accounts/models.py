@@ -64,7 +64,7 @@ class User(AbstractUser):
         from mobcash_inte.models import Bonus
 
         bonus = (
-            Bonus.objects.filter(bonus_with=False, bonus_delete=False).aggregate(
+            Bonus.objects.filter(bonus_with=False, bonus_delete=False, user=self ).aggregate(
                 total=Sum("amount")
             )["total"]
             or 0

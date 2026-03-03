@@ -738,7 +738,7 @@ def process_transaction_notifications_and_bonus(transaction_id, is_error=False, 
 
         # 3. Attribution de bonus de parrainage (si applicable)
         if (
-            transaction.type_trans in ["deposit", "withdrawal"]
+            transaction.type_trans in ["deposit"]
             and transaction.user 
             and transaction.user.referrer_code 
             and setting.referral_bonus
