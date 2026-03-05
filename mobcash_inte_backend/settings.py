@@ -126,6 +126,8 @@ CORS_ALLOWED_ORIGINS = [
     "https://slaterci.net",
     "https://slaterci-mobile-app.vercel.app",
     "https://www.slaterci.net",
+    "https://www.coobet.app",
+    "https://coobet.app",
     "https://1xstore.org",
     "https://1xstore-mobile-app.vercel.app",
     "https://api.supercashci.net",
@@ -145,6 +147,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://cashika.net",
     "https://turnaicash.vercel.app",
     "https://mobile.cashika.net",
+    
 ]
 
 
