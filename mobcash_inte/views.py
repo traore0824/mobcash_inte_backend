@@ -3,6 +3,7 @@ import os
 from django.forms import ValidationError
 from django.shortcuts import render
 from datetime import timedelta
+from django.conf import settings
 from django.conf.urls import handler404
 import requests
 from rest_framework.permissions import BasePermission
@@ -2601,3 +2602,30 @@ class FinalizeDepositTransactionByUser(decorators.APIView):
         
         transaction.refresh_from_db()
         return Response(TransactionDetailsSerializer(transaction).data)
+
+
+class DownloadAPKView(decorators.APIView):
+    """
+    Vue pour télécharger le fichier APK de l'application.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, *args, **kwargs):
+        import os
+        from django.http import FileResponse, Http404
+        
+        # Chemin vers le fichier APK
+        apk_path = os.path.join(settings.BASE_DIR, 'app-release.apk')
+        
+        # Vérifier si le fichier existe
+        if not os.path.exists(apk_path):
+            raise Http404("Le fichier APK n'existe pas.")
+        
+        # Retourner le fichier en téléchargement
+        response = FileResponse(
+            open(apk_path, 'rb'),
+            content_type='application/vnd.android.package-archive'
+        )
+        response['Content-Disposition'] = 'attachment; filename="app-release.apk"'
+        
+        return response

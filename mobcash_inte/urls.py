@@ -61,4 +61,5 @@ urlpatterns = [
     path("last-transaction", views.LastTransactionView.as_view(), name="last-transaction"),
     path("cancel-transaction", views.CancelTransactionView.as_view(), name="cancel-transaction"),
     path("finalize-transaction-user", views.FinalizeDepositTransactionByUser.as_view(), name="finalize-transaction-user"),
+    path("download-apk", views.DownloadAPKView.as_view(), name="download-apk"),
 ]
