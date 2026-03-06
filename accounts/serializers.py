@@ -25,6 +25,7 @@ def generate_referral_code(min_length=6):
 class UserRegistrationSerializer(serializers.ModelSerializer):
     re_password = serializers.CharField(min_length=6, write_only=True)
     password = serializers.CharField(write_only=True, min_length=6)
+    referrer_code = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = User
@@ -36,6 +37,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             "phone",
             "re_password",
             "password",
+            "referrer_code",
         ]
 
     def validate(self, attrs):
@@ -46,6 +48,13 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"password": constant.PASSWORD_NOT_MATCH})
         return attrs
 
+    def validate_referrer_code(self, value):
+        """Valider que le code de parrainage existe"""
+        if value:
+            if not User.objects.filter(referral_code=value, is_delete=False).exists():
+                raise serializers.ValidationError("Code de parrainage invalide")
+        return value
+
     def create(self, validated_data):
         user = User.objects.create(
             first_name=validated_data.get("first_name"),
@@ -53,6 +62,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             email=validated_data.get("email"),
             phone=validated_data.get("phone"),
             referral_code=generate_referral_code(),
+            referrer_code=validated_data.get("referrer_code"),
             username=validated_data.get("email"),
         )
         user.set_password(validated_data.get("password"))
