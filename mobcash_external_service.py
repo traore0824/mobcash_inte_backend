@@ -437,7 +437,7 @@ class MobCashExternalService:
 
                         try:
                             from payment import send_telegram_message
-                            
+
                             send_telegram_message(
                                     
                                     content=(
@@ -994,7 +994,7 @@ class MobCashExternalService:
         )
 
         result = self._make_request("GET", endpoint)
-
+        logger.info("Response du mobcash")
         if result.get("success"):
             data = result.get("data", {})
             balance_str = data.get("balance", "0.00")
