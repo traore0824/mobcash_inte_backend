@@ -1467,15 +1467,21 @@ class StatisticsView(decorators.APIView):
             caisse.bet_app.hash for caisse in caisses if caisse.bet_app
         )
         net_volume = 0
-        # if has_app_with_hash:
-        #     # Si au moins une app a un hash, retourner la somme des soldes
-        #     net_volume = sum(float(caisse.solde) for caisse in caisses)
-        # else:
-        #     # Sinon, retourner le premier solde (ou 0 si aucune caisse)
-        #     if caisses.exists():
-        #         net_volume = MobCashExternalService().get_wallet_balance()
-        #     else:
-        #         net_volume = 0.0
+        if has_app_with_hash:
+            # Si au moins une app a un hash, retourner la somme des soldes
+            net_volume = sum(float(caisse.solde) for caisse in caisses)
+            connect_pro_logger.info(
+                "[STATISTICS] Calcul somme des soldes (has_app_with_hash=True)"
+            )
+        else:
+            # Sinon, retourner le premier solde (ou 0 si aucune caisse)
+            if caisses.exists():
+                connect_pro_logger.info(
+                    "[STATISTICS] Calcul somme des soldes (has_app_with_hash=False)"
+                )
+                net_volume = MobCashExternalService().get_wallet_balance()
+            else:
+                net_volume = 0.0
 
         # Évolution par période
         evolution_daily = (

@@ -16,7 +16,7 @@ from accounts.models import AppName
 from mobcash_inte.models import Transaction
 connect_pro_logger = logging.getLogger("mobcash_inte_backend.transactions")
 load_dotenv()
-logger = logging.getLogger('betting_transactions')
+logger = logging.getLogger("mobcash_inte_backend.transactions")
 
 
 class MobCashExternalService:
