@@ -170,7 +170,7 @@ class MobCashExternalService:
         headers = self._get_headers(method, endpoint, body)
 
         logger.info(
-            f"[MOBCASH] [REQUEST_START] {method} {url}",
+            f"[MOBCASH] [REQUEST_START] {method} {url} headers {headers}",
             extra={
                 "url": url,
                 "has_data": bool(data),
