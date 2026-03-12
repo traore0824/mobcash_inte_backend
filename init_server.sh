@@ -84,6 +84,21 @@ fi
 
 success "Version Python compatible: $PYTHON_VERSION"
 
+# S'assurer que python3-venv et python3-pip sont installés
+info "Vérification des modules Python (venv, pip)..."
+if ! $PYTHON_CMD -m venv --help &> /dev/null; then
+    warn "Module 'venv' manquant. Installation de python3-venv..."
+    sudo apt-get update
+    sudo apt-get install -y python3-venv
+fi
+
+if ! $PYTHON_CMD -m pip --version &> /dev/null; then
+    warn "Pip manquant. Installation de python3-pip..."
+    sudo apt-get update
+    sudo apt-get install -y python3-pip
+fi
+success "Modules Python requis vérifiés"
+
 # ============================================================================
 # ÉTAPE 2: Installation des dépendances système
 # ============================================================================
@@ -305,8 +320,14 @@ step "ÉTAPE 8: Configuration de l'environnement Python"
 if [ -d ".venv" ]; then
     success "Environnement virtuel .venv déjà présent"
 else
-    info "Création de l'environnement virtuel..."
-    $PYTHON_CMD -m venv .venv
+    info "Création de l'environnement virtuel (.venv)..."
+    $PYTHON_CMD -m venv .venv || {
+        error "Échec de la création de l'environnement virtuel."
+        info "Tentative d'installation des paquets système manquants..."
+        sudo apt-get update
+        sudo apt-get install -y python3-venv
+        $PYTHON_CMD -m venv .venv
+    }
     success "Environnement virtuel créé"
 fi
 
