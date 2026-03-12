@@ -250,7 +250,7 @@ class Transaction(models.Model):
     fixed_by_admin = models.BooleanField(default=False)
     mobcash_response = models.TextField(blank=True, null=True)
     ussd_code = models.CharField(max_length=200, blank=True, null=True)
-
+    connect_pro_response = models.TextField(blank=True, null=True)
     class Meta:
         verbose_name = "Transaction"
         verbose_name_plural = "Transactions"

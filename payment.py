@@ -193,6 +193,7 @@ def connect_withdrawal(transaction: Transaction):
     try:
         response = requests.post(url, json=data, headers=headers, timeout=30)
         connect_pro_logger.info(f"response connect pro with {response.json()}")
+        transaction.connect_pro_response = str(response.content)
         transaction.public_id = response.json().get("data").get("uid")
         transaction.save()
     except Exception as e:
@@ -333,6 +334,7 @@ def deposit_connect(transaction: Transaction):
         try:
             response = requests.post(url, json=data, headers=headers, timeout=30)
             connect_pro_logger.info(f" connect pro  response {response.json()}")
+            transaction.connect_pro_response = str(response.content)
             transaction.public_id = response.json().get("data").get("uid")
             transaction.save()
         except Exception as e:

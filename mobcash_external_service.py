@@ -357,7 +357,7 @@ class MobCashExternalService:
                 else:
                     transaction.message = raw_response.get("Message")
 
-                transaction.mobcash_response = str(raw_response)
+                transaction.mobcash_response = str(mobcash_response)
                 transaction.save()
             except Exception as e:
                 logger.error(
@@ -464,7 +464,7 @@ class MobCashExternalService:
                     transaction.message = "Retrait effectué avec succès."
                 else:
                     transaction.message = raw_response.get("Message")
-                transaction.mobcash_response = str(raw_response)
+                transaction.mobcash_response = str(mobcash_response)
                 transaction.save()
             except Exception as e:
                 logger.error(
