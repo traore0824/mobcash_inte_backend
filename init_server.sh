@@ -73,11 +73,10 @@ fi
 
 success "Python détecté: $PYTHON_CMD version $PYTHON_VERSION"
 
-# Vérifier et installer python3-venv si nécessaire
-info "Vérification de python3-venv..."
+# Installer python3-venv si pas déjà installé
 if ! dpkg -l | grep -q python3-venv; then
     info "Installation de python3-venv..."
-    sudo apt-get install -y python3-venv python3-pip python3-dev
+    sudo apt-get install -y python3-venv
     success "python3-venv installé"
 else
     success "python3-venv déjà installé"
@@ -151,8 +150,35 @@ if [ -f .env ]; then
     done < .env
     success "Fichier .env chargé"
 else
-    error "Fichier .env introuvable!"
-    exit 1
+    warn "Fichier .env introuvable! Création d'un fichier .env par défaut..."
+    cat > .env <<'EOF'
+SECRET_KEY='django-insecure-1xk(s@!44_4h^d^q&!vpy=^641-&0r)&eoa^gh8umk$3l@uth@'
+DATABASE_NAME=mobcash
+DATABASE_USER=root
+DATABASE_PASSWORD="qwertyuiop"
+DATABASE_HOST=127.0.0.1
+DATABASE_PORT=3306
+DEBUG=False
+TOKEN_BOT="8308946:AAEe5YhGdk9p1wU3Aoo9QGMPOxUMFpXFLIA"
+MOBCASHAPI_API_KEY=mbck_live_94dc052ddc73627fcef7ffbdc82b6e69
+MOBCASHAPI_API_SECRET=ASfxsuncAblZlz7cAXRvxlg3u06LXE7m37AAiX_8Ids
+CONNECT_PRO_BASE_URL="https://connect.slaterci.net"
+BASE_URL="https://api.slaterci.net/mobcash"
+MOBCASHAPI_BASE_URL=https://api.blaffa-change.net
+MTN_NOT_FEE="True"
+EMAIL_HOST_USER=zeusslater25@gmail.com
+EMAIL_PASSWORD=nhhd bxhw zmkc pmwm
+FIREBASE_PROJECT_ID=slater-79f2c
+EOF
+    success "Fichier .env créé avec les valeurs par défaut"
+    warn "⚠️  IMPORTANT: Modifiez le fichier .env avec vos propres valeurs avant de continuer!"
+    
+    # Charger le nouveau fichier .env
+    while IFS='=' read -r key value; do
+        [[ -z "$key" || "$key" =~ ^# ]] && continue
+        value=$(echo "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^["'\'']//' -e 's/["'\'']$//')
+        export "$key=$value"
+    done < .env
 fi
 
 # Configuration des ports (Multi-projets)
