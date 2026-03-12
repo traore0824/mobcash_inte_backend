@@ -36,9 +36,10 @@ from google.oauth2 import service_account
 cred = credentials.Certificate(os.path.join(BASE_DIR, "mobcash.json"))
 initialize_app(cred)
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
 ALLOWED_HOSTS = [
+    "dev.slaterci.net",
     "api.turaincash.com",
     "127.0.0.1",
     "apiv2.coobet.app",
