@@ -84,21 +84,6 @@ fi
 
 success "Version Python compatible: $PYTHON_VERSION"
 
-# S'assurer que python3-venv et python3-pip sont installés
-info "Vérification des modules Python (venv, pip)..."
-if ! $PYTHON_CMD -m venv --help &> /dev/null; then
-    warn "Module 'venv' manquant. Installation de python3-venv..."
-    sudo apt-get update
-    sudo apt-get install -y python3-venv
-fi
-
-if ! $PYTHON_CMD -m pip --version &> /dev/null; then
-    warn "Pip manquant. Installation de python3-pip..."
-    sudo apt-get update
-    sudo apt-get install -y python3-pip
-fi
-success "Modules Python requis vérifiés"
-
 # ============================================================================
 # ÉTAPE 2: Installation des dépendances système
 # ============================================================================
@@ -140,38 +125,6 @@ info "Démarrage de PostgreSQL..."
 sudo systemctl start postgresql
 sudo systemctl enable postgresql
 success "PostgreSQL démarré et activé au démarrage"
-
-# ============================================================================
-# ÉTAPE 2.5: Vérification des fichiers de configuration
-# ============================================================================
-step "ÉTAPE 2.5: Vérification des fichiers de configuration"
-
-if [ ! -f .env ]; then
-    info "Le fichier .env est absent. Création à partir du modèle..."
-    if [ -f templates/.env.example ]; then
-        # On utilise envsubst pour remplacer $DOMAIN si nécessaire, ou on fait un simple sed
-        sed "s/\${DOMAIN}/$DOMAIN/g" templates/.env.example > .env
-        warn "⚠️  Fichier .env créé. VEUILLEZ ÉDITER LE FICHIER ET REMPLIR LES SECRETS (SECRET_KEY, etc.)"
-    else
-        error "Modèle templates/.env.example introuvable!"
-        exit 1
-    fi
-else
-    success "Fichier .env déjà présent"
-fi
-
-if [ ! -f mobcash.json ]; then
-    info "Le fichier mobcash.json est absent. Création à partir du modèle..."
-    if [ -f templates/mobcash.json.example ]; then
-        cp templates/mobcash.json.example mobcash.json
-        warn "⚠️  Fichier mobcash.json créé. VEUILLEZ REMPLIR LA private_key DANS LE FICHIER."
-    else
-        error "Modèle templates/mobcash.json.example introuvable!"
-        exit 1
-    fi
-else
-    success "Fichier mobcash.json déjà présent"
-fi
 
 # Charger les variables d'environnement
 if [ -f .env ]; then
@@ -320,14 +273,8 @@ step "ÉTAPE 8: Configuration de l'environnement Python"
 if [ -d ".venv" ]; then
     success "Environnement virtuel .venv déjà présent"
 else
-    info "Création de l'environnement virtuel (.venv)..."
-    $PYTHON_CMD -m venv .venv || {
-        error "Échec de la création de l'environnement virtuel."
-        info "Tentative d'installation des paquets système manquants..."
-        sudo apt-get update
-        sudo apt-get install -y python3-venv
-        $PYTHON_CMD -m venv .venv
-    }
+    info "Création de l'environnement virtuel..."
+    $PYTHON_CMD -m venv .venv
     success "Environnement virtuel créé"
 fi
 
