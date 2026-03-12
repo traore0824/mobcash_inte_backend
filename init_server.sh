@@ -126,6 +126,38 @@ sudo systemctl start postgresql
 sudo systemctl enable postgresql
 success "PostgreSQL démarré et activé au démarrage"
 
+# ============================================================================
+# ÉTAPE 2.5: Vérification des fichiers de configuration
+# ============================================================================
+step "ÉTAPE 2.5: Vérification des fichiers de configuration"
+
+if [ ! -f .env ]; then
+    info "Le fichier .env est absent. Création à partir du modèle..."
+    if [ -f templates/.env.example ]; then
+        # On utilise envsubst pour remplacer $DOMAIN si nécessaire, ou on fait un simple sed
+        sed "s/\${DOMAIN}/$DOMAIN/g" templates/.env.example > .env
+        warn "⚠️  Fichier .env créé. VEUILLEZ ÉDITER LE FICHIER ET REMPLIR LES SECRETS (SECRET_KEY, etc.)"
+    else
+        error "Modèle templates/.env.example introuvable!"
+        exit 1
+    fi
+else
+    success "Fichier .env déjà présent"
+fi
+
+if [ ! -f mobcash.json ]; then
+    info "Le fichier mobcash.json est absent. Création à partir du modèle..."
+    if [ -f templates/mobcash.json.example ]; then
+        cp templates/mobcash.json.example mobcash.json
+        warn "⚠️  Fichier mobcash.json créé. VEUILLEZ REMPLIR LA private_key DANS LE FICHIER."
+    else
+        error "Modèle templates/mobcash.json.example introuvable!"
+        exit 1
+    fi
+else
+    success "Fichier mobcash.json déjà présent"
+fi
+
 # Charger les variables d'environnement
 if [ -f .env ]; then
     # Nettoyer les espaces et exporter les variables pour le script
