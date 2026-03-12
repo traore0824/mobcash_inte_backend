@@ -73,6 +73,16 @@ fi
 
 success "Python détecté: $PYTHON_CMD version $PYTHON_VERSION"
 
+# Vérifier et installer python3-venv si nécessaire
+info "Vérification de python3-venv..."
+if ! dpkg -l | grep -q python3-venv; then
+    info "Installation de python3-venv..."
+    sudo apt-get install -y python3-venv python3-pip python3-dev
+    success "python3-venv installé"
+else
+    success "python3-venv déjà installé"
+fi
+
 # Vérifier la version minimale (3.8+)
 PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d. -f1)
 PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d. -f2)
@@ -129,7 +139,16 @@ success "PostgreSQL démarré et activé au démarrage"
 # Charger les variables d'environnement
 if [ -f .env ]; then
     # Nettoyer les espaces et exporter les variables pour le script
-    export $(grep -v '^#' .env | xargs)
+    while IFS='=' read -r key value; do
+        # Sauter les lignes vides et les commentaires
+        [[ -z "$key" || "$key" =~ ^# ]] && continue
+        
+        # Supprimer les guillemets simples/doubles autour de la valeur si présents
+        value=$(echo "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^["'\'']//' -e 's/["'\'']$//')
+        
+        # Exporter la variable
+        export "$key=$value"
+    done < .env
     success "Fichier .env chargé"
 else
     error "Fichier .env introuvable!"
