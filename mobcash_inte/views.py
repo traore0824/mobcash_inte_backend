@@ -1361,11 +1361,11 @@ class CreateCoupon(generics.ListCreateAPIView):
                 return Coupon.objects.filter(created_at__gte=last_24h)
             else:
                 total_deposit = Transaction.objects.filter(
-                    type_trans="deposit", status="accept"
+                    user=self.request.user, type_trans="deposit", status="accept"
                 ).aggregate(total=Sum("amount"))["total"] or 0
-                if total_deposit>= setting.minimun_deposit_before_view_coupon:
+                if total_deposit >= setting.minimun_deposit_before_view_coupon:
                     return Coupon.objects.filter(created_at__gte=last_24h)
-                
+
         return Coupon.objects.none()
 
 
