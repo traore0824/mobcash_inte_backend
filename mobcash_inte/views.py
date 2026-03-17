@@ -1993,24 +1993,6 @@ class TestAPIViews(decorators.APIView):
         connect_pro_logger.info(f"[TEST] cancel_old_pending_transactions lancée | task_id={result.id}")
         return Response({"message": "Tâche lancée", "task_id": result.id}, status=status.HTTP_200_OK)
 
-            return Response(
-                {
-                    "message": "Retrait en cours de traitement",
-                    "task_id": task.id,
-                },
-                status=status.HTTP_202_ACCEPTED,
-            )
-
-        except Exception as e:
-            connect_pro_logger.error(
-                f"Erreur lancement task Celery | {str(e)}", exc_info=True
-            )
-
-            return Response(
-                {"error": "Impossible de lancer le retrait"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-
 
 class RechargeMobcashBalanceView(generics.ListCreateAPIView):
     """
