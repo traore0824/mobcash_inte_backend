@@ -208,3 +208,25 @@ def generate_ussd_code(transaction :Transaction):
     except (KeyError, ValueError, IndexError) as e:
         # logger.error(f"Erreur de formatage USSD pour la transaction {transaction.id}: {e}")
         return None
+
+
+@shared_task
+def cancel_old_pending_transactions():
+    """
+    Tâche Celery Beat exécutée chaque jour à 00h.
+    - Transactions pending depuis plus de 24h → status = "annuler"
+    - Transactions pending depuis plus de 24h créées il y a au moins 24h → supprimées
+    """
+    from django.utils import timezone
+    from datetime import timedelta
+
+    connect_pro_logger = logging.getLogger("mobcash_inte_backend.transactions")
+    threshold = timezone.now() - timedelta(hours=24)
+
+    # Transactions pending créées il y a au moins 24h → annuler
+    to_cancel = Transaction.objects.filter(status="pending", created_at__lte=threshold)
+    cancel_count = to_cancel.count()
+    to_cancel.update(status="annuler")
+    connect_pro_logger.info(f"[CANCEL_PENDING] {cancel_count} transactions annulées")
+
+    return f"{cancel_count} transactions annulées"

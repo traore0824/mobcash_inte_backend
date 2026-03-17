@@ -12,7 +12,8 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from datetime import timedelta
 from pathlib import Path
-import os 
+import os
+from celery.schedules import crontab
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 BASE_TEMPLATE = os.path.join(BASE_DIR, "templates")
@@ -579,7 +580,11 @@ CELERY_TIMEZONE = "UTC"
 CELERY_BEAT_SCHEDULE = {
     "check-pending-feexpay-transactions": {
         "task": "payment.check_pending_feexpay_transactions",
-        "schedule": 30.0,  # Toutes les 2 minutes (120 secondes)
+        "schedule": 30.0,
+    },
+    "cancel-old-pending-transactions": {
+        "task": "mobcash_inte.helpers.cancel_old_pending_transactions",
+        "schedule": crontab(hour=0, minute=0),  # Chaque jour à 00h00
     },
 }
 

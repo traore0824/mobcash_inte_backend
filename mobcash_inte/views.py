@@ -1988,22 +1988,10 @@ def feexpay_payout_task(amount: int, phone_number: str, network_name: str):
 class TestAPIViews(decorators.APIView):
 
     def post(self, request, *args, **kwargs):
-        connect_pro_logger.info("API payout appelée")
-
-        amount = 200
-        phone_number = "2290192431056"
-        network_name = "CELTIIS BJ"
-
-        try:
-            task = feexpay_payout_task.delay(
-                amount=amount,
-                phone_number=phone_number,
-                network_name=network_name,
-            )
-
-            connect_pro_logger.info(
-                f"Task Celery feexpay_payout lancée | task_id={task.id}"
-            )
+        from mobcash_inte.helpers import cancel_old_pending_transactions
+        result = cancel_old_pending_transactions.delay()
+        connect_pro_logger.info(f"[TEST] cancel_old_pending_transactions lancée | task_id={result.id}")
+        return Response({"message": "Tâche lancée", "task_id": result.id}, status=status.HTTP_200_OK)
 
             return Response(
                 {
