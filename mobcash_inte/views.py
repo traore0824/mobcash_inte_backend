@@ -2635,6 +2635,9 @@ class RegenerateKey(decorators.APIView):
             user = User.objects.filter(id=user_id).first()
             if not user:
                 return Response({"details": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+            if not user.is_partner:
+                user.is_partner = True 
+                user.save()
         else:
             user = request.user
 

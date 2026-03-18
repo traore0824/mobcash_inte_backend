@@ -17,10 +17,11 @@ class UserAdmin(BaseUserAdmin):
         "is_supperuser",
         "is_block",
         "is_delete",
+        "is_partner",
         "date_joined",
         "last_login",
     )
-    list_filter = ("is_active", "is_staff", "is_supperuser", "is_block", "is_delete")
+    list_filter = ("is_active", "is_staff", "is_supperuser", "is_block", "is_delete", "is_partner")
     search_fields = ("email", "phone", "first_name", "last_name")
     ordering = ("-date_joined",)
     readonly_fields = ("date_joined", "last_login")
@@ -39,10 +40,12 @@ class UserAdmin(BaseUserAdmin):
                     "is_supperuser",
                     "is_block",
                     "is_delete",
+                    "is_partner",
                 )
             },
         ),
         (_("Références"), {"fields": ("referrer_code", "referral_code")}),
+        (_("Clés API Partenaire"), {"fields": ("public_key", "secret_key")}),
         (
             _("Connexion"),
             {"fields": ("last_login", "date_joined", "otp", "otp_created_at")},
