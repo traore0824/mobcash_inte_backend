@@ -550,7 +550,11 @@ class RechargeMobcashBalanceSerializer(serializers.ModelSerializer):
 
 
 class PartnerTransactionSerializer(serializers.ModelSerializer):
+    user_id = serializers.CharField(source="user_app_id", required=True)
+    betapp = serializers.PrimaryKeyRelatedField(source="app", queryset=AppName.objects.all(), required=True)
+
     class Meta:
         model = PartnerTransaction
-        fields = "__all__"
+        fields = ["id", "user_id", "betapp", "type_trans", "amount", "withdriwal_code",
+                  "external_reference", "reference", "status", "bet_response", "created_at", "validated_at", "partner"]
         read_only_fields = ["partner", "reference", "status", "bet_response", "created_at", "validated_at"]
