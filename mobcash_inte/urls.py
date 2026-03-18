@@ -62,4 +62,7 @@ urlpatterns = [
     path("cancel-transaction", views.CancelTransactionView.as_view(), name="cancel-transaction"),
     path("finalize-transaction-user", views.FinalizeDepositTransactionByUser.as_view(), name="finalize-transaction-user"),
     path("download-apk", views.DownloadAPKView.as_view(), name="download-apk"),
+    path("partner/regenerate-key", views.RegenerateKey.as_view(), name="partner-regenerate-key"),
+    path("partner/transaction", views.CreatePartnerTransactionView.as_view(), name="partner-transaction"),
+    path("partner/transaction-status", views.PartnerTransactionStatusView.as_view(), name="partner-transaction-status"),
 ]

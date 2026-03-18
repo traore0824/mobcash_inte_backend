@@ -359,6 +359,42 @@ PAYMENT_METHOD_CHOICES = [
 ]
 
 
+PARTNER_TRANS_STATUS = [
+    ("pending", "Pending"),
+    ("accept", "Accept"),
+    ("failed", "Failed"),
+    ("annuler", "Annulé"),
+]
+
+PARTNER_TRANS_TYPE = [
+    ("deposit", "Dépôt"),
+    ("withdrawal", "Retrait"),
+]
+
+
+class PartnerTransaction(models.Model):
+    partner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="partner_transactions")
+    app = models.ForeignKey(AppName, on_delete=models.CASCADE)
+    reference = models.CharField(max_length=255, unique=True)
+    external_reference = models.CharField(max_length=255, blank=True, null=True)
+    type_trans = models.CharField(max_length=50, choices=PARTNER_TRANS_TYPE)
+    status = models.CharField(max_length=50, choices=PARTNER_TRANS_STATUS, default="pending")
+    amount = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
+    user_app_id = models.CharField(max_length=120)
+    withdriwal_code = models.CharField(max_length=50, blank=True, null=True)
+    bet_response = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    validated_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        verbose_name = "Partner Transaction"
+        verbose_name_plural = "Partner Transactions"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.reference
+
+
 class RechargeMobcashBalance(models.Model):
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     payment_method = models.CharField(

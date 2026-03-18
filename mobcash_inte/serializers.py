@@ -13,6 +13,7 @@ from mobcash_inte.models import (
     IDLink,
     Network,
     Notification,
+    PartnerTransaction,
     RechargeMobcashBalance,
     Reward,
     Setting,
@@ -546,3 +547,10 @@ class RechargeMobcashBalanceSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data["created_by"] = self.context["request"].user
         return super().create(validated_data)
+
+
+class PartnerTransactionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PartnerTransaction
+        fields = "__all__"
+        read_only_fields = ["partner", "reference", "status", "bet_response", "created_at", "validated_at"]

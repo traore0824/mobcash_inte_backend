@@ -63,6 +63,7 @@ from mobcash_inte.serializers import (
     IDLinkSerializer,
     NetworkSerializer,
     NotificationSerializer,
+    PartnerTransactionSerializer,
     ReadAppNameSerializer,
     ReadSettingSerializer,
     RechargeMobcashBalanceSerializer,
@@ -2605,3 +2606,164 @@ class DownloadAPKView(decorators.APIView):
         response['Content-Disposition'] = 'attachment; filename="app-release.apk"'
         
         return response
+
+
+import secrets as secrets_module
+
+
+def generate_api_keys() -> dict:
+    public_key = "pk_live_" + secrets_module.token_urlsafe()
+    secret_key = "sk_live_" + secrets_module.token_urlsafe()
+    return {"public_key": public_key, "secret_key": secret_key}
+
+
+def validate_partner_key(secret_key, public_key):
+    user = User.objects.filter(
+        secret_key=secret_key, public_key=public_key, is_partner=True, is_block=False
+    ).first()
+    if not user:
+        return {"is_valid": False}
+    return {"is_valid": True, "user": user}
+
+
+class RegenerateKey(decorators.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        user_id = request.GET.get("user_id")
+        if user_id and request.user.is_staff:
+            user = User.objects.filter(id=user_id).first()
+            if not user:
+                return Response({"details": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            user = request.user
+
+        if not (user.is_partner or request.user.is_staff):
+            return Response(
+                {"details": "Votre compte n'est pas enregistré en tant que partenaire. Veuillez contacter l'équipe de support."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        keys = generate_api_keys()
+        user.secret_key = keys["secret_key"]
+        user.public_key = keys["public_key"]
+        user.save(update_fields=["secret_key", "public_key"])
+        return Response(keys)
+
+
+class CreatePartnerTransactionView(decorators.APIView):
+
+    def post(self, request, *args, **kwargs):
+        from mobcash_inte.models import PartnerTransaction
+        from mobcash_inte.helpers import generate_reference, init_mobcash
+        from mobcash_inte.serializers import PartnerTransactionSerializer
+        from mobcash_external_service import MobCashExternalService
+
+        secret = request.headers.get("X-Secret-Key")
+        public = request.headers.get("X-Public-Key")
+        auth = validate_partner_key(secret_key=secret, public_key=public)
+        if not auth.get("is_valid"):
+            return Response(status=status.HTTP_401_UNAUTHORIZED)
+
+        serializer = PartnerTransactionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        partner = auth["user"]
+        reference = generate_reference(prefix="partner-")
+        transaction = serializer.save(partner=partner, reference=reference)
+
+        app = transaction.app
+
+        if transaction.type_trans == "deposit":
+            # Même logique que RewardTransactionViews / CreateDepositTransactionViews
+            try:
+                servculAPI = init_mobcash(app_name=app)
+                if app.hash:
+                    response = servculAPI.recharge_account(
+                        amount=float(transaction.amount), userid=transaction.user_app_id
+                    )
+                    xbet_data = response.get("data", {})
+                else:
+                    response = MobCashExternalService().create_deposit(transaction=transaction)
+                    xbet_data = response
+
+                if xbet_data.get("Success") == True:
+                    transaction.status = "accept"
+                    transaction.validated_at = timezone.now()
+                else:
+                    transaction.status = "failed"
+                    transaction.bet_response = str(xbet_data.get("Message", ""))
+            except Exception as e:
+                transaction.status = "failed"
+                transaction.bet_response = str(e)
+
+        else:  # withdrawal
+            try:
+                servculAPI = init_mobcash(app_name=app)
+                if app.hash:
+                    response = servculAPI.withdraw_from_account(
+                        userid=transaction.user_app_id, code=transaction.withdriwal_code
+                    )
+                    xbet_data = response.get("data", {})
+                else:
+                    response = MobCashExternalService().create_withdrawal(transaction=transaction)
+                    xbet_data = response
+
+                if str(xbet_data.get("Success", "")).lower() == "true":
+                    amount = float(xbet_data.get("Summa", transaction.amount)) * (-1)
+                    transaction.amount = abs(amount)
+                    transaction.status = "accept"
+                    transaction.validated_at = timezone.now()
+                else:
+                    transaction.status = "failed"
+                    transaction.bet_response = str(xbet_data.get("Message", ""))
+            except Exception as e:
+                transaction.status = "failed"
+                transaction.bet_response = str(e)
+
+        transaction.save()
+        transaction.refresh_from_db()
+        return Response(PartnerTransactionSerializer(transaction).data, status=status.HTTP_201_CREATED)
+
+    def get(self, request, *args, **kwargs):
+        from mobcash_inte.models import PartnerTransaction
+        from mobcash_inte.serializers import PartnerTransactionSerializer
+
+        secret = request.headers.get("X-Secret-Key")
+        public = request.headers.get("X-Public-Key")
+        auth = validate_partner_key(secret_key=secret, public_key=public)
+        if not auth.get("is_valid"):
+            return Response(status=status.HTTP_401_UNAUTHORIZED)
+
+        reference = request.GET.get("reference")
+        transaction = PartnerTransaction.objects.filter(reference=reference).first()
+        if not transaction:
+            return Response({"details": "Transaction not found"}, status=status.HTTP_404_NOT_FOUND)
+        return Response(PartnerTransactionSerializer(transaction).data)
+
+
+class PartnerTransactionStatusView(decorators.APIView):
+
+    def get(self, request, *args, **kwargs):
+        from mobcash_inte.models import PartnerTransaction
+        from mobcash_inte.serializers import PartnerTransactionSerializer
+
+        secret = request.headers.get("X-Secret-Key")
+        public = request.headers.get("X-Public-Key")
+        auth = validate_partner_key(secret_key=secret, public_key=public)
+        if not auth.get("is_valid"):
+            return Response(status=status.HTTP_401_UNAUTHORIZED)
+
+        external_reference = request.GET.get("external_reference")
+        if not external_reference:
+            return Response(
+                {"external_reference": ["external_reference is required"]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        transaction = PartnerTransaction.objects.filter(
+            external_reference=external_reference, partner=auth["user"]
+        ).first()
+        if not transaction:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response(PartnerTransactionSerializer(transaction).data)

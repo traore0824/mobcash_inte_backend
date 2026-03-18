@@ -56,6 +56,9 @@ class User(AbstractUser):
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     is_supperuser = models.BooleanField(default=False)
+    is_partner = models.BooleanField(default=False)
+    public_key = models.CharField(max_length=255, blank=True, null=True, unique=True)
+    secret_key = models.CharField(max_length=255, blank=True, null=True, unique=True)
     date_joined = models.DateTimeField(auto_now_add=True)
     last_login = models.DateTimeField(auto_now=True)
 
