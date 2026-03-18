@@ -16,6 +16,7 @@ urlpatterns = [
     path("network", views.CreateNetworkView.as_view(), name="network"),
     path("network/<int:pk>", views.DetailsNetworkView.as_view()),
     path("plateform", views.CreateAppName.as_view()),
+    path("app_name", views.BetAppName.as_view()),
     path("plateform/<str:pk>", views.DetailAppName.as_view()),
     path("notification", views.NotificationView.as_view()),
     path("delete-notification", views.ReadAllNotificaation.as_view()),

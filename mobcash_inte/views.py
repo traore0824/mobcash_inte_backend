@@ -262,6 +262,18 @@ class CreateAppName(generics.ListCreateAPIView):
         return ReadAppNameSerializer
 
 
+class BetAppName(generics.ListAPIView):
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["name"]
+
+    def get_queryset(self):
+        queryset = AppName.objects.filter(enable=True).order_by("order")
+        return queryset
+
+    serializer_class = ReadAppNameSerializer
+    permission_classes = [permissions.AllowAny]
+
+
 class DetailAppName(generics.RetrieveUpdateDestroyAPIView):
     queryset = AppName.objects.all().order_by("order")
     serializer_class = ReadAppNameSerializer
