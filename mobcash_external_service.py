@@ -5,6 +5,7 @@ import logging
 import hmac
 import hashlib
 import time
+from datetime import datetime
 import json
 from decimal import Decimal
 from typing import Dict, Any, Optional
@@ -336,6 +337,12 @@ class MobCashExternalService:
             "payment_method": str(transaction.network.name).upper(),
         }
 
+        logger.info(
+            f"[MOBCASH] [DEPOSIT_CALL] "
+            f"date={datetime.now().isoformat()} | "
+            f"transaction_id={transaction.id} | "
+            f"body={json.dumps(payload, ensure_ascii=False)}"
+        )
         result = self._make_request("POST", endpoint, data=payload)
 
         if result.get("success"):
@@ -410,6 +417,12 @@ class MobCashExternalService:
             "mobcash_code": transaction.withdriwal_code,
         }
 
+        logger.info(
+            f"[MOBCASH] [WITHDRAWAL_CALL] "
+            f"date={datetime.now().isoformat()} | "
+            f"transaction_id={transaction.id} | "
+            f"body={json.dumps(payload, ensure_ascii=False)}"
+        )
         result = self._make_request('POST', endpoint, data=payload)
         logger.info(f"[MOBCASH] [WITHDRAWAL_SUCCESS] result: {result}")
         if result.get("success"):
