@@ -2580,7 +2580,7 @@ class FinalizeDepositTransactionByUser(decorators.APIView):
 
         # Mise à jour de la transaction
         transaction.status = "pending"
-        prefix = "depot-" if transaction.type_trans in ["deposit", "reward"] else "retrait-"
+        prefix = "depot-" if transaction.type_trans in ["deposit-f", "reward-f"] else "retrait-f-"
         new_reference = generate_reference(prefix=prefix)
         transaction.reference = new_reference
         transaction.save()
