@@ -1998,7 +1998,6 @@ def feexpay_payout_task(amount: int, phone_number: str, network_name: str):
         raise
 
 
-
 class TestAPIViews(decorators.APIView):
 
     def post(self, request, *args, **kwargs):
@@ -2490,13 +2489,18 @@ class LastTransactionView(generics.RetrieveAPIView):
     def get_object(self):
         user = self.request.user
         if user and user.is_authenticated:
-            return Transaction.objects.filter(user=user).order_by("-created_at").first()
-        
+            return (
+                Transaction.objects.filter(user=user)
+                .exclude(type_trans="withdrawal")
+                .order_by("-created_at")
+                .first()
+            )
+
         # Pour les utilisateurs Telegram (via le header X-USER-ID géré par IsAuthenticated)
         telegram_user = getattr(self.request, "telegram_user", None)
         if telegram_user:
             return Transaction.objects.filter(telegram_user=telegram_user).order_by("-created_at").first()
-        
+
         return None
 
     def retrieve(self, request, *args, **kwargs):
