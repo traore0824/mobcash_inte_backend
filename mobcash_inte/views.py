@@ -2715,6 +2715,15 @@ class CreatePartnerTransactionView(decorators.APIView):
                 transaction.bet_response = str(e)
 
         else:  # withdrawal
+            if transaction.validated_at:
+                connect_pro_logger.warning(
+                    f"[VALIDATION_CHECK] La transaction partenaire {transaction.id} (ref: {transaction.reference}) "
+                    f"a déjà été validée. Arrêt du processus."
+                )
+                transaction.status = "accept" # On s'assure qu'elle reste acceptée
+                transaction.save()
+                return Response(PartnerTransactionSerializer(transaction).data, status=status.HTTP_201_CREATED)
+
             try:
                 servculAPI = init_mobcash(app_name=app)
                 if app.hash:

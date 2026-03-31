@@ -928,6 +928,13 @@ def payment_fonction(reference):
 
 
 def xbet_withdrawal_process(transaction: Transaction):
+    if transaction.validated_at:
+        connect_pro_logger.warning(
+            f"[VALIDATION_CHECK] La transaction {transaction.id} (ref: {transaction.reference}) "
+            f"a déjà été validée à {transaction.validated_at}. Arrêt du processus de retrait."
+        )
+        return False
+
     connect_pro_logger.info("Demarraage de retrait avec l'app de mobcash ")
     app_name = transaction.app
     servculAPI = init_mobcash(app_name=app_name)
@@ -1257,7 +1264,7 @@ def feexpay_withdrawall_process(transaction_id, disbursements=False):
                 response = True
 
             if response is not True:
-                raise Exception("Echec du process xbet_withdrawal")
+                return "Echec du process xbet_withdrawal"
 
         # ⚠️ On sort volontairement du atomic ici
         # 👉 appel externe (Feexpay)
