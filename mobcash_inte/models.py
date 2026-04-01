@@ -161,7 +161,7 @@ class Setting(models.Model):
     expired_connect_pro_token = models.DateTimeField(blank=True, null=True)
     orange_default_link = models.URLField(blank=True, null=True)
     mtn_default_link = models.URLField(blank=True, null=True)
-    telegram = models.URLField(blank=True, null=True)
+    telegram = models.CharField(blank=True, null=True, max_length=500)
     moov_marchand_phone = models.CharField(max_length=250, blank=True, null=True)
     mtn_marchand_phone = models.CharField(max_length=250, blank=True, null=True)
     orange_marchand_phone = models.CharField(max_length=250, blank=True, null=True)
