@@ -618,7 +618,7 @@ class MobCashExternalService:
             return None
 
         # Normalise le code recherché (minuscule pour comparaison)
-        search_code = code.strip().lower()
+        search_code = code.replace(" ", "").lower()
 
         for platform in result["results"]:
             # Compare insensible à la casse
