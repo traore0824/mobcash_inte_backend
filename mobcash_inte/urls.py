@@ -84,4 +84,19 @@ urlpatterns = [
         views.PartnerTransactionStatusView.as_view(),
         name="partner-transaction-status",
     ),
+
+    # ============================================================
+    # Coupon System V2 Routes
+    # ============================================================
+    path("v2/coupons", views.CouponV2View.as_view(), name="coupon-v2-list"),
+    path("v2/coupons/<uuid:pk>", views.CouponV2DetailView.as_view(), name="coupon-v2-detail"),
+    path("v2/coupons/<uuid:pk>/vote", views.VoteCouponV2View.as_view(), name="coupon-v2-vote"),
+    path("v2/coupon-wallet", views.CouponWalletView.as_view(), name="coupon-wallet"),
+    path("v2/coupon-wallet-withdraw", views.CouponWithdrawalView.as_view(), name="coupon-wallet-withdraw"),
+    path("v2/coupon-wallet-payouts", views.CouponPayoutListView.as_view(), name="coupon-wallet-payouts"),
+    path("v2/author-comments", views.AuthorCommentView.as_view(), name="author-comments"),
+    path("v2/author-comments/<uuid:pk>", views.AuthorCommentDetailView.as_view(), name="author-comment-detail"),
+    path("v2/author-ratings", views.AuthorRatingView.as_view(), name="author-ratings"),
+    path("v2/user/coupon-stats", views.UserCouponStatsView.as_view(), name="user-coupon-stats"),
+    path("v2/author-stats/<uuid:user_id>", views.AuthorStatsView.as_view(), name="author-stats"),
 ]

@@ -1,3 +1,5 @@
+import uuid
+
 from django.db import models
 
 from accounts.models import AppName, TelegramUser, User
@@ -173,6 +175,17 @@ class Setting(models.Model):
     bf_orange_marchand_phone = models.CharField(max_length=250, blank=True, null=True)
     requires_deposit_to_view_coupon = models.BooleanField(default=False)
     minimun_deposit_before_view_coupon = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    max_coupons_per_day = models.PositiveIntegerField(default=10)
+    max_coupons_per_week = models.PositiveIntegerField(default=50)
+    enable_coupon_monetization = models.BooleanField(default=False)
+    minimum_coupon_withdrawal = models.DecimalField(max_digits=10, decimal_places=2, default=1000.00)
+    monetization_amount = models.DecimalField(max_digits=10, decimal_places=2, default=1.00)
+    coupon_rating_points = models.DecimalField(max_digits=4, decimal_places=2, default=1.0)
+    payout_mode = models.CharField(max_length=20, choices=[('immediate', 'Immédiat'), ('monthly', 'Mensuel')], default='monthly')
+    min_withdrawal = models.DecimalField(max_digits=10, decimal_places=2, default=10.00)
+    max_withdrawal_monthly = models.DecimalField(max_digits=10, decimal_places=2, default=500.00)
+    auto_approve_withdrawal = models.BooleanField(default=False)
+    coupon_enable = models.BooleanField(default=False)
 
     def __str__(self):
         return str(self.id)
@@ -251,6 +264,8 @@ class Transaction(models.Model):
     mobcash_response = models.TextField(blank=True, null=True)
     ussd_code = models.CharField(max_length=200, blank=True, null=True)
     connect_pro_response = models.TextField(blank=True, null=True)
+    credit_used = models.PositiveIntegerField(default=0)
+
     class Meta:
         verbose_name = "Transaction"
         verbose_name_plural = "Transactions"
@@ -415,3 +430,189 @@ class RechargeMobcashBalance(models.Model):
 
     def __str__(self):
         return f"Recharge {self.payment_reference} - {self.amount}"
+
+
+class UserCredit(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='credit')
+    amount = models.PositiveIntegerField(default=0)
+    note = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Crédit utilisateur"
+        verbose_name_plural = "Crédits utilisateurs"
+
+    def __str__(self):
+        return f"UserCredit({self.user}, {self.amount} FCFA)"
+
+
+class CouponV2(models.Model):
+    COUPON_TYPES = [
+        ('single', 'Paris simple'),
+        ('combine', 'Paris combiné'),
+        ('system', 'Système'),
+    ]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    bet_app = models.ForeignKey(AppName, on_delete=models.CASCADE, blank=True, null=True)
+    code = models.CharField(max_length=150, blank=True, null=True)
+    author = models.ForeignKey(User, on_delete=models.CASCADE, related_name='published_coupons_v2', blank=True, null=True)
+    likes_count = models.PositiveIntegerField(default=0)
+    dislikes_count = models.PositiveIntegerField(default=0)
+    coupon_type = models.CharField(max_length=20, choices=COUPON_TYPES, default='combine')
+    cote = models.DecimalField(max_digits=6, decimal_places=2, default=1.00)
+    match_count = models.PositiveIntegerField(default=1)
+    potential_gain = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "Coupon V2"
+        verbose_name_plural = "Coupons V2"
+
+    def __str__(self):
+        return str(self.id)
+
+
+class CouponRatingV2(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    coupon = models.ForeignKey(CouponV2, on_delete=models.CASCADE, related_name='ratings')
+    is_like = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ['user', 'coupon']
+        verbose_name = "Vote Coupon V2"
+        verbose_name_plural = "Votes Coupon V2"
+
+    def __str__(self):
+        return str(self.id)
+
+
+class CouponWallet(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='coupon_wallet')
+    balance = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    total_earned = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    pending_payout = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Portefeuille Coupon"
+        verbose_name_plural = "Portefeuilles Coupon"
+
+    def __str__(self):
+        return f"Wallet({self.user}, {self.balance} FCFA)"
+
+
+COUPON_PAYOUT_STATUS = [
+    ('pending', 'En attente'),
+    ('processing', 'En cours'),
+    ('completed', 'Terminé'),
+    ('failed', 'Échec'),
+    ('cancelled', 'Annulé'),
+]
+
+COUPON_PAYOUT_TYPE = [
+    ('automatic', 'Automatique - Seuil atteint'),
+    ('monthly', 'Paiement mensuel'),
+    ('manual', 'Manuel admin'),
+]
+
+
+class CouponPayout(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    wallet = models.ForeignKey(CouponWallet, on_delete=models.CASCADE)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    payout_type = models.CharField(max_length=20, choices=COUPON_PAYOUT_TYPE)
+    status = models.CharField(max_length=20, choices=COUPON_PAYOUT_STATUS, default='pending')
+    processed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    payment_method = models.CharField(max_length=50, default='bank_transfer')
+    transaction_id = models.CharField(max_length=100, null=True, blank=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = "Versement Coupon"
+        verbose_name_plural = "Versements Coupon"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return str(self.id)
+
+
+COUPON_WITHDRAWAL_STATUS = [
+    ('pending', 'En attente'),
+    ('approved', 'Approuvé'),
+    ('rejected', 'Rejeté'),
+    ('completed', 'Terminé'),
+]
+
+
+class CouponWithdrawal(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    wallet = models.ForeignKey(CouponWallet, on_delete=models.CASCADE)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    status = models.CharField(max_length=20, choices=COUPON_WITHDRAWAL_STATUS, default='pending')
+    bank_name = models.CharField(max_length=100)
+    account_number = models.CharField(max_length=50)
+    account_holder = models.CharField(max_length=100)
+    created_at = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+    admin_notes = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = "Retrait Coupon"
+        verbose_name_plural = "Retraits Coupon"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return str(self.id)
+
+
+class AuthorComment(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    author = models.ForeignKey(User, on_delete=models.CASCADE, related_name='comments_written')
+    coupon_author = models.ForeignKey(User, on_delete=models.CASCADE, related_name='comments_received')
+    coupon = models.ForeignKey(CouponV2, on_delete=models.CASCADE, related_name='comments', null=True, blank=True)
+    content = models.TextField()
+    parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='replies')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "Commentaire Auteur"
+        verbose_name_plural = "Commentaires Auteur"
+        indexes = [
+            models.Index(fields=['coupon_author', 'created_at']),
+            models.Index(fields=['parent', 'created_at']),
+        ]
+
+    def __str__(self):
+        return str(self.id)
+
+
+class AuthorCouponRating(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='ratings_given')
+    coupon_author = models.ForeignKey(User, on_delete=models.CASCADE, related_name='ratings_received')
+    coupon = models.ForeignKey(CouponV2, on_delete=models.CASCADE, related_name='author_ratings', null=True, blank=True)
+    is_like = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['user', 'coupon_author']
+        verbose_name = "Vote Auteur"
+        verbose_name_plural = "Votes Auteur"
+
+    def __str__(self):
+        return str(self.id)

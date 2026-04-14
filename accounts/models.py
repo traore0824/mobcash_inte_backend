@@ -61,6 +61,9 @@ class User(AbstractUser):
     secret_key = models.CharField(max_length=255, blank=True, null=True, unique=True)
     date_joined = models.DateTimeField(auto_now_add=True)
     last_login = models.DateTimeField(auto_now=True)
+    can_publish_coupons = models.BooleanField(default=False)
+    can_rate_coupons = models.BooleanField(default=False)
+    coupon_points = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
     @property
     def bonus_available(self):

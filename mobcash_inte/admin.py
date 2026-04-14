@@ -1,7 +1,29 @@
 from django.contrib import admin
 
 from accounts.models import Advertisement
-from .models import Bonus, Caisse, Coupon, IDLink, Network, Notification, RechargeMobcashBalance, Reward, Setting, TestModel, Transaction, UserPhone, WebhookLog
+from .models import (
+    AuthorComment,
+    AuthorCouponRating,
+    Bonus,
+    Caisse,
+    Coupon,
+    CouponPayout,
+    CouponRatingV2,
+    CouponV2,
+    CouponWallet,
+    CouponWithdrawal,
+    IDLink,
+    Network,
+    Notification,
+    RechargeMobcashBalance,
+    Reward,
+    Setting,
+    TestModel,
+    Transaction,
+    UserCredit,
+    UserPhone,
+    WebhookLog,
+)
 
 
 @admin.register(Network)
@@ -468,3 +490,13 @@ admin.site.register(IDLink)
 admin.site.register(Coupon)
 admin.site.register(TestModel)
 admin.site.register(RechargeMobcashBalance)
+admin.site.register(UserCredit)
+
+# Coupon System V2
+admin.site.register(CouponV2)
+admin.site.register(CouponRatingV2)
+admin.site.register(CouponWallet)
+admin.site.register(CouponPayout)
+admin.site.register(CouponWithdrawal)
+admin.site.register(AuthorComment)
+admin.site.register(AuthorCouponRating)

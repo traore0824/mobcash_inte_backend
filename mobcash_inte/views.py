@@ -8,6 +8,7 @@ from django.conf.urls import handler404
 import requests
 from rest_framework.permissions import BasePermission
 from rest_framework import generics, permissions, status, decorators, viewsets
+from rest_framework.views import APIView
 from accounts.helpers import CustomPagination
 from accounts.models import Advertisement, AppName, TelegramUser, User
 from rest_framework.filters import SearchFilter
@@ -25,9 +26,16 @@ from mobcash_inte.helpers import (
 from mobcash_inte.mobcash_service import CashAPIService
 from mobcash_inte.models import (
     TYPE_TRANS,
+    AuthorComment,
+    AuthorCouponRating,
     Bonus,
     Caisse,
     Coupon,
+    CouponPayout,
+    CouponRatingV2,
+    CouponV2,
+    CouponWallet,
+    CouponWithdrawal,
     Deposit,
     IDLink,
     Network,
@@ -44,6 +52,10 @@ from django_filters.rest_framework import DjangoFilterBackend
 from mobcash_inte.permissions import IsAuthenticated
 from mobcash_inte.serializers import (
     AdvertisementSerializer,
+    AuthorCommentSerializer,
+    AuthorCommentCreateSerializer,
+    AuthorCouponRatingSerializer,
+    AuthorRatingCreateSerializer,
     BonusSerializer,
     BonusTransactionSerializer,
     CreateBonusSerializer,
@@ -51,6 +63,12 @@ from mobcash_inte.serializers import (
     BotWithdrawalTransactionSerializer,
     CaisseSerializer,
     ChangeTransactionStatusSerializer,
+    CouponPayoutSerializer,
+    CouponRatingV2Serializer,
+    CouponV2Serializer,
+    CouponV2CreateSerializer,
+    CouponWalletSerializer,
+    CouponWithdrawalSerializer,
     ProcessTransactionSerializer,
     UpdateTransactionStatusSerializer,
     ValidateVersionSerializer,
@@ -2802,3 +2820,400 @@ class PartnerTransactionStatusView(decorators.APIView):
         if not transaction:
             return Response(status=status.HTTP_404_NOT_FOUND)
         return Response(PartnerTransactionSerializer(transaction).data)
+
+
+# ============================================================
+# Coupon System V2 Views
+# ============================================================
+
+class CouponV2View(generics.ListCreateAPIView):
+    serializer_class = CouponV2Serializer
+    pagination_class = CustomPagination
+
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
+
+    def get_queryset(self):
+        last_24h = timezone.now() - relativedelta(hours=24)
+        qs = CouponV2.objects.filter(created_at__gte=last_24h)
+        bet_app = self.request.query_params.get('bet_app')
+        if bet_app:
+            qs = qs.filter(bet_app__id=bet_app)
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        serializer = CouponV2CreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        setting = Setting.objects.first()
+
+        if not setting.coupon_enable:
+            return Response({"error": "Le système de coupons est désactivé."}, status=status.HTTP_403_FORBIDDEN)
+
+        if not (request.user.is_staff or getattr(request.user, 'can_publish_coupons', False)):
+            return Response({"error": "Vous n'avez pas l'autorisation de publier des coupons."}, status=status.HTTP_403_FORBIDDEN)
+
+        bet_app = AppName.objects.filter(id=data['bet_app_id']).first()
+        if not bet_app:
+            return Response({"error": "Application bookmaker non trouvée."}, status=status.HTTP_404_NOT_FOUND)
+
+        today = timezone.now().date()
+        week_start = today - timezone.timedelta(days=today.weekday())
+
+        # 1 coupon par app par jour
+        if CouponV2.objects.filter(author=request.user, bet_app=bet_app, created_at__date=today).exists():
+            return Response({"error": f"Vous avez déjà créé un coupon pour {bet_app.name} aujourd'hui."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        # Quota journalier
+        if CouponV2.objects.filter(author=request.user, created_at__date=today).count() >= setting.max_coupons_per_day:
+            return Response({"error": f"Quota journalier de {setting.max_coupons_per_day} coupons atteint."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        # Quota hebdomadaire
+        if CouponV2.objects.filter(author=request.user, created_at__date__gte=week_start).count() >= setting.max_coupons_per_week:
+            return Response({"error": f"Quota hebdomadaire de {setting.max_coupons_per_week} coupons atteint."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        # Unicité du code par app
+        code = data.get('code')
+        if code and CouponV2.objects.filter(bet_app=bet_app, code=code).exists():
+            return Response({"error": "Ce code promo existe déjà pour cette application bookmaker."}, status=status.HTTP_400_BAD_REQUEST)
+
+        cote = data.get('cote', 1.00)
+        potential_gain = float(cote) * 10000
+
+        coupon = CouponV2.objects.create(
+            author=request.user,
+            bet_app=bet_app,
+            code=code,
+            coupon_type=data.get('coupon_type', 'combine'),
+            cote=cote,
+            match_count=data.get('match_count', 1),
+            potential_gain=potential_gain,
+        )
+        return Response(CouponV2Serializer(coupon, context={'request': request}).data, status=status.HTTP_201_CREATED)
+
+
+class CouponV2DetailView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = CouponV2.objects.all()
+    serializer_class = CouponV2Serializer
+
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [permissions.AllowAny()]
+        return [permissions.IsAdminUser()]
+
+
+class VoteCouponV2View(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        serializer = CouponRatingV2Serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        vote_type = serializer.validated_data['vote_type']
+        is_like = (vote_type == 'like')
+
+        if not getattr(request.user, 'can_rate_coupons', False):
+            return Response({"error": "Vous n'avez pas l'autorisation de noter des coupons."}, status=status.HTTP_403_FORBIDDEN)
+
+        coupon = CouponV2.objects.filter(id=pk).first()
+        if not coupon:
+            return Response({"error": "Coupon non trouvé."}, status=status.HTTP_404_NOT_FOUND)
+
+        if coupon.author == request.user:
+            return Response({"error": "Vous ne pouvez pas voter sur votre propre coupon."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Règle 1 vote/jour/auteur
+        today = timezone.now().date()
+        already_voted_today = CouponRatingV2.objects.filter(
+            user=request.user,
+            coupon__author=coupon.author,
+            created_at__date=today,
+        ).exclude(coupon=coupon).exists()
+        if already_voted_today:
+            return Response({"error": "Vous avez déjà voté aujourd'hui sur un coupon de cet auteur."}, status=status.HTTP_400_BAD_REQUEST)
+
+        setting = Setting.objects.first()
+        monetization_enabled = setting.enable_coupon_monetization
+        monetization_amount = setting.monetization_amount
+        coupon_rating_points = setting.coupon_rating_points
+
+        author = coupon.author
+        wallet = None
+        if author:
+            wallet, _ = CouponWallet.objects.get_or_create(user=author)
+
+        existing_rating = CouponRatingV2.objects.filter(user=request.user, coupon=coupon).first()
+        adjustment = 0
+        points_delta = 0
+
+        if existing_rating is None:
+            # Nouveau vote
+            CouponRatingV2.objects.create(user=request.user, coupon=coupon, is_like=is_like)
+            if is_like:
+                coupon.likes_count += 1
+                adjustment = monetization_amount
+            else:
+                coupon.dislikes_count += 1
+                adjustment = -monetization_amount
+            points_delta = float(coupon_rating_points)
+
+        elif existing_rating.is_like == is_like:
+            # Annulation du vote
+            existing_rating.delete()
+            if is_like:
+                coupon.likes_count = max(0, coupon.likes_count - 1)
+                adjustment = -monetization_amount
+            else:
+                coupon.dislikes_count = max(0, coupon.dislikes_count - 1)
+                adjustment = monetization_amount
+            points_delta = -float(coupon_rating_points)
+
+        else:
+            # Changement de vote
+            existing_rating.is_like = is_like
+            existing_rating.save()
+            if is_like:
+                coupon.likes_count += 1
+                coupon.dislikes_count = max(0, coupon.dislikes_count - 1)
+                adjustment = 2 * monetization_amount
+            else:
+                coupon.dislikes_count += 1
+                coupon.likes_count = max(0, coupon.likes_count - 1)
+                adjustment = -2 * monetization_amount
+            # Pas de changement de points lors d'un changement de vote
+
+        coupon.save()
+
+        if author:
+            if points_delta != 0:
+                author.coupon_points = float(author.coupon_points or 0) + points_delta
+                author.save(update_fields=['coupon_points'])
+
+            if monetization_enabled and wallet and adjustment != 0:
+                wallet.balance = float(wallet.balance) + float(adjustment)
+                if float(adjustment) > 0:
+                    wallet.total_earned = float(wallet.total_earned) + float(adjustment)
+                wallet.save()
+
+        return Response({
+            "message": f"Vote {vote_type} enregistré avec succès",
+            "coupon": {
+                "id": str(coupon.id),
+                "likes": coupon.likes_count,
+                "dislikes": coupon.dislikes_count,
+                "user_liked": is_like if existing_rating is None else (existing_rating.is_like if existing_rating else False),
+                "user_disliked": not is_like if existing_rating is None else (not existing_rating.is_like if existing_rating else False),
+            },
+            "amount_earned": str(adjustment) if monetization_enabled else "0",
+            "points_delta": points_delta,
+        }, status=status.HTTP_200_OK)
+
+
+class CouponWalletView(generics.RetrieveAPIView):
+    serializer_class = CouponWalletSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self):
+        wallet, _ = CouponWallet.objects.get_or_create(user=self.request.user)
+        return wallet
+
+
+class CouponWithdrawalView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = CouponWithdrawalSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        setting = Setting.objects.first()
+        wallet, _ = CouponWallet.objects.get_or_create(user=request.user)
+
+        amount = data['amount']
+
+        if amount < setting.minimum_coupon_withdrawal:
+            return Response({"error": f"Montant minimum de retrait: {setting.minimum_coupon_withdrawal} FCFA."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if amount > wallet.balance:
+            return Response({"error": f"Solde insuffisant. Solde disponible: {wallet.balance} FCFA."}, status=status.HTTP_400_BAD_REQUEST)
+
+        network = Network.objects.filter(id=data['network']).first()
+        if not network:
+            return Response({"error": "Réseau de paiement non trouvé."}, status=status.HTTP_404_NOT_FOUND)
+
+        import secrets as secrets_module
+        reference = f"CW-{secrets_module.token_hex(8).upper()}"
+
+        transaction = Transaction.objects.create(
+            user=request.user,
+            type_trans="coupon_withdrawal",
+            amount=int(amount),
+            phone_number=data['phone_number'],
+            network=network,
+            reference=reference,
+            status="pending",
+        )
+
+        CouponWithdrawal.objects.create(
+            user=request.user,
+            wallet=wallet,
+            amount=amount,
+            bank_name=data.get('bank_name', ''),
+            account_number=data.get('account_number', ''),
+            account_holder=data.get('account_holder', ''),
+        )
+
+        wallet.balance = float(wallet.balance) - float(amount)
+        wallet.pending_payout = float(wallet.pending_payout) + float(amount)
+        wallet.save()
+
+        from payment import connect_pro_withd_process
+        connect_pro_withd_process(transaction=transaction)
+
+        from mobcash_inte.serializers import TransactionDetailsSerializer
+        return Response(TransactionDetailsSerializer(transaction).data, status=status.HTTP_201_CREATED)
+
+
+class CouponPayoutListView(generics.ListAPIView):
+    serializer_class = CouponPayoutSerializer
+    permission_classes = [permissions.IsAdminUser]
+    pagination_class = CustomPagination
+    queryset = CouponPayout.objects.all().order_by('-created_at')
+
+
+class AuthorCommentView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        coupon_author_id = request.query_params.get('coupon_author_id')
+        if not coupon_author_id:
+            return Response({"error": "coupon_author_id est requis."}, status=status.HTTP_400_BAD_REQUEST)
+        comments = AuthorComment.objects.filter(
+            coupon_author__id=coupon_author_id,
+            parent=None,
+            is_deleted=False,
+        ).order_by('-created_at')
+        serializer = AuthorCommentSerializer(comments, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        serializer = AuthorCommentCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        coupon = CouponV2.objects.filter(id=data['coupon_id']).first()
+        if not coupon:
+            return Response({"error": "Coupon non trouvé."}, status=status.HTTP_404_NOT_FOUND)
+
+        parent = None
+        if data.get('parent_id'):
+            parent = AuthorComment.objects.filter(id=data['parent_id']).first()
+            if not parent:
+                return Response({"error": "Commentaire parent non trouvé."}, status=status.HTTP_404_NOT_FOUND)
+
+        comment = AuthorComment.objects.create(
+            author=request.user,
+            coupon_author=coupon.author,
+            coupon=coupon,
+            content=data['content'],
+            parent=parent,
+        )
+        return Response(AuthorCommentSerializer(comment).data, status=status.HTTP_201_CREATED)
+
+
+class AuthorCommentDetailView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, pk):
+        comment = AuthorComment.objects.filter(id=pk, author=request.user, is_deleted=False).first()
+        if not comment:
+            return Response({"error": "Commentaire non trouvé ou non autorisé."}, status=status.HTTP_404_NOT_FOUND)
+        content = request.data.get('content')
+        if content:
+            comment.content = content
+            comment.save()
+        return Response(AuthorCommentSerializer(comment).data)
+
+    def delete(self, request, pk):
+        comment = AuthorComment.objects.filter(id=pk, author=request.user, is_deleted=False).first()
+        if not comment:
+            return Response({"error": "Commentaire non trouvé ou non autorisé."}, status=status.HTTP_404_NOT_FOUND)
+        comment.is_deleted = True
+        comment.deleted_at = timezone.now()
+        comment.save()
+        return Response({"message": "Commentaire supprimé avec succès."}, status=status.HTTP_200_OK)
+
+
+class AuthorRatingView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = AuthorRatingCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        coupon = CouponV2.objects.filter(id=data['coupon_id']).first()
+        if not coupon:
+            return Response({"error": "Coupon non trouvé."}, status=status.HTTP_404_NOT_FOUND)
+
+        coupon_author = coupon.author
+        if coupon_author == request.user:
+            return Response({"error": "Vous ne pouvez pas voter pour vous-même."}, status=status.HTTP_400_BAD_REQUEST)
+
+        rating, created = AuthorCouponRating.objects.update_or_create(
+            user=request.user,
+            coupon_author=coupon_author,
+            defaults={'is_like': data['is_like'], 'coupon': coupon},
+        )
+        return Response(AuthorCouponRatingSerializer(rating).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+class AuthorStatsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, user_id):
+        from accounts.models import User as UserModel
+        author = UserModel.objects.filter(id=user_id).first()
+        if not author:
+            return Response({"error": "Auteur non trouvé."}, status=status.HTTP_404_NOT_FOUND)
+
+        total_likes = AuthorCouponRating.objects.filter(coupon_author=author, is_like=True).count()
+        total_dislikes = AuthorCouponRating.objects.filter(coupon_author=author, is_like=False).count()
+        total_coupons = CouponV2.objects.filter(author=author).count()
+        total_votes = total_likes + total_dislikes
+        author_rating = round((total_likes / total_votes) * 5, 2) if total_votes > 0 else 0.0
+
+        return Response({
+            "user": {
+                "id": str(author.id),
+                "email": author.email,
+                "first_name": author.first_name,
+                "last_name": author.last_name,
+            },
+            "total_coupons": total_coupons,
+            "total_likes": total_likes,
+            "total_dislikes": total_dislikes,
+            "author_rating": author_rating,
+        })
+
+
+class UserCouponStatsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        total_coupons = CouponV2.objects.filter(author=user).count()
+        total_likes = sum(c.likes_count for c in CouponV2.objects.filter(author=user))
+        total_dislikes = sum(c.dislikes_count for c in CouponV2.objects.filter(author=user))
+        wallet, _ = CouponWallet.objects.get_or_create(user=user)
+
+        return Response({
+            "total_published_coupons": total_coupons,
+            "total_likes_received": total_likes,
+            "total_dislikes_received": total_dislikes,
+            "wallet_balance": str(wallet.balance),
+            "total_earned": str(wallet.total_earned),
+            "pending_payouts": str(wallet.pending_payout),
+        })

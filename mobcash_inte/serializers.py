@@ -6,9 +6,16 @@ from accounts.serializers import SmallBotUserSerializer, SmallUserSerializer
 # from mobcash_inte.mobcash_service import BetApp
 from mobcash_inte.models import (
     TRANS_STATUS,
+    AuthorComment,
+    AuthorCouponRating,
     Bonus,
     Caisse,
     Coupon,
+    CouponPayout,
+    CouponRatingV2,
+    CouponV2,
+    CouponWallet,
+    CouponWithdrawal,
     Deposit,
     IDLink,
     Network,
@@ -558,3 +565,145 @@ class PartnerTransactionSerializer(serializers.ModelSerializer):
         fields = ["id", "user_id", "betapp", "type_trans", "amount", "withdriwal_code",
                   "external_reference", "reference", "status", "bet_response", "created_at", "validated_at", "partner"]
         read_only_fields = ["partner", "reference", "status", "bet_response", "created_at", "validated_at"]
+
+
+# ============================================================
+# Coupon System V2 Serializers
+# ============================================================
+
+class CouponV2Serializer(serializers.ModelSerializer):
+    author_name = serializers.SerializerMethodField()
+    author_rating = serializers.SerializerMethodField()
+    author_coupon_points = serializers.SerializerMethodField()
+    user_liked = serializers.SerializerMethodField()
+    user_disliked = serializers.SerializerMethodField()
+    total_ratings = serializers.SerializerMethodField()
+    bet_app_details = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CouponV2
+        fields = '__all__'
+
+    def get_author_name(self, obj):
+        if obj.author:
+            return f"{obj.author.first_name} {obj.author.last_name}".strip()
+        return None
+
+    def get_author_rating(self, obj):
+        if not obj.author:
+            return 0.0
+        author_coupons = CouponV2.objects.filter(author=obj.author)
+        total_likes = sum(c.likes_count for c in author_coupons)
+        total_dislikes = sum(c.dislikes_count for c in author_coupons)
+        total_votes = total_likes + total_dislikes
+        if total_votes == 0:
+            return 0.0
+        return round((total_likes / total_votes) * 5, 2)
+
+    def get_author_coupon_points(self, obj):
+        if obj.author:
+            return float(obj.author.coupon_points or 0)
+        return 0
+
+    def get_user_liked(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return CouponRatingV2.objects.filter(user=request.user, coupon=obj, is_like=True).exists()
+        return False
+
+    def get_user_disliked(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return CouponRatingV2.objects.filter(user=request.user, coupon=obj, is_like=False).exists()
+        return False
+
+    def get_total_ratings(self, obj):
+        return obj.likes_count + obj.dislikes_count
+
+    def get_bet_app_details(self, obj):
+        if obj.bet_app:
+            return {'id': str(obj.bet_app.id), 'name': obj.bet_app.name}
+        return None
+
+
+class CouponV2CreateSerializer(serializers.Serializer):
+    bet_app_id = serializers.UUIDField(required=True)
+    code = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    coupon_type = serializers.ChoiceField(choices=['single', 'combine', 'system'], default='combine')
+    cote = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, default=1.00)
+    match_count = serializers.IntegerField(required=False, default=1)
+
+    def validate(self, data):
+        if data.get('coupon_type') == 'combine' and data.get('match_count', 1) < 2:
+            raise serializers.ValidationError({"match_count": "Un coupon combiné doit avoir au moins 2 matchs."})
+        return data
+
+
+class CouponRatingV2Serializer(serializers.Serializer):
+    vote_type = serializers.ChoiceField(choices=['like', 'dislike'], required=True)
+
+
+class CouponWalletSerializer(serializers.ModelSerializer):
+    user_email = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CouponWallet
+        fields = '__all__'
+
+    def get_user_email(self, obj):
+        return obj.user.email if obj.user else None
+
+
+class CouponPayoutSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CouponPayout
+        fields = '__all__'
+
+
+class CouponWithdrawalSerializer(serializers.Serializer):
+    amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0.01)
+    phone_number = serializers.CharField(max_length=20, required=True)
+    network = serializers.UUIDField(required=True)
+    bank_name = serializers.CharField(max_length=100, required=False, allow_blank=True, default='')
+    account_number = serializers.CharField(max_length=50, required=False, allow_blank=True, default='')
+    account_holder = serializers.CharField(max_length=100, required=False, allow_blank=True, default='')
+
+
+class AuthorCommentReplySerializer(serializers.ModelSerializer):
+    author_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AuthorComment
+        fields = ['id', 'author', 'author_name', 'content', 'created_at', 'updated_at', 'is_deleted']
+
+    def get_author_name(self, obj):
+        return f"{obj.author.first_name} {obj.author.last_name}".strip() if obj.author else None
+
+
+class AuthorCommentSerializer(serializers.ModelSerializer):
+    replies = AuthorCommentReplySerializer(many=True, read_only=True)
+    author_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AuthorComment
+        fields = '__all__'
+
+    def get_author_name(self, obj):
+        return f"{obj.author.first_name} {obj.author.last_name}".strip() if obj.author else None
+
+
+class AuthorCommentCreateSerializer(serializers.Serializer):
+    coupon_id = serializers.UUIDField(required=True)
+    content = serializers.CharField(required=True, max_length=5000)
+    parent_id = serializers.UUIDField(required=False, allow_null=True)
+
+
+class AuthorCouponRatingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AuthorCouponRating
+        fields = '__all__'
+
+
+class AuthorRatingCreateSerializer(serializers.Serializer):
+    coupon_id = serializers.UUIDField(required=True)
+    is_like = serializers.BooleanField(required=True)
