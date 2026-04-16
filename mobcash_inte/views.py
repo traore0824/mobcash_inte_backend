@@ -1275,6 +1275,7 @@ class HistoryTransactionViews(generics.ListAPIView):
         "phone_number",
         "user_app_id",
         "public_id",
+        "user__email",
     ]
 
     def get_queryset(self):
