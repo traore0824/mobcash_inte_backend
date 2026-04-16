@@ -18,10 +18,13 @@ class UserAdmin(BaseUserAdmin):
         "is_block",
         "is_delete",
         "is_partner",
+        "can_publish_coupons",
+        "can_rate_coupons",
+        "coupon_points",
         "date_joined",
         "last_login",
     )
-    list_filter = ("is_active", "is_staff", "is_supperuser", "is_block", "is_delete", "is_partner")
+    list_filter = ("is_active", "is_staff", "is_supperuser", "is_block", "is_delete", "is_partner", "can_publish_coupons", "can_rate_coupons")
     search_fields = ("email", "phone", "first_name", "last_name")
     ordering = ("-date_joined",)
     readonly_fields = ("date_joined", "last_login")
@@ -46,6 +49,10 @@ class UserAdmin(BaseUserAdmin):
         ),
         (_("Références"), {"fields": ("referrer_code", "referral_code")}),
         (_("Clés API Partenaire"), {"fields": ("public_key", "secret_key")}),
+        (
+            _("Coupons"),
+            {"fields": ("can_publish_coupons", "can_rate_coupons", "coupon_points")},
+        ),
         (
             _("Connexion"),
             {"fields": ("last_login", "date_joined", "otp", "otp_created_at")},
