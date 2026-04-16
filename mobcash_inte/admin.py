@@ -190,10 +190,12 @@ class SettingAdmin(admin.ModelAdmin):
         "deposit_reward_percent",
         "min_version",
         "moov_marchand_phone",
+        "coupon_enable",
+        "enable_coupon_monetization",
     )
 
     search_fields = ("whatsapp_phone", "connect_pro_email")
-    list_filter = ("referral_bonus", "deposit_reward")
+    list_filter = ("referral_bonus", "deposit_reward", "coupon_enable", "enable_coupon_monetization", "auto_approve_withdrawal")
     readonly_fields = ("id",)
     fieldsets = (
         (
@@ -273,6 +275,24 @@ class SettingAdmin(admin.ModelAdmin):
                 "fields": (
                     "mobcash_api_key",
                     "mobcash_api_secret",
+                )
+            },
+        ),
+        (
+            "Système de Coupons V2",
+            {
+                "fields": (
+                    "coupon_enable",
+                    "max_coupons_per_day",
+                    "max_coupons_per_week",
+                    "enable_coupon_monetization",
+                    "monetization_amount",
+                    "coupon_rating_points",
+                    "minimum_coupon_withdrawal",
+                    "payout_mode",
+                    "min_withdrawal",
+                    "max_withdrawal_monthly",
+                    "auto_approve_withdrawal",
                 )
             },
         ),
