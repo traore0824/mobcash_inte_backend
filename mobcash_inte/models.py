@@ -186,6 +186,7 @@ class Setting(models.Model):
     max_withdrawal_monthly = models.DecimalField(max_digits=10, decimal_places=2, default=500.00)
     auto_approve_withdrawal = models.BooleanField(default=False)
     coupon_enable = models.BooleanField(default=False)
+    allow_all_users_publish_coupons = models.BooleanField(default=False)
 
     def __str__(self):
         return str(self.id)

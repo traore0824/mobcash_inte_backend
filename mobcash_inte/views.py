@@ -2854,7 +2854,7 @@ class CouponV2View(generics.ListCreateAPIView):
         if not setting.coupon_enable:
             return Response({"error": "Le système de coupons est désactivé."}, status=status.HTTP_403_FORBIDDEN)
 
-        if not (request.user.is_staff or getattr(request.user, 'can_publish_coupons', False)):
+        if not (request.user.is_staff or setting.allow_all_users_publish_coupons or getattr(request.user, 'can_publish_coupons', False)):
             return Response({"error": "Vous n'avez pas l'autorisation de publier des coupons."}, status=status.HTTP_403_FORBIDDEN)
 
         bet_app = AppName.objects.filter(id=data['bet_app_id']).first()

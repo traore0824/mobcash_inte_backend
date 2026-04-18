@@ -1,7 +1,7 @@
 # API Documentation — Coupon System V2
 
-> Base URL: `https://api.slaterci.net/mobcash`  
-> Authentication: `Authorization: Bearer <access_token>`  
+> Base URL: `https://dev.slaterci.net/mobcash`
+> Authentication: `Authorization: Bearer <access_token>`
 > Format: JSON
 
 ---
@@ -10,7 +10,7 @@
 
 1. [List / Create a coupon](#1-list--create-a-coupon)
 2. [Coupon detail](#2-coupon-detail)
-3. [Vote on a coupon (like / dislike)](#3-vote-on-a-coupon)
+3. [Vote on a coupon](#3-vote-on-a-coupon)
 4. [Coupon wallet](#4-coupon-wallet)
 5. [Withdraw from coupon wallet](#5-withdraw-from-coupon-wallet)
 6. [Author comments](#6-author-comments)
@@ -20,6 +20,7 @@
 10. [My coupon stats](#10-my-coupon-stats)
 11. [Important business rules](#11-important-business-rules)
 12. [Error codes](#12-error-codes)
+13. [Endpoints summary](#13-endpoints-summary)
 
 ---
 
@@ -27,24 +28,24 @@
 
 ### `GET /v2/coupons`
 
-Returns coupons published in the **last 24 hours**.
+Returns coupons published in the **last 24 hours**. After 24h a coupon no longer appears in this list.
 
 **Auth required**: No (public)
 
 **Query params**
 
-| Parameter | Type | Required | Description                        |
-|-----------|------|----------|------------------------------------|
-| bet_app   | UUID | No       | Filter by bookmaker app            |
-| page      | int  | No       | Page number (default: 1)           |
-| page_size | int  | No       | Page size (max: 50)                |
+| Parameter | Type   | Required | Description                      |
+|-----------|--------|----------|----------------------------------|
+| bet_app   | UUID   | No       | Filter by bookmaker app ID       |
+| page      | int    | No       | Page number (default: 1)         |
+| page_size | int    | No       | Page size (max: 50)              |
 
 **Response 200**
 
 ```json
 {
   "count": 12,
-  "next": "https://api.slaterci.net/mobcash/v2/coupons?page=2",
+  "next": "https://dev.slaterci.net/mobcash/v2/coupons?page=2",
   "previous": null,
   "results": [
     {
@@ -74,23 +75,27 @@ Returns coupons published in the **last 24 hours**.
 }
 ```
 
+> `user_liked` and `user_disliked` are always `false` on unauthenticated requests.
+
 ---
 
 ### `POST /v2/coupons`
 
 Publish a new coupon.
 
-**Auth required**: Yes — user with `can_publish_coupons = true` or admin
+**Auth required**: Yes — user with `can_publish_coupons = true` OR admin (`is_staff = true`)
 
 **Body**
 
-| Field       | Type    | Required | Description                                           |
-|-------------|---------|----------|-------------------------------------------------------|
-| bet_app_id  | UUID    | Yes      | Bookmaker app ID                                      |
-| code        | string  | No       | Coupon code (must be unique per app)                  |
-| coupon_type | string  | No       | `single`, `combine`, `system` — default: `combine`    |
-| cote        | decimal | No       | Total odds — default: `1.00`                          |
-| match_count | int     | No       | Number of matches — default: `1`                      |
+| Field       | Type    | Required | Accepted values                          | Description                        |
+|-------------|---------|----------|------------------------------------------|------------------------------------|
+| bet_app_id  | UUID    | Yes      | Any valid AppName UUID                   | Bookmaker app ID                   |
+| code        | string  | No       | Any string, unique per app               | Coupon code                        |
+| coupon_type | string  | No       | `"single"`, `"combine"`, `"system"`      | Default: `"combine"`               |
+| cote        | decimal | No       | Any positive decimal (max 6 digits, 2dp) | Total odds — default: `1.00`       |
+| match_count | int     | No       | Integer >= 1 (>= 2 if combine)           | Number of matches — default: `1`   |
+
+> `potential_gain` is calculated automatically by the server (`cote * 10000`). Do NOT send it.
 
 **Example**
 
@@ -104,21 +109,20 @@ Publish a new coupon.
 }
 ```
 
-**Response 201**: full coupon object (same structure as GET)
+**Response 201**: full coupon object (same structure as GET list item)
 
 **Possible errors**
 
-| Code | Message                                                      |
-|------|--------------------------------------------------------------|
-| 403  | The coupon system is disabled                                |
-| 403  | You are not authorized to publish coupons                    |
-| 404  | Bookmaker app not found                                      |
-| 400  | This promo code already exists for this bookmaker app        |
-| 429  | You already created a coupon for this app today              |
-| 429  | Daily quota reached (configurable in Settings)               |
-| 429  | Weekly quota reached (configurable in Settings)              |
-
-> **Combine rule**: if `coupon_type = "combine"`, `match_count` must be >= 2.
+| Code | Error key | Message                                                        |
+|------|-----------|----------------------------------------------------------------|
+| 403  | `error`   | `"Le système de coupons est désactivé."`                       |
+| 403  | `error`   | `"Vous n'avez pas l'autorisation de publier des coupons."`     |
+| 404  | `error`   | `"Application bookmaker non trouvée."`                         |
+| 400  | `error`   | `"Ce code promo existe déjà pour cette application bookmaker."`|
+| 400  | `match_count` | `"Un coupon combiné doit avoir au moins 2 matchs."`        |
+| 429  | `error`   | `"Vous avez déjà créé un coupon pour {app} aujourd'hui."`      |
+| 429  | `error`   | `"Quota journalier de {N} coupons atteint."`                   |
+| 429  | `error`   | `"Quota hebdomadaire de {N} coupons atteint."`                 |
 
 ---
 
@@ -128,15 +132,15 @@ Publish a new coupon.
 
 **Auth required**: No (public)
 
-**Response 200**: full coupon object (same structure as list)
+**Response 200**: full coupon object (same structure as list item)
 
-### `PUT/PATCH /v2/coupons/{id}`
+### `PUT / PATCH /v2/coupons/{id}`
 
-**Auth required**: Admin only
+**Auth required**: Admin only (`is_staff = true`)
 
 ### `DELETE /v2/coupons/{id}`
 
-**Auth required**: Admin only
+**Auth required**: Admin only (`is_staff = true`)
 
 ---
 
@@ -144,13 +148,18 @@ Publish a new coupon.
 
 ### `POST /v2/coupons/{id}/vote`
 
-**Auth required**: Yes — user with `can_rate_coupons = true`
+**Auth required**: Yes — user with `can_rate_coupons = true` (admins are NOT exempt from this rule)
 
 **Body**
 
-| Field     | Type   | Required | Values             |
-|-----------|--------|----------|--------------------|
-| vote_type | string | Yes      | `like`, `dislike`  |
+| Field     | Type   | Required | Accepted values              |
+|-----------|--------|----------|------------------------------|
+| vote_type | string | Yes      | `"like"` or `"dislike"` only |
+
+> Any other value (`"lose"`, `"win"`, `"up"`, etc.) returns:
+> ```json
+> {"vote_type": ["\"lose\" is not a valid choice."]}
+> ```
 
 **Example**
 
@@ -164,7 +173,7 @@ Publish a new coupon.
 
 ```json
 {
-  "message": "Vote like registered successfully",
+  "message": "Vote like enregistré avec succès",
   "coupon": {
     "id": "550e8400-...",
     "likes": 13,
@@ -177,24 +186,26 @@ Publish a new coupon.
 }
 ```
 
+> `amount_earned` is `"0"` if monetization is disabled in settings.
+
 **Vote behavior**
 
-| Situation                   | Result                                        |
-|-----------------------------|-----------------------------------------------|
-| No previous vote            | Vote registered, counter incremented          |
-| Same vote type again        | Vote cancelled, counter decremented           |
-| Opposite vote type          | Vote changed, both counters updated           |
+| Situation                        | Result                                              |
+|----------------------------------|-----------------------------------------------------|
+| No previous vote                 | Vote registered, counter incremented                |
+| Same vote type sent again        | Vote cancelled, counter decremented                 |
+| Opposite vote type sent          | Vote switched, both counters updated                |
 
 **Possible errors**
 
-| Code | Message                                                        |
-|------|----------------------------------------------------------------|
-| 403  | You are not authorized to rate coupons                         |
-| 404  | Coupon not found                                               |
-| 400  | You cannot vote on your own coupon                             |
-| 400  | You already voted today on a coupon from this author           |
+| Code | Error key | Message                                                              |
+|------|-----------|----------------------------------------------------------------------|
+| 403  | `error`   | `"Vous n'avez pas l'autorisation de noter des coupons."`             |
+| 404  | `error`   | `"Coupon non trouvé."`                                               |
+| 400  | `error`   | `"Vous ne pouvez pas voter sur votre propre coupon."`                |
+| 400  | `error`   | `"Vous avez déjà voté aujourd'hui sur un coupon de cet auteur."`     |
 
-> **Rule**: 1 vote per day per author (not per coupon — per author).
+> **Rule**: 1 vote per day per **author** (not per coupon). If you already voted on any coupon from the same author today, you cannot vote again.
 
 ---
 
@@ -202,7 +213,7 @@ Publish a new coupon.
 
 ### `GET /v2/coupon-wallet`
 
-Returns the wallet of the authenticated user.
+Returns the wallet of the authenticated user. Created automatically if it doesn't exist yet.
 
 **Auth required**: Yes
 
@@ -221,11 +232,11 @@ Returns the wallet of the authenticated user.
 }
 ```
 
-| Field          | Description                                        |
-|----------------|----------------------------------------------------|
-| balance        | Available balance for withdrawal                   |
-| total_earned   | Total earned since account creation                |
-| pending_payout | Amount currently being processed (pending payout)  |
+| Field          | Description                                          |
+|----------------|------------------------------------------------------|
+| balance        | Available balance for withdrawal                     |
+| total_earned   | Total earned since account creation                  |
+| pending_payout | Amount currently being processed (pending withdrawal)|
 
 ---
 
@@ -237,14 +248,14 @@ Returns the wallet of the authenticated user.
 
 **Body**
 
-| Field          | Type    | Required | Description                                  |
-|----------------|---------|----------|----------------------------------------------|
-| amount         | decimal | Yes      | Amount to withdraw (min: configurable)       |
-| phone_number   | string  | Yes      | Phone number for mobile money payment        |
-| network        | UUID    | Yes      | Mobile money network ID                      |
-| bank_name      | string  | No       | Bank name (optional)                         |
-| account_number | string  | No       | Account number (optional)                    |
-| account_holder | string  | No       | Account holder name (optional)               |
+| Field          | Type    | Required | Description                                                    |
+|----------------|---------|----------|----------------------------------------------------------------|
+| amount         | decimal | Yes      | Amount to withdraw — must be >= `minimum_coupon_withdrawal`    |
+| phone_number   | string  | Yes      | Phone number for mobile money payment (max 20 chars)           |
+| network        | UUID    | Yes      | UUID of the Network object (get it from `GET /mobcash/network`)|
+| bank_name      | string  | No       | Bank name — default: `""`                                      |
+| account_number | string  | No       | Account number — default: `""`                                 |
+| account_holder | string  | No       | Account holder name — default: `""`                            |
 
 **Example**
 
@@ -260,11 +271,11 @@ Returns the wallet of the authenticated user.
 
 **Possible errors**
 
-| Code | Message                                              |
-|------|------------------------------------------------------|
-| 400  | Minimum withdrawal amount: X FCFA                    |
-| 400  | Insufficient balance. Available balance: X FCFA      |
-| 404  | Payment network not found                            |
+| Code | Error key | Message                                                  |
+|------|-----------|----------------------------------------------------------|
+| 400  | `error`   | `"Montant minimum de retrait: {N} FCFA."`                |
+| 400  | `error`   | `"Solde insuffisant. Solde disponible: {N} FCFA."`       |
+| 404  | `error`   | `"Réseau de paiement non trouvé."`                       |
 
 ---
 
@@ -272,15 +283,15 @@ Returns the wallet of the authenticated user.
 
 ### `GET /v2/author-comments?coupon_author_id={uuid}`
 
-Returns comments (with replies) on an author.
+Returns top-level comments (with nested replies) on an author. Only non-deleted comments are returned.
 
 **Auth required**: Yes
 
 **Query params**
 
-| Parameter        | Type | Required | Description         |
-|------------------|------|----------|---------------------|
-| coupon_author_id | UUID | Yes      | Target author ID    |
+| Parameter        | Type | Required | Description          |
+|------------------|------|----------|----------------------|
+| coupon_author_id | UUID | Yes      | Target author's user ID |
 
 **Response 200**
 
@@ -316,29 +327,46 @@ Returns comments (with replies) on an author.
 
 ### `POST /v2/author-comments`
 
-Post a comment or a reply.
+Post a comment or a reply on a coupon.
 
 **Auth required**: Yes
 
 **Body**
 
-| Field     | Type   | Required | Description                                    |
-|-----------|--------|----------|------------------------------------------------|
-| coupon_id | UUID   | Yes      | ID of the related coupon                       |
-| content   | string | Yes      | Comment content (max 5000 characters)          |
-| parent_id | UUID   | No       | Parent comment ID (for a reply)                |
+| Field     | Type   | Required | Description                                      |
+|-----------|--------|----------|--------------------------------------------------|
+| coupon_id | UUID   | Yes      | UUID of the coupon being commented on            |
+| content   | string | Yes      | Comment text (max 5000 characters)               |
+| parent_id | UUID   | No       | UUID of parent comment (omit for top-level)      |
 
-**Example**
+**Example — top-level comment**
 
 ```json
 {
   "coupon_id": "550e8400-...",
-  "content": "Excellent pick, I'm following!",
-  "parent_id": null
+  "content": "Excellent pick, I'm following!"
+}
+```
+
+**Example — reply**
+
+```json
+{
+  "coupon_id": "550e8400-...",
+  "content": "I agree!",
+  "parent_id": "uuid-of-parent-comment"
 }
 ```
 
 **Response 201**: full comment object
+
+**Possible errors**
+
+| Code | Error key | Message                                  |
+|------|-----------|------------------------------------------|
+| 400  | `error`   | `"coupon_author_id est requis."`         |
+| 404  | `error`   | `"Coupon non trouvé."`                   |
+| 404  | `error`   | `"Commentaire parent non trouvé."`       |
 
 ---
 
@@ -346,9 +374,9 @@ Post a comment or a reply.
 
 ### `PATCH /v2/author-comments/{id}`
 
-Edit your own comment.
+Edit your own comment. Only the `content` field can be updated.
 
-**Auth required**: Yes (comment author only)
+**Auth required**: Yes — comment author only
 
 **Body**
 
@@ -360,21 +388,25 @@ Edit your own comment.
 
 **Response 200**: updated comment object
 
+**Error**: returns 404 if comment not found or you are not the author.
+
 ---
 
 ### `DELETE /v2/author-comments/{id}`
 
-Soft delete — the comment stays in the database with `is_deleted = true`.
+Soft delete — `is_deleted` is set to `true`, the comment stays in the database.
 
-**Auth required**: Yes (comment author only)
+**Auth required**: Yes — comment author only
 
 **Response 200**
 
 ```json
 {
-  "message": "Comment deleted successfully."
+  "message": "Commentaire supprimé avec succès."
 }
 ```
+
+**Error**: returns 404 if comment not found or you are not the author.
 
 ---
 
@@ -382,16 +414,16 @@ Soft delete — the comment stays in the database with `is_deleted = true`.
 
 ### `POST /v2/author-ratings`
 
-Vote on an author's reputation via one of their coupons.
+Vote on an author's overall reputation via one of their coupons.
 
 **Auth required**: Yes
 
 **Body**
 
-| Field     | Type    | Required | Description                          |
-|-----------|---------|----------|--------------------------------------|
-| coupon_id | UUID    | Yes      | ID of the target author's coupon     |
-| is_like   | boolean | Yes      | `true` = like, `false` = dislike     |
+| Field     | Type    | Required | Description                              |
+|-----------|---------|----------|------------------------------------------|
+| coupon_id | UUID    | Yes      | UUID of any coupon from the target author|
+| is_like   | boolean | Yes      | `true` = like, `false` = dislike         |
 
 **Example**
 
@@ -402,7 +434,7 @@ Vote on an author's reputation via one of their coupons.
 }
 ```
 
-**Response 201 / 200**
+**Response 201** (new vote) or **200** (updated vote)
 
 ```json
 {
@@ -418,12 +450,12 @@ Vote on an author's reputation via one of their coupons.
 
 **Possible errors**
 
-| Code | Message                                  |
-|------|------------------------------------------|
-| 404  | Coupon not found                         |
-| 400  | You cannot vote for yourself             |
+| Code | Error key | Message                                      |
+|------|-----------|----------------------------------------------|
+| 404  | `error`   | `"Coupon non trouvé."`                       |
+| 400  | `error`   | `"Vous ne pouvez pas voter pour vous-même."` |
 
-> **Note**: 1 vote per author (unique on `user` + `coupon_author`). Voting again updates the existing vote.
+> **Note**: 1 vote per author (unique on `user` + `coupon_author`). Sending again updates the existing vote — no duplicate created.
 
 ---
 
@@ -432,6 +464,8 @@ Vote on an author's reputation via one of their coupons.
 ### `GET /v2/author-stats/{user_id}`
 
 **Auth required**: Yes
+
+**URL param**: `user_id` — UUID of the author
 
 **Response 200**
 
@@ -450,9 +484,15 @@ Vote on an author's reputation via one of their coupons.
 }
 ```
 
-| Field         | Description                                          |
-|---------------|------------------------------------------------------|
-| author_rating | Score out of 5 calculated as: `(likes / total_votes) * 5` |
+| Field         | Description                                               |
+|---------------|-----------------------------------------------------------|
+| author_rating | Score out of 5: `(total_likes / (total_likes + total_dislikes)) * 5` — `0.0` if no votes |
+
+**Error**
+
+| Code | Message                    |
+|------|----------------------------|
+| 404  | `"Auteur non trouvé."`     |
 
 ---
 
@@ -460,7 +500,7 @@ Vote on an author's reputation via one of their coupons.
 
 ### `GET /v2/user/coupon-stats`
 
-Stats for the authenticated user.
+Stats for the currently authenticated user.
 
 **Auth required**: Yes
 
@@ -481,39 +521,46 @@ Stats for the authenticated user.
 
 ## 11. Important business rules
 
-### Publishing access
+### Who can publish coupons
 
-To publish a coupon, the user must have `can_publish_coupons = true` on their account (or be an admin). Contact the admin to enable this permission.
+The user must have **`can_publish_coupons = true`** on their account, OR be an admin (`is_staff = true`). This flag is set by an admin in the Django admin panel.
 
-### Voting access
+### Who can vote on coupons
 
-To vote on a coupon, the user must have `can_rate_coupons = true` on their account.
+The user must have **`can_rate_coupons = true`** on their account. Admins are **not** exempt — they also need this flag.
 
-### Publishing quotas (configurable by admin)
+### Coupon system switch
 
-| Rule                           | Default value |
-|--------------------------------|---------------|
-| Max coupons per day            | 10            |
-| Max coupons per week           | 50            |
-| 1 coupon per app per day       | Yes (fixed)   |
-| Unique code per app            | Yes (fixed)   |
+The entire coupon system can be disabled globally via `coupon_enable` in Settings. When disabled, no one can create coupons and `POST /v2/coupons` returns 403.
 
-### Monetization (enabled by admin)
+### Publishing quotas (set by admin in Settings)
 
-When `enable_coupon_monetization = true`:
-- Each like received credits the author's wallet by `monetization_amount` FCFA
-- Each dislike debits `monetization_amount` FCFA
-- Changing a vote = double adjustment
+| Rule                              | Default |
+|-----------------------------------|---------|
+| Max coupons per day (all apps)    | 10      |
+| Max coupons per week (all apps)   | 50      |
+| Max 1 coupon per app per day      | Fixed   |
+| Coupon code must be unique per app| Fixed   |
 
 ### Coupon visibility
 
-- Coupons are visible for **24 hours** after creation
-- After that, they no longer appear in the list
+Coupons are only visible for **24 hours** after creation. After that they disappear from `GET /v2/coupons`.
+
+### Monetization (enabled by admin)
+
+When `enable_coupon_monetization = true` in Settings:
+- Each **like** received → author wallet credited by `monetization_amount` FCFA
+- Each **dislike** received → author wallet debited by `monetization_amount` FCFA
+- Switching vote (like → dislike or reverse) → double adjustment applied
+- Cancelling a vote → adjustment reversed
+
+When disabled, `amount_earned` in vote response is always `"0"`.
 
 ### Wallet withdrawal
 
-- Minimum amount: configurable (`minimum_coupon_withdrawal`, default 1000 FCFA)
-- Withdrawal triggers a mobile money payment via Connect Pro
+- Minimum amount: `minimum_coupon_withdrawal` in Settings (default 1000 FCFA)
+- Triggers a real mobile money payout via Connect Pro
+- The `network` UUID must come from `GET /mobcash/network`
 
 ---
 
@@ -523,32 +570,33 @@ When `enable_coupon_monetization = true`:
 |-----------|--------------------------------------------------|
 | 400       | Invalid data or business rule not respected      |
 | 401       | Missing or expired token                         |
-| 403       | Insufficient permissions                         |
+| 403       | Insufficient permissions or system disabled      |
 | 404       | Resource not found                               |
-| 429       | Quota exceeded (too many coupons)                |
+| 429       | Publishing quota exceeded                        |
 | 500       | Internal server error                            |
 
 ---
 
-## Endpoints summary
+## 13. Endpoints summary
 
-| Method | Endpoint                       | Auth         | Description                      |
-|--------|--------------------------------|--------------|----------------------------------|
-| GET    | /v2/coupons                    | No           | List coupons (last 24h)          |
-| POST   | /v2/coupons                    | Yes*         | Publish a coupon                 |
-| GET    | /v2/coupons/{id}               | No           | Coupon detail                    |
-| PUT    | /v2/coupons/{id}               | Admin        | Update a coupon                  |
-| DELETE | /v2/coupons/{id}               | Admin        | Delete a coupon                  |
-| POST   | /v2/coupons/{id}/vote          | Yes*         | Like / dislike a coupon          |
-| GET    | /v2/coupon-wallet              | Yes          | My wallet                        |
-| POST   | /v2/coupon-wallet-withdraw     | Yes          | Withdraw my earnings             |
-| GET    | /v2/coupon-wallet-payouts      | Admin        | List payouts                     |
-| GET    | /v2/author-comments            | Yes          | Comments on an author            |
-| POST   | /v2/author-comments            | Yes          | Post a comment                   |
-| PATCH  | /v2/author-comments/{id}       | Yes (author) | Edit my comment                  |
-| DELETE | /v2/author-comments/{id}       | Yes (author) | Delete my comment                |
-| POST   | /v2/author-ratings             | Yes          | Vote for an author               |
-| GET    | /v2/author-stats/{user_id}     | Yes          | Author stats                     |
-| GET    | /v2/user/coupon-stats          | Yes          | My coupon stats                  |
+| Method | Endpoint                          | Auth              | Description                      |
+|--------|-----------------------------------|-------------------|----------------------------------|
+| GET    | /v2/coupons                       | No                | List coupons (last 24h)          |
+| POST   | /v2/coupons                       | Yes*              | Publish a coupon                 |
+| GET    | /v2/coupons/{id}                  | No                | Coupon detail                    |
+| PUT    | /v2/coupons/{id}                  | Admin only        | Update a coupon                  |
+| DELETE | /v2/coupons/{id}                  | Admin only        | Delete a coupon                  |
+| POST   | /v2/coupons/{id}/vote             | Yes**             | Like / dislike a coupon          |
+| GET    | /v2/coupon-wallet                 | Yes               | My wallet                        |
+| POST   | /v2/coupon-wallet-withdraw        | Yes               | Withdraw my earnings             |
+| GET    | /v2/coupon-wallet-payouts         | Admin only        | List all payouts                 |
+| GET    | /v2/author-comments               | Yes               | Comments on an author            |
+| POST   | /v2/author-comments               | Yes               | Post a comment or reply          |
+| PATCH  | /v2/author-comments/{id}          | Yes (own only)    | Edit my comment                  |
+| DELETE | /v2/author-comments/{id}          | Yes (own only)    | Delete my comment                |
+| POST   | /v2/author-ratings                | Yes               | Vote for an author               |
+| GET    | /v2/author-stats/{user_id}        | Yes               | Stats of an author               |
+| GET    | /v2/user/coupon-stats             | Yes               | My coupon stats                  |
 
-> `*` = requires a specific flag on the account (`can_publish_coupons` or `can_rate_coupons`)
+> `*` requires `can_publish_coupons = true` OR `is_staff = true`
+> `**` requires `can_rate_coupons = true` — admins are NOT exempt
