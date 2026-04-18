@@ -2915,7 +2915,8 @@ class VoteCouponV2View(APIView):
         vote_type = serializer.validated_data['vote_type']
         is_like = (vote_type == 'like')
 
-        if not getattr(request.user, 'can_rate_coupons', False):
+        setting = Setting.objects.first()
+        if not (setting.allow_all_users_publish_coupons or getattr(request.user, 'can_rate_coupons', False)):
             return Response({"error": "Vous n'avez pas l'autorisation de noter des coupons."}, status=status.HTTP_403_FORBIDDEN)
 
         coupon = CouponV2.objects.filter(id=pk).first()
@@ -2935,7 +2936,6 @@ class VoteCouponV2View(APIView):
         if already_voted_today:
             return Response({"error": "Vous avez déjà voté aujourd'hui sur un coupon de cet auteur."}, status=status.HTTP_400_BAD_REQUEST)
 
-        setting = Setting.objects.first()
         monetization_enabled = setting.enable_coupon_monetization
         monetization_amount = setting.monetization_amount
         coupon_rating_points = setting.coupon_rating_points
