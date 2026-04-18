@@ -283,6 +283,7 @@ class SettingAdmin(admin.ModelAdmin):
             {
                 "fields": (
                     "coupon_enable",
+                    "allow_all_users_publish_coupons",
                     "max_coupons_per_day",
                     "max_coupons_per_week",
                     "enable_coupon_monetization",
