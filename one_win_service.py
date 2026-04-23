@@ -27,5 +27,5 @@ class CashAPIService:
 plateform = CashAPIService(
     api_key="ebfad3fbccb250211271dd519da8b9e9c10d4797a9ea6f772ee34245c4e6ee0f"
 )
-resul = plateform.create_deposit(user_id="339966934", amount=200)
+resul = plateform.create_deposit(user_id="339966934", amount=500)
 print(resul)
