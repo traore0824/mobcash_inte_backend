@@ -448,7 +448,6 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                     message="Paiement reçu, appel API betting en cours",
                 )
                 app = transaction.app
-                servculAPI = init_mobcash(app_name=app)
                 amount = transaction.amount
 
                 if setting.deposit_reward and transaction.type_trans != "reward":
@@ -468,7 +467,8 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                     connect_pro_logger.info(
                         f"Reponse de l'api de {transaction.app.name}: {response}"
                     )
-                    xbet_response_data = response
+                    # BetApp retourne {"code": 0, "data": {...}}, OneWinService/MobCash retournent directement le dict
+                    xbet_response_data = response.get("data") if "data" in response and "code" in response else response
                 else:
                     response = MobCashExternalService().create_deposit(transaction=transaction)
                     connect_pro_logger.info( 
@@ -954,7 +954,7 @@ def xbet_withdrawal_process(transaction: Transaction):
             response = servculAPI.withdraw_from_account(
                 userid=transaction.user_app_id, code=transaction.withdriwal_code
             )
-            xbet_response_data = response
+            xbet_response_data = response.get("data") if "data" in response and "code" in response else response
         else:
             response = MobCashExternalService().create_withdrawal(transaction=transaction)
             connect_pro_logger.info(

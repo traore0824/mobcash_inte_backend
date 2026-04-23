@@ -578,7 +578,7 @@ class RewardTransactionViews(generics.CreateAPIView):
                     connect_pro_logger.info(
                         f"Reponse de l'api de {transaction.app.name}: {response}"
                     )
-                    xbet_response_data = response
+                    xbet_response_data = response.get("data") if "data" in response and "code" in response else response
                 else:
                     response = MobCashExternalService().create_deposit(
                         transaction=transaction
@@ -2486,7 +2486,7 @@ class FinalizeDepositTransaction(decorators.APIView):
             connect_pro_logger.info(
                 f"Reponse de l'api de {transaction.app.name}: {response}"
             )
-            xbet_response_data = response
+            xbet_response_data = response.get("data") if "data" in response and "code" in response else response
         else:
             response = MobCashExternalService().create_deposit(transaction=transaction)
             connect_pro_logger.info(
@@ -2743,7 +2743,7 @@ class CreatePartnerTransactionView(decorators.APIView):
                     response = servculAPI.recharge_account(
                         amount=float(transaction.amount), userid=transaction.user_app_id
                     )
-                    xbet_data = response
+                    xbet_data = response.get("data") if "data" in response and "code" in response else response
                 else:
                     response = MobCashExternalService().create_deposit(transaction=transaction)
                     xbet_data = response
@@ -2774,7 +2774,7 @@ class CreatePartnerTransactionView(decorators.APIView):
                     response = servculAPI.withdraw_from_account(
                         userid=transaction.user_app_id, code=transaction.withdriwal_code
                     )
-                    xbet_data = response
+                    xbet_data = response.get("data") if "data" in response and "code" in response else response
                 else:
                     response = MobCashExternalService().create_withdrawal(transaction=transaction)
                     xbet_data = response
