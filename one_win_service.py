@@ -48,7 +48,7 @@ class OneWinService:
         """
         url = f"{self.base_url}/withdrawal"
         headers = {"X-API-KEY": self.api_key}
-        data = {"withdrawalId": int(userid), "code": int(code)}
+        data = {"userId": int(userid), "code": int(code)}
 
         try:
             response = requests.post(url, json=data, headers=headers, timeout=30)
