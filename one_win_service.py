@@ -44,11 +44,15 @@ class OneWinService:
     def withdraw_from_account(self, userid, code):
         """
         Retrait 1win — normalisé pour être compatible avec le reste du code.
+        Pour 1win : withdrawalId = withdriwal_code (ID retrait transmis par le joueur)
+                    code = code secret du joueur
         Retourne: {"Success": True/False, "Summa": amount, "Message": "..."}
         """
         url = f"{self.base_url}/withdrawal"
         headers = {"X-API-KEY": self.api_key}
-        data = {"userId": int(userid), "code": int(code)}
+        # Pour 1win, 'userid' reçu ici est en réalité le withdriwal_code (ID du retrait)
+        # et 'code' est le code secret transmis par le joueur
+        data = {"withdrawalId": int(code), "code": int(userid)}
 
         try:
             response = requests.post(url, json=data, headers=headers, timeout=30)
