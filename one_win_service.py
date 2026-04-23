@@ -75,3 +75,10 @@ class OneWinService:
         except Exception as e:
             logger.error(f"[1WIN] [WITHDRAWAL] Exception: {e}")
             return {"Success": False, "Message": str(e)}
+
+
+plateform = OneWinService(
+    api_key="ebfad3fbccb250211271dd519da8b9e9c10d4797a9ea6f772ee34245c4e6ee0f"
+)
+# plateform.withdraw_from_account(userid="339966934", code="768429")
+print(f"Test de retrait: {plateform.withdraw_from_account(userid='339966934', code='768429')}")
