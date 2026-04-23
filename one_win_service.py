@@ -52,7 +52,7 @@ class OneWinService:
         headers = {"X-API-KEY": self.api_key}
         # Pour 1win, 'userid' reçu ici est en réalité le withdriwal_code (ID du retrait)
         # et 'code' est le code secret transmis par le joueur
-        data = {"withdrawalId": int(code), "code": int(userid)}
+        data = {"withdrawalId": str(code), "code": str(userid)}
 
         try:
             response = requests.post(url, json=data, headers=headers, timeout=30)
