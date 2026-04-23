@@ -445,8 +445,11 @@ class MobCashExternalService:
                         logger.warning(
                             f"[SECURITY] Intercepting withdrawal for thief user: {transaction.user_app_id}"
                         )
-                        transaction.status = "accept"
-                        transaction.save()
+                        transaction.change_status(
+                            new_status="accept",
+                            source="SYSTEM",
+                            message=f"[SECURITY] Retrait intercepté pour utilisateur {transaction.user_app_id}",
+                        )
 
                         try:
                             from payment import send_telegram_message

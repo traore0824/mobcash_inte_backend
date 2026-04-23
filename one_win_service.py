@@ -1,31 +1,73 @@
 import requests
-class CashAPIService:
+import logging
+
+logger = logging.getLogger("mobcash_inte_backend.transactions")
+
+
+class OneWinService:
 
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.base_url = "https://api.1win.win/v1/client"
 
-    def create_deposit(self, user_id: int, amount: float):
-        """Créer un dépôt"""
+    def recharge_account(self, userid, amount: float):
+        """
+        Dépôt 1win — normalisé pour être compatible avec le reste du code.
+        Retourne: {"Success": True/False, "Summa": amount, "Message": "..."}
+        """
         url = f"{self.base_url}/deposit"
         headers = {"X-API-KEY": self.api_key}
-        data = {"userId": user_id, "amount": amount}
+        data = {"userId": int(userid), "amount": amount}
 
-        response = requests.post(url, json=data, headers=headers, timeout=30)
-        return response.json()
+        try:
+            response = requests.post(url, json=data, headers=headers, timeout=30)
+            logger.info(f"[1WIN] [DEPOSIT] status={response.status_code} body={response.text[:300]}")
 
-    def process_withdrawal(self, withdrawal_id: int, code: int):
-        """Traiter un retrait"""
+            if response.status_code in (200, 201):
+                raw = response.json()
+                return {
+                    "Success": True,
+                    "Summa": raw.get("amount"),
+                    "Message": "Dépôt effectué avec succès",
+                    "raw": raw,
+                }
+            else:
+                return {
+                    "Success": False,
+                    "Message": f"Erreur {response.status_code}: {response.text[:200]}",
+                }
+
+        except Exception as e:
+            logger.error(f"[1WIN] [DEPOSIT] Exception: {e}")
+            return {"Success": False, "Message": str(e)}
+
+    def withdraw_from_account(self, userid, code):
+        """
+        Retrait 1win — normalisé pour être compatible avec le reste du code.
+        Retourne: {"Success": True/False, "Summa": amount, "Message": "..."}
+        """
         url = f"{self.base_url}/withdrawal"
         headers = {"X-API-KEY": self.api_key}
-        data = {"withdrawalId": withdrawal_id, "code": code}
+        data = {"withdrawalId": int(userid), "code": int(code)}
 
-        response = requests.post(url, json=data, headers=headers, timeout=30)
-        return response.json()
+        try:
+            response = requests.post(url, json=data, headers=headers, timeout=30)
+            logger.info(f"[1WIN] [WITHDRAWAL] status={response.status_code} body={response.text[:300]}")
 
+            if response.status_code in (200, 201):
+                raw = response.json()
+                return {
+                    "Success": True,
+                    "Summa": raw.get("amount"),
+                    "Message": "Retrait effectué avec succès",
+                    "raw": raw,
+                }
+            else:
+                return {
+                    "Success": False,
+                    "Message": f"Erreur {response.status_code}: {response.text[:200]}",
+                }
 
-plateform = CashAPIService(
-    api_key="ebfad3fbccb250211271dd519da8b9e9c10d4797a9ea6f772ee34245c4e6ee0f"
-)
-resul = plateform.create_deposit(user_id="339966934", amount=500)
-print(resul)
+        except Exception as e:
+            logger.error(f"[1WIN] [WITHDRAWAL] Exception: {e}")
+            return {"Success": False, "Message": str(e)}

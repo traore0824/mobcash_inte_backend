@@ -178,6 +178,21 @@ def init_mobcash(app_name: AppName):
     return bet_app
 
 
+def resolve_api_service(app: AppName):
+    """
+    Retourne le bon service API selon l'app :
+    - app.hash + name == "1win"  → OneWinService (api_key = hash)
+    - app.hash + autre nom       → BetApp (servcul)
+    - pas de hash                → None  (→ MobCashExternalService à utiliser côté appelant)
+    """
+    if app.hash and app.name.lower() == "1win":
+        from one_win_service import OneWinService
+        return OneWinService(api_key=app.hash)
+    elif app.hash:
+        return init_mobcash(app_name=app)
+    return None
+
+
 def generate_reference(prefix, rand_digits=3):
     millis = int(time.time() * 1_000)
     rnd = secrets.randbelow(10**rand_digits)

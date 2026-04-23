@@ -275,6 +275,78 @@ class Transaction(models.Model):
     def __str__(self):
         return str(self.id)
 
+    def change_status(self, new_status, source, data=None, message=None, extra_fields=None):
+        """
+        Change le statut de la transaction ET crée une entrée d'audit automatiquement.
+        Remplace le pattern : transaction.status = "xxx" + track_status_change() + save()
+        """
+        from django.utils import timezone as tz
+        old_status = self.status
+        self.status = new_status
+        fields_to_update = ["status"]
+
+        if message:
+            self.message = message
+            fields_to_update.append("message")
+
+        if source in [
+            TransactionStatusHistory.Source.EXCEPTION,
+            TransactionStatusHistory.Source.API_ERROR,
+            TransactionStatusHistory.Source.WEBHOOK_ERROR,
+        ] and data:
+            self.error_message = str(data)[:1000]
+            fields_to_update.append("error_message")
+
+        if extra_fields:
+            fields_to_update.extend(extra_fields)
+
+        self.save(update_fields=list(set(fields_to_update)))
+
+        # Mise à jour all_status (compatibilité avec l'existant)
+        if not isinstance(self.all_status, list):
+            self.all_status = []
+        temp = list(self.all_status)
+        temp.append({"status": new_status, "timestamp": tz.now().isoformat(), "source": source})
+        self.all_status = temp
+        self.save(update_fields=["all_status"])
+
+        TransactionStatusHistory.objects.create(
+            transaction=self,
+            old_status=old_status,
+            new_status=new_status,
+            trigger_source=source,
+            trigger_data=data if isinstance(data, (dict, list)) else {"raw_info": str(data)} if data else {},
+            message=message or f"Status changed from {old_status} to {new_status} via {source}",
+        )
+
+
+class TransactionStatusHistory(models.Model):
+    class Source(models.TextChoices):
+        WEBHOOK       = "WEBHOOK",       "Webhook"
+        API_RESPONSE  = "API_RESPONSE",  "Réponse API"
+        EXCEPTION     = "EXCEPTION",     "Exception/Erreur Technique"
+        ADMIN         = "ADMIN",         "Action Admin"
+        SYSTEM        = "SYSTEM",        "Système"
+        WEBHOOK_ERROR = "WEBHOOK_ERROR", "Erreur Webhook"
+        API_ERROR     = "API_ERROR",     "Erreur API"
+        USER          = "USER",          "Action Utilisateur"
+
+    transaction    = models.ForeignKey(Transaction, on_delete=models.CASCADE, related_name="status_history")
+    old_status     = models.CharField(max_length=120)
+    new_status     = models.CharField(max_length=120)
+    trigger_source = models.CharField(max_length=50, choices=Source.choices)
+    trigger_data   = models.JSONField(default=dict, blank=True)
+    message        = models.TextField(blank=True, null=True)
+    created_at     = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Historique Statut Transaction"
+        verbose_name_plural = "Historiques Statuts Transactions"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.transaction_id} | {self.old_status} → {self.new_status} ({self.trigger_source})"
+
 
 class Bonus(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)

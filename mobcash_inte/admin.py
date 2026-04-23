@@ -20,6 +20,7 @@ from .models import (
     Setting,
     TestModel,
     Transaction,
+    TransactionStatusHistory,
     UserCredit,
     UserPhone,
     WebhookLog,
@@ -344,6 +345,8 @@ class WebhookLogAdmin(admin.ModelAdmin):
 
 @admin.register(Transaction)
 class TransactionAdmin(admin.ModelAdmin):
+    inlines_classes = None  # défini après TransactionStatusHistoryInline
+
     list_display = (
         "id",
         "user",
@@ -521,3 +524,29 @@ admin.site.register(CouponPayout)
 admin.site.register(CouponWithdrawal)
 admin.site.register(AuthorComment)
 admin.site.register(AuthorCouponRating)
+
+
+class TransactionStatusHistoryInline(admin.TabularInline):
+    model = TransactionStatusHistory
+    extra = 0
+    readonly_fields = ["old_status", "new_status", "trigger_source", "message", "trigger_data", "created_at"]
+    can_delete = False
+    ordering = ["-created_at"]
+    show_change_link = False
+
+
+# Injecter l'inline dans TransactionAdmin
+TransactionAdmin.inlines = [TransactionStatusHistoryInline]
+
+
+@admin.register(TransactionStatusHistory)
+class TransactionStatusHistoryAdmin(admin.ModelAdmin):
+    list_display = ["transaction_ref", "old_status", "new_status", "trigger_source", "message", "created_at"]
+    list_filter  = ["trigger_source", "new_status", "created_at"]
+    search_fields = ["transaction__reference", "transaction__public_id", "message"]
+    readonly_fields = ["transaction", "old_status", "new_status", "trigger_source", "trigger_data", "message", "created_at"]
+    ordering = ["-created_at"]
+
+    def transaction_ref(self, obj):
+        return obj.transaction.reference or str(obj.transaction.id)
+    transaction_ref.short_description = "Transaction Ref"

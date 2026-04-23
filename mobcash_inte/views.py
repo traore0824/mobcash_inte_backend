@@ -20,6 +20,7 @@ from mobcash_external_service import MobCashExternalService
 from mobcash_inte.helpers import (
     generate_reference,
     init_mobcash,
+    resolve_api_service,
     send_admin_notification,
     send_notification,
 )
@@ -44,6 +45,7 @@ from mobcash_inte.models import (
     Reward,
     Setting,
     Transaction,
+    TransactionStatusHistory,
     UploadFile,
     UserPhone,
     WebhookLog,
@@ -107,7 +109,6 @@ from payment import (
     webhook_transaction_failled,
     webhook_transaction_success,
     feexpay_webhook,
-    track_status_change,
     connect_pro_withd_process,
     feexpay_withdrawall_process,
     check_solde,
@@ -451,7 +452,7 @@ class CreateDepositTransactionViews(generics.CreateAPIView):
             type_trans="deposit",
         )
         transaction.api = transaction.network.deposit_api
-        track_status_change(transaction, transaction.status, source="system")
+        TransactionStatusHistory.objects.create(transaction=transaction, old_status=transaction.status, new_status=transaction.status, trigger_source=TransactionStatusHistory.Source.SYSTEM, message="Statut initial enregistré")
         transaction.save()
         if transaction.network.payment_by_ussd_code:
             from .helpers import generate_ussd_code
@@ -483,7 +484,7 @@ class CreateBonusDepositTransactionViews(generics.CreateAPIView):
             type_trans="reward",
         )
         # transaction.api = transaction.network.deposit_api
-        track_status_change(transaction, transaction.status, source="system")
+        TransactionStatusHistory.objects.create(transaction=transaction, old_status=transaction.status, new_status=transaction.status, trigger_source=TransactionStatusHistory.Source.SYSTEM, message="Statut initial enregistré")
         transaction.save()
         webhook_transaction_success(
             transaction=transaction, setting=Setting.objects.first()
@@ -535,7 +536,7 @@ class RewardTransactionViews(generics.CreateAPIView):
                 type_trans="reward",
                 amount=int(bonus_amount),  # Utiliser tout le solde disponible
             )
-            track_status_change(transaction, transaction.status, source="system")
+            TransactionStatusHistory.objects.create(transaction=transaction, old_status=transaction.status, new_status=transaction.status, trigger_source=TransactionStatusHistory.Source.SYSTEM, message="Statut initial enregistré")
 
             # 4. Verrouiller la transaction pour éviter traitement simultané
             transaction = Transaction.objects.select_for_update().get(
@@ -558,23 +559,26 @@ class RewardTransactionViews(generics.CreateAPIView):
                 )
 
             try:
-                transaction.status = "init_payment"
-                track_status_change(transaction, "init_payment", source="system")
-                transaction.save()
+                transaction.change_status(
+                    new_status="init_payment",
+                    source="WEBHOOK",
+                    message="Paiement reçu (reward), appel API betting en cours",
+                )
 
                 app = transaction.app
                 servculAPI = init_mobcash(app_name=app)
                 amount = transaction.amount
 
                 # Appeler l'API selon le type d'app
-                if transaction.app.hash:
+                servculAPI = resolve_api_service(transaction.app)
+                if servculAPI:
                     response = servculAPI.recharge_account(
                         amount=float(amount), userid=transaction.user_app_id
                     )
                     connect_pro_logger.info(
                         f"Reponse de l'api de {transaction.app.name}: {response}"
                     )
-                    xbet_response_data = response.get("data")
+                    xbet_response_data = response
                 else:
                     response = MobCashExternalService().create_deposit(
                         transaction=transaction
@@ -590,9 +594,13 @@ class RewardTransactionViews(generics.CreateAPIView):
                         f"Transaction reward de {transaction.app.name} success"
                     )
                     transaction.validated_at = timezone.now()
-                    transaction.status = "accept"
-                    track_status_change(transaction, "accept", source="system")
-                    transaction.save()
+                    transaction.change_status(
+                        new_status="accept",
+                        source="API_RESPONSE",
+                        data=xbet_response_data,
+                        message="Reward confirmé par l'API betting",
+                        extra_fields=["validated_at"],
+                    )
 
                     # Marquer TOUS les bonus comme utilisés
                     bonus_queryset.update(bonus_with=True)
@@ -618,10 +626,13 @@ class RewardTransactionViews(generics.CreateAPIView):
                         )
                 else:
                     # 8. Si échec : mettre status="error" (bonus restent disponibles)
-                    transaction.status = "error"
-                    track_status_change(transaction, "error", source="system")
-                    transaction.error_message = f"Échec de l'API : {xbet_response_data}"
-                    transaction.save()
+                    transaction.change_status(
+                        new_status="error",
+                        source="API_ERROR",
+                        data=xbet_response_data,
+                        message=f"Échec de l'API : {xbet_response_data}",
+                        extra_fields=["error_message"],
+                    )
 
                     # Envoyer une notification d'erreur à l'utilisateur
                     try:
@@ -659,10 +670,12 @@ class RewardTransactionViews(generics.CreateAPIView):
                     f"Erreur lors du traitement de la transaction reward {transaction.id}: {str(e)}",
                     exc_info=True,
                 )
-                transaction.status = "error"
-                track_status_change(transaction, "error", source="system")
-                transaction.error_message = str(e)
-                transaction.save()
+                transaction.change_status(
+                    new_status="error",
+                    source="EXCEPTION",
+                    data=str(e),
+                    message=f"Exception non gérée : {str(e)}",
+                )
 
                 return Response(
                     {"error": "Erreur lors du traitement", "details": str(e)},
@@ -1047,11 +1060,11 @@ class ChangeTransactionStatus(decorators.APIView):
                         )
             elif transaction.status == "init_payment":
                 if transaction.type_trans == "withdrawal":
-                    transaction.status = "accept"
-                    track_status_change(
-                        transaction, "accept", source="admin", admin_id=request.user.id
+                    transaction.change_status(
+                        new_status="accept",
+                        source="ADMIN",
+                        message=f"Retrait forcé en accept par admin (id={request.user.id})",
                     )
-                    transaction.save()
                 else:
                     webhook_transaction_success(
                         transaction=transaction, setting=setting
@@ -1061,12 +1074,13 @@ class ChangeTransactionStatus(decorators.APIView):
             return Response({"status": transaction.status}, status=status.HTTP_200_OK)
         else:
             new_status = serializer.validated_data.get("status")
-            transaction.status = new_status
-            track_status_change(
-                transaction, new_status, source="admin", admin_id=request.user.id
+            transaction.change_status(
+                new_status=new_status,
+                source="ADMIN",
+                message=f"Statut modifié manuellement par admin (id={request.user.id})",
             )
             transaction.fixed_by_admin = True
-            transaction.save(update_fields=["status", "fixed_by_admin"])
+            transaction.save(update_fields=["fixed_by_admin"])
             return Response({"status": transaction.status}, status=status.HTTP_200_OK)
 
 
@@ -1112,7 +1126,7 @@ class BotWithdrawalTransactionViews(generics.CreateAPIView):
             telegram_user=request.telegram_user,
         )
         transaction.api = transaction.network.withdrawal_api
-        track_status_change(transaction, transaction.status, source="system")
+        TransactionStatusHistory.objects.create(transaction=transaction, old_status=transaction.status, new_status=transaction.status, trigger_source=TransactionStatusHistory.Source.SYSTEM, message="Statut initial enregistré")
         transaction.save()
         payment_fonction(reference=transaction.reference)
         return Response(
@@ -1135,7 +1149,7 @@ class BotDepositTransactionViews(generics.CreateAPIView):
             source="bot",
         )
         transaction.api = transaction.network.deposit_api
-        track_status_change(transaction, transaction.status, source="system")
+        TransactionStatusHistory.objects.create(transaction=transaction, old_status=transaction.status, new_status=transaction.status, trigger_source=TransactionStatusHistory.Source.SYSTEM, message="Statut initial enregistré")
         transaction.save()
         if transaction.network.payment_by_ussd_code:
             from .helpers import generate_ussd_code
@@ -1163,7 +1177,7 @@ class WithdrawalTransactionViews(generics.CreateAPIView):
             user=request.user,
         )
         transaction.api = transaction.network.withdrawal_api
-        track_status_change(transaction, transaction.status, source="system")
+        TransactionStatusHistory.objects.create(transaction=transaction, old_status=transaction.status, new_status=transaction.status, trigger_source=TransactionStatusHistory.Source.SYSTEM, message="Statut initial enregistré")
         transaction.save()
         payment_fonction(reference=transaction.reference)
         return Response(
@@ -1357,7 +1371,11 @@ class SearchUserBet(decorators.APIView):
         app = serializer.validated_data["app"]
         app_name = app.name
         userid = serializer.validated_data["userid"]
-        if app.hash:
+
+        if app.hash and app.name.lower() == "1win":
+            # 1win n'a pas d'endpoint de recherche utilisateur
+            response = {"UserId": userid, "Name": None, "CurrencyId": 27}
+        elif app.hash:
             init_app = init_mobcash(app_name=app)
             response = init_app.search_user(userid=userid)
             if response.get("code") != constant.CODE_EXEPTION:
@@ -2192,7 +2210,7 @@ class ProcessTransactionView(decorators.APIView):
         try:
             # Tracker le statut initial si pas encore tracké
             if not transaction.all_status:
-                track_status_change(transaction, transaction.status, source="system")
+                TransactionStatusHistory.objects.create(transaction=transaction, old_status=transaction.status, new_status=transaction.status, trigger_source=TransactionStatusHistory.Source.SYSTEM, message="Statut initial enregistré")
 
             # Traiter selon le type de transaction
             if (
@@ -2261,18 +2279,13 @@ class UpdateTransactionStatusView(decorators.APIView):
         try:
             old_status = transaction.status
 
-            # Tracker le changement de statut avec source admin
-            track_status_change(
-                transaction=transaction,
+            transaction.change_status(
                 new_status=new_status,
-                source="admin",
-                admin_id=str(request.user.id),
+                source="ADMIN",
+                message=f"Statut modifié manuellement par admin (id={request.user.id})",
             )
-
-            # Mettre à jour le statut et marquer comme fixé par admin
-            transaction.status = new_status
             transaction.fixed_by_admin = True
-            transaction.save(update_fields=["status", "fixed_by_admin"])
+            transaction.save(update_fields=["fixed_by_admin"])
 
             transaction.refresh_from_db()
             return Response(
@@ -2439,16 +2452,13 @@ class ChangeTransactionStatusManuelViews(decorators.APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        track_status_change(
-            transaction=transaction,
+        transaction.change_status(
             new_status=new_status,
-            source="admin",
-            admin_id=str(request.user.id),
+            source="ADMIN",
+            message=f"Statut modifié manuellement par admin (id={request.user.id})",
         )
-
-        transaction.status = new_status
         transaction.fixed_by_admin = True
-        transaction.save(update_fields=["status", "fixed_by_admin"])
+        transaction.save(update_fields=["fixed_by_admin"])
 
         return Response(
             TransactionDetailsSerializer(transaction).data, status=status.HTTP_200_OK
@@ -2468,16 +2478,15 @@ class FinalizeDepositTransaction(decorators.APIView):
         if not transaction:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
-        servculAPI = init_mobcash(app_name=transaction.app)
-
-        if transaction.app.hash:
+        servculAPI = resolve_api_service(transaction.app)
+        if servculAPI:
             response = servculAPI.recharge_account(
                 amount=float(transaction.amount), userid=transaction.user_app_id
             )
             connect_pro_logger.info(
                 f"Reponse de l'api de {transaction.app.name}: {response}"
             )
-            xbet_response_data = response.get("data")
+            xbet_response_data = response
         else:
             response = MobCashExternalService().create_deposit(transaction=transaction)
             connect_pro_logger.info(
@@ -2486,9 +2495,14 @@ class FinalizeDepositTransaction(decorators.APIView):
             xbet_response_data = response
 
         if xbet_response_data.get("Success") == True:
-            transaction.status = "accept"
+            transaction.change_status(
+                new_status="accept",
+                source="API_RESPONSE",
+                data=xbet_response_data,
+                message="Dépôt finalisé par admin via API betting",
+            )
             transaction.mobcash_response = str(response)
-            transaction.save()
+            transaction.save(update_fields=["mobcash_response"])
 
             check_solde.delay(transaction_id=transaction.id)
             send_notification(
@@ -2566,9 +2580,11 @@ class CancelTransactionView(decorators.APIView):
         if transaction.status in ["accept", "annuler"]:
             return Response({"error": f"Impossible d'annuler une transaction déjà {transaction.status}."}, status=status.HTTP_400_BAD_REQUEST)
 
-        transaction.status = "annuler"
-        track_status_change(transaction, "annuler", source="user")
-        transaction.save()
+        transaction.change_status(
+            new_status="annuler",
+            source="USER",
+            message=f"Transaction annulée par l'utilisateur",
+        )
 
         return Response({
             "message": "Transaction annulée avec succès.",
@@ -2607,14 +2623,15 @@ class FinalizeDepositTransactionByUser(decorators.APIView):
             return Response({"error": "Cette transaction est déjà acceptée."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Mise à jour de la transaction
-        transaction.status = "pending"
+        transaction.change_status(
+            new_status="pending",
+            source="USER",
+            message="Transaction relancée par l'utilisateur",
+        )
         prefix = "depot-" if transaction.type_trans in ["deposit-f", "reward-f"] else "retrait-f-"
         new_reference = generate_reference(prefix=prefix)
         transaction.reference = new_reference
-        transaction.save()
-        
-        # Tracking du changement de statut
-        track_status_change(transaction, "pending", source="user")
+        transaction.save(update_fields=["reference"])
         
         # Lancement du processus de paiement
         payment_fonction(reference=new_reference)
@@ -2720,19 +2737,18 @@ class CreatePartnerTransactionView(decorators.APIView):
         app = transaction.app
 
         if transaction.type_trans == "deposit":
-            # Même logique que RewardTransactionViews / CreateDepositTransactionViews
             try:
-                servculAPI = init_mobcash(app_name=app)
-                if app.hash:
+                servculAPI = resolve_api_service(app)
+                if servculAPI:
                     response = servculAPI.recharge_account(
                         amount=float(transaction.amount), userid=transaction.user_app_id
                     )
-                    xbet_data = response.get("data", {})
+                    xbet_data = response
                 else:
                     response = MobCashExternalService().create_deposit(transaction=transaction)
                     xbet_data = response
 
-                if xbet_data.get("Success") == True:
+                if xbet_data.get("Success") == True or str(xbet_data.get("Success", "")).lower() == "true":
                     transaction.status = "accept"
                     transaction.validated_at = timezone.now()
                 else:
@@ -2748,17 +2764,17 @@ class CreatePartnerTransactionView(decorators.APIView):
                     f"[VALIDATION_CHECK] La transaction partenaire {transaction.id} (ref: {transaction.reference}) "
                     f"a déjà été validée. Arrêt du processus."
                 )
-                transaction.status = "accept" # On s'assure qu'elle reste acceptée
+                transaction.status = "accept"
                 transaction.save()
                 return Response(PartnerTransactionSerializer(transaction).data, status=status.HTTP_201_CREATED)
 
             try:
-                servculAPI = init_mobcash(app_name=app)
-                if app.hash:
+                servculAPI = resolve_api_service(app)
+                if servculAPI:
                     response = servculAPI.withdraw_from_account(
                         userid=transaction.user_app_id, code=transaction.withdriwal_code
                     )
-                    xbet_data = response.get("data", {})
+                    xbet_data = response
                 else:
                     response = MobCashExternalService().create_withdrawal(transaction=transaction)
                     xbet_data = response

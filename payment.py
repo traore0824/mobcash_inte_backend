@@ -10,6 +10,7 @@ load_dotenv()
 from mobcash_balance import get_balance
 from mobcash_inte.helpers import (
     init_mobcash,
+    resolve_api_service,
     send_admin_notification,
     send_notification,
     send_telegram_message,
@@ -441,9 +442,11 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
         ) and transaction.status != "accept":
 
             try:
-                transaction.status = "init_payment"
-                track_status_change(transaction, "init_payment", source="system")
-                transaction.save()
+                transaction.change_status(
+                    new_status="init_payment",
+                    source="WEBHOOK",
+                    message="Paiement reçu, appel API betting en cours",
+                )
                 app = transaction.app
                 servculAPI = init_mobcash(app_name=app)
                 amount = transaction.amount
@@ -457,14 +460,15 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                     transaction.net_payable_amout = amount
                     transaction.save()
 
-                if transaction.app.hash:
+                servculAPI = resolve_api_service(transaction.app)
+                if servculAPI:
                     response = servculAPI.recharge_account(
                         amount=float(amount), userid=transaction.user_app_id
                     )
                     connect_pro_logger.info(
                         f"Reponse de l'api de {transaction.app.name}: {response}"
                     )
-                    xbet_response_data = response.get("data")
+                    xbet_response_data = response
                 else:
                     response = MobCashExternalService().create_deposit(transaction=transaction)
                     connect_pro_logger.info( 
@@ -476,12 +480,14 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                         f"Transaction de {transaction.app.name} success - passage au statut accept"
                     )
                     transaction.validated_at = timezone.now()
-                    transaction.status = "accept"
-                    transaction.save()
+                    transaction.change_status(
+                        new_status="accept",
+                        source="API_RESPONSE",
+                        data=xbet_response_data,
+                        message="Dépôt confirmé par l'API betting",
+                        extra_fields=["validated_at"],
+                    )
                     connect_pro_logger.info(f"Transaction {transaction.id} sauvegardée avec succès au statut accept")
-                    
-                    track_status_change(transaction, "accept", source="system")
-                    connect_pro_logger.info(f"Status change tracked pour transaction {transaction.id}")
 
                     # Appel de la tâche Celery pour les opérations lentes (notifications, bonus, etc.)
                     try:
@@ -546,10 +552,12 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
         else:
             try:
                 connect_pro_logger.info(f"Operation success")
-                transaction.status = "accept"
-                transaction.save()
+                transaction.change_status(
+                    new_status="accept",
+                    source="WEBHOOK",
+                    message="Retrait confirmé par le webhook",
+                )
                 connect_pro_logger.info(f"Retrait {transaction.id} sauvegardé avec succès au statut accept")
-                track_status_change(transaction, "accept", source="system")
 
                 # Appel de la tâche Celery pour les notifications (retrait)
                 try:
@@ -574,9 +582,11 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
 
 def webhook_transaction_failled(transaction: Transaction):
     payment_logger.info(f"Transaction with ")
-    transaction.status = "error"
-    track_status_change(transaction, "error", source="system")
-    transaction.save()
+    transaction.change_status(
+        new_status="error",
+        source="WEBHOOK_ERROR",
+        message="Transaction échouée ou annulée par le webhook",
+    )
     if transaction.type_trans == "reward":
         reward_failed_process(transaction=transaction)
     transaction.refresh_from_db()
@@ -937,14 +947,14 @@ def xbet_withdrawal_process(transaction: Transaction):
 
     connect_pro_logger.info("Demarraage de retrait avec l'app de mobcash ")
     app_name = transaction.app
-    servculAPI = init_mobcash(app_name=app_name)
-    
+
     if transaction.type_trans == "withdrawal":
-        if transaction.app.hash:
+        servculAPI = resolve_api_service(transaction.app)
+        if servculAPI:
             response = servculAPI.withdraw_from_account(
                 userid=transaction.user_app_id, code=transaction.withdriwal_code
             )
-            xbet_response_data = response.get("data")
+            xbet_response_data = response
         else:
             response = MobCashExternalService().create_withdrawal(transaction=transaction)
             connect_pro_logger.info(
@@ -956,10 +966,12 @@ def xbet_withdrawal_process(transaction: Transaction):
             str(xbet_response_data.get("Success")).lower() == "false"
             or xbet_response_data.get("status") == 401
         ):
-            transaction.status = "error"
-            track_status_change(transaction, "error", source="system")
-            transaction.message=xbet_response_data.get('Message')
-            transaction.save()
+            transaction.change_status(
+                new_status="error",
+                source="API_ERROR",
+                data=xbet_response_data,
+                message=xbet_response_data.get('Message') or "Échec API betting (retrait)",
+            )
             transaction.refresh_from_db()
             app_name = transaction.app.name.upper() if transaction.app else "l'application"
             error_message = (
@@ -975,10 +987,15 @@ def xbet_withdrawal_process(transaction: Transaction):
             connect_pro_logger.info("app BET step suvccess 11111111")
             amount = float(xbet_response_data.get("Summa")) * (-1)
             transaction.amount = amount
-            transaction.status = "init_payment"
-            track_status_change(transaction, "init_payment", source="system")
+            transaction.change_status(
+                new_status="init_payment",
+                source="API_RESPONSE",
+                data=xbet_response_data,
+                message="Retrait validé par l'API betting, paiement en cours",
+                extra_fields=["amount"],
+            )
             transaction.validated_at = timezone.now()
-            transaction.save()
+            transaction.save(update_fields=["validated_at"])
             transaction.refresh_from_db()
             connect_pro_logger.info("L'appelle a l'API betting a réussi (init_payment)")
             return True
