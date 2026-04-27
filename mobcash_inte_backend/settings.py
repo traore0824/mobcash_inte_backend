@@ -153,8 +153,13 @@ CORS_ALLOWED_ORIGINS = [
     "https://www.cashika.net",
     "https://cashika.net",
     "https://turnaicash.vercel.app",
-    "https://mobile.cashika.net",
-    
+    "https://mobile.ti-cash.net",
+    "https://module.ti-cash.net",
+    "https://dashboard.ti-cash.net",
+    "https://admin.ti-cash.net",
+    "https://www.ti-cash.net",
+    "https://ti-cash.net",
+    "https://ticash-mobile-app.vercel.app",
 ]
 
 
