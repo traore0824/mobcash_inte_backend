@@ -11,6 +11,7 @@ from mobcash_balance import get_balance
 from mobcash_inte.helpers import (
     init_mobcash,
     resolve_api_service,
+    calculate_fee,
     send_admin_notification,
     send_notification,
     send_telegram_message,
@@ -243,13 +244,11 @@ def deposit_connect(transaction: Transaction):
         "Content-Type": "application/json",
     }
     url = None
-    amount=None 
     amount = transaction.amount
-    if transaction.network.reduce_fee:
-        amount = int(amount - (amount * (float(transaction.network.fee_payin) / 100)))
-    else:
-        amount = transaction.amount
-    
+    fee = calculate_fee(transaction.network, amount)
+    if fee:
+        amount = int(amount - fee)
+
     if transaction.network.name == "wave":
         connect_pro_logger.info("debut de creatuion de transaction wave")
         url = CONNECT_PRO_BASE_URL + "/api/payments/wave-business-transactions/"

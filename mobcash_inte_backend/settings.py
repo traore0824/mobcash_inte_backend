@@ -60,6 +60,7 @@ ALLOWED_HOSTS = [
     "api.mobcash.supercashci.net",
     "api.i-cashci.net",
     "api.cashika.net",
+    "api.ti-cash.net"
 ]
 
 

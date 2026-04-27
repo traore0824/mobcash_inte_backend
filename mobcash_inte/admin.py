@@ -98,6 +98,20 @@ class NetworkAdmin(admin.ModelAdmin):
             },
         ),
         (
+            "Frais par tranches",
+            {
+                "fields": (
+                    "fee_slice_enabled",
+                    "fee_slice_threshold",
+                    "fee_slice_low_percent",
+                    "fee_slice_high_percent",
+                    "fee_slice_fixed",
+                ),
+                "classes": ("collapse",),
+                "description": "Activer pour des frais variables selon le montant (ex: Orange). Désactive automatiquement reduce_fee.",
+            },
+        ),
+        (
             "Activation",
             {
                 "fields": (

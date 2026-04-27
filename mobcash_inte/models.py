@@ -134,6 +134,12 @@ class Network(models.Model):
     ussd_code = models.CharField(max_length=200, blank=True, null=True)
     reduce_fee = models.BooleanField(default=False)
     fee_payin = models.DecimalField(decimal_places=2, max_digits=10, blank=True, null=True)
+    # Frais par tranches (ex: Orange)
+    fee_slice_enabled = models.BooleanField(default=False)
+    fee_slice_threshold = models.PositiveIntegerField(blank=True, null=True, help_text="Seuil de changement de tranche (ex: 50000)")
+    fee_slice_low_percent = models.DecimalField(decimal_places=2, max_digits=5, blank=True, null=True, help_text="% pour montant <= seuil")
+    fee_slice_high_percent = models.DecimalField(decimal_places=2, max_digits=5, blank=True, null=True, help_text="% pour montant > seuil")
+    fee_slice_fixed = models.PositiveIntegerField(default=0, help_text="Montant fixe ajouté sur la tranche haute")
 
 
 class Setting(models.Model):

@@ -178,6 +178,23 @@ def init_mobcash(app_name: AppName):
     return bet_app
 
 
+def calculate_fee(network, amount: int) -> int:
+    """
+    Calcule les frais à déduire selon la configuration du réseau.
+    - fee_slice_enabled=True → frais par tranches (ex: Orange)
+    - reduce_fee=True        → taux unique fee_payin (comportement actuel)
+    - sinon                  → 0
+    """
+    if network.fee_slice_enabled and network.fee_slice_threshold:
+        if amount <= network.fee_slice_threshold:
+            return int(amount * float(network.fee_slice_low_percent or 0) / 100)
+        else:
+            return int(amount * float(network.fee_slice_high_percent or 0) / 100) + (network.fee_slice_fixed or 0)
+    elif network.reduce_fee and network.fee_payin:
+        return int(amount * float(network.fee_payin) / 100)
+    return 0
+
+
 def resolve_api_service(app: AppName):
     """
     Retourne le bon service API selon l'app :
@@ -210,9 +227,9 @@ def generate_ussd_code(transaction :Transaction):
     if not network.payment_by_ussd_code:
         return None
     amount = transaction.amount
-    if network.reduce_fee and network.fee_payin:
-        # Calcul du montant après réduction (arrondi à l'entier le plus proche)
-        amount = int(amount - (amount * (float(network.fee_payin) / 100)))
+    fee = calculate_fee(network, amount)
+    if fee:
+        amount = int(amount - fee)
 
     # Formatage du code USSD en remplaçant {amount}
     try:
