@@ -18,6 +18,7 @@ from dateutil.relativedelta import relativedelta
 from mobcash_balance import get_balance
 from mobcash_external_service import MobCashExternalService
 from mobcash_inte.helpers import (
+    calculate_fee,
     generate_reference,
     init_mobcash,
     resolve_api_service,
@@ -2600,13 +2601,14 @@ class FinalizeDepositTransactionByUser(decorators.APIView):
 
     def post(self, request, *args, **kwargs):
         old_reference = request.data.get("reference")
+        setting = Setting.objects.first()
         if not old_reference:
             return Response({"error": "La référence est requise."}, status=status.HTTP_400_BAD_REQUEST)
-        
+
         transaction = Transaction.objects.filter(reference=old_reference).first()
         if not transaction:
             return Response({"error": "Transaction non trouvée."}, status=status.HTTP_404_NOT_FOUND)
-        
+
         # Vérification de l'appartenance
         is_owner = False
         if request.user and request.user.is_authenticated:
@@ -2615,9 +2617,9 @@ class FinalizeDepositTransactionByUser(decorators.APIView):
         elif hasattr(request, "telegram_user"):
             if transaction.telegram_user == request.telegram_user:
                 is_owner = True
-        
+
         if not is_owner:
-             return Response({"error": "Vous n'avez pas la permission de modifier cette transaction."}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"error": "Vous n'avez pas la permission de modifier cette transaction."}, status=status.HTTP_403_FORBIDDEN)
 
         if transaction.status == "accept":
             return Response({"error": "Cette transaction est déjà acceptée."}, status=status.HTTP_400_BAD_REQUEST)
@@ -2628,14 +2630,37 @@ class FinalizeDepositTransactionByUser(decorators.APIView):
             source="USER",
             message="Transaction relancée par l'utilisateur",
         )
-        prefix = "depot-" if transaction.type_trans in ["deposit-f", "reward-f"] else "retrait-f-"
+        prefix = (
+            "depot-"
+            if transaction.type_trans in ["deposit", "reward"]
+            else "retrait-f-"
+        )
         new_reference = generate_reference(prefix=prefix)
+        amount = transaction.amount
+        fee = calculate_fee(transaction.network, amount)
         transaction.reference = new_reference
-        transaction.save(update_fields=["reference"])
-        
+        if fee:
+            amount = int(amount - fee)
+        if transaction.network.name == "wave":
+            transaction.transaction_link = transaction.transaction_link = (
+                setting.wave_default_link + f"?amount={amount}"
+            )
+        elif transaction.network.payment_by_link:
+            if transaction.network.name == "orange":
+                transaction.transaction_link = (
+                    setting.orange_default_link + f"&amount={amount}"
+                )
+            else:
+                transaction.transaction_link = (
+                    setting.mtn_default_link
+                    + f"?amount={amount}&reference={transaction.reference}"
+                )
+
+        transaction.save(update_fields=["reference", "transaction_link"])
+
         # Lancement du processus de paiement
         payment_fonction(reference=new_reference)
-        
+
         transaction.refresh_from_db()
         return Response(TransactionDetailsSerializer(transaction).data)
 
