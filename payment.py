@@ -268,8 +268,11 @@ def deposit_connect(transaction: Transaction):
             transaction.transaction_link = (
                 setting.wave_default_link + f"?amount={amount}"
             )
+            transaction.connect_pro_response = str(response.content)
             transaction.save()
         except Exception as e:
+            transaction.connect_pro_response = str(e)
+            transaction.save()
             connect_pro_logger.critical(
                 f" Erreur de creation wave pour connect pro {e}"
             )
@@ -301,8 +304,11 @@ def deposit_connect(transaction: Transaction):
                     setting.mtn_default_link
                     + f"?amount={amount}&reference={transaction.reference}"
                 )
+            transaction.connect_pro_response = str(response.content)
             transaction.save()
         except Exception as e:
+            transaction.connect_pro_response = str(e)
+            transaction.save()
             connect_pro_logger.critical(
                 f" Erreur de creation de transaction {transaction.network.name} pour connect pro {e}"
             )
@@ -338,6 +344,8 @@ def deposit_connect(transaction: Transaction):
             transaction.public_id = response.json().get("data").get("uid")
             transaction.save()
         except Exception as e:
+            transaction.connect_pro_response = str(e)
+            transaction.save()
             connect_pro_logger.info(f" connect pro  response exep {e}")
 
 
