@@ -1511,43 +1511,40 @@ class StatisticsView(decorators.APIView):
 
         # Volume net
         connect_pro_logger.info("[STATISTICS] Début calcul net_volume")
-        # Récupérer toutes les caisses avec leurs apps
-        caisses = Caisse.objects.select_related("bet_app").all()
 
-        connect_pro_logger.info("[STATISTICS] Nombre de caisses: %s", caisses.count())
+        apps = AppName.objects.all()
+        connect_pro_logger.info("[STATISTICS] Nombre d'apps: %s", apps.count())
 
-        # Vérifier si au moins une app a un hash
-        has_app_with_hash = any(
-            caisse.bet_app.hash for caisse in caisses if caisse.bet_app
-        )
+        has_app_with_hash = apps.filter(hash__isnull=False).exclude(hash="").exists()
         connect_pro_logger.info("[STATISTICS] has_app_with_hash=%s", has_app_with_hash)
+
         net_volume = 0
         if has_app_with_hash:
-            # Si au moins une app a un hash, retourner la somme des soldes (caisse)
+            # Au moins une app a un hash → somme des soldes via Caisse
+            caisses = Caisse.objects.select_related("bet_app").all()
             net_volume = sum(float(caisse.solde) for caisse in caisses)
             connect_pro_logger.info(
-                "[STATISTICS] [SOURCE=CAISSE] Calcul somme des soldes via caisse (has_app_with_hash=True) | net_volume=%s",
-                net_volume,
+                "[STATISTICS] [SOURCE=CAISSE] net_volume=%s", net_volume
             )
-        else:
-            # Sinon, appel get_wallet_balance
-            if caisses.exists():
+        elif apps.exists():
+            # Des apps existent mais aucune n'a de hash → get_wallet_balance
+            connect_pro_logger.info(
+                "[STATISTICS] [SOURCE=GET_WALLET_BALANCE] Appel get_wallet_balance()"
+            )
+            net_volume = MobCashExternalService().get_wallet_balance()
+            if net_volume is not None:
                 connect_pro_logger.info(
-                    "[STATISTICS] [SOURCE=GET_WALLET_BALANCE] Appel MobCashExternalService.get_wallet_balance() (has_app_with_hash=False)"
+                    "[STATISTICS] [GET_WALLET_BALANCE_RESULT] Valeur retournée: %s",
+                    net_volume,
                 )
-                net_volume = MobCashExternalService().get_wallet_balance()
-                if net_volume is not None:
-                    connect_pro_logger.info(
-                        "[STATISTICS] [GET_WALLET_BALANCE_RESULT] Valeur retournée: %s",
-                        net_volume,
-                    )
-                else:
-                    connect_pro_logger.warning(
-                        "[STATISTICS] [GET_WALLET_BALANCE_RESULT] get_wallet_balance() a retourné None"
-                    )
-                    net_volume = 0.0
             else:
+                connect_pro_logger.warning(
+                    "[STATISTICS] [GET_WALLET_BALANCE_RESULT] get_wallet_balance() a retourné None"
+                )
                 net_volume = 0.0
+        else:
+            connect_pro_logger.warning("[STATISTICS] Aucune app trouvée, net_volume=0")
+            net_volume = 0.0
 
         connect_pro_logger.info("[STATISTICS] net_volume final=%s", net_volume)
 
