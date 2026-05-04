@@ -1510,13 +1510,17 @@ class StatisticsView(decorators.APIView):
         total_withdrawals_count = withdrawals.count()
 
         # Volume net
+        connect_pro_logger.info("[STATISTICS] Début calcul net_volume")
         # Récupérer toutes les caisses avec leurs apps
         caisses = Caisse.objects.select_related("bet_app").all()
+
+        connect_pro_logger.info("[STATISTICS] Nombre de caisses: %s", caisses.count())
 
         # Vérifier si au moins une app a un hash
         has_app_with_hash = any(
             caisse.bet_app.hash for caisse in caisses if caisse.bet_app
         )
+        connect_pro_logger.info("[STATISTICS] has_app_with_hash=%s", has_app_with_hash)
         net_volume = 0
         if has_app_with_hash:
             # Si au moins une app a un hash, retourner la somme des soldes (caisse)
@@ -1544,6 +1548,8 @@ class StatisticsView(decorators.APIView):
                     net_volume = 0.0
             else:
                 net_volume = 0.0
+
+        connect_pro_logger.info("[STATISTICS] net_volume final=%s", net_volume)
 
         # Évolution par période
         evolution_daily = (
