@@ -502,7 +502,7 @@ LOGGING = {
         # Logger spécifique pour les transactions
         "mobcash_inte_backend.transactions": {
             "handlers": ["file_transactions", "console"],
-            "level": "DEBUG" if DEBUG else "WARNING",
+            "level": "INFO",
             "propagate": False,
         },
         "mobcash_inte_backend.payments.audit": {
