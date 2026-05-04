@@ -108,6 +108,7 @@ def connect_pro_token():
 def get_network_id(name):
     token = connect_pro_token()
     if not token:
+        connect_pro_logger.warning("[GET_NETWORK_ID] Token ConnectPro non disponible")
         return None
 
     headers = {
@@ -115,18 +116,25 @@ def get_network_id(name):
         "Content-Type": "application/json",
     }
     url = CONNECT_PRO_BASE_URL + "/api/payments/networks/"
+    connect_pro_logger.info(f"[GET_NETWORK_ID] GET {url} | recherche réseau: {name}")
     try:
         response = requests.get(url, headers=headers, timeout=30)
-        connect_pro_logger.debug(f"Liste des réseaux ConnectPro : {response.json()}")
+        connect_pro_logger.info(
+            f"[GET_NETWORK_ID] Response status={response.status_code} | body={response.text[:500]}"
+        )
         results = response.json().get("results", [])
 
         # Comparaison insensible à la casse
         for data in results:
             if data.get("code", "").lower() == name.lower():
-                return data.get("uid")
+                uid = data.get("uid")
+                connect_pro_logger.info(f"[GET_NETWORK_ID] Réseau trouvé: code={name} | uid={uid}")
+                return uid
+
+        connect_pro_logger.warning(f"[GET_NETWORK_ID] Réseau '{name}' non trouvé dans la liste")
 
     except Exception as e:
-        connect_pro_logger.critical(f"Erreur de récupération de réseau : {e}")
+        connect_pro_logger.critical(f"[GET_NETWORK_ID] Erreur de récupération de réseau : {e}")
 
     return None
 
@@ -192,14 +200,19 @@ def connect_withdrawal(transaction: Transaction):
         ),
         "callback_url": f"{BASE_URL}/connect-pro-webhook",
     }
+    connect_pro_logger.info(
+        f"[CONNECT_WITHDRAWAL] POST {url} | transaction_id={transaction.id} | body={data}"
+    )
     try:
         response = requests.post(url, json=data, headers=headers, timeout=30)
-        connect_pro_logger.info(f"response connect pro with {response.json()}")
+        connect_pro_logger.info(
+            f"[CONNECT_WITHDRAWAL] Response status={response.status_code} | body={response.text[:500]}"
+        )
         transaction.connect_pro_response = str(response.content)
         transaction.public_id = response.json().get("data").get("uid")
         transaction.save()
     except Exception as e:
-        connect_pro_logger.info(f"response connect pro with errer {e}")
+        connect_pro_logger.info(f"[CONNECT_WITHDRAWAL] Erreur: {e}")
 
 
 def connect_pro_withd_process(transaction: Transaction, disbursements=False):
@@ -291,9 +304,14 @@ def deposit_connect(transaction: Transaction):
             "callback_url": f"{BASE_URL}/connect-pro-webhook",
             "payment_type": f"{transaction.network.name}-{transaction.network.country_code}",
         }
+        connect_pro_logger.info(
+            f"[CONNECT_MOMO_PAY] POST {url} | transaction_id={transaction.id} | body={data}"
+        )
         try:
             response = requests.post(url, json=data, headers=headers, timeout=30)
-            connect_pro_logger.info(f" connect pro  response {response.json()}")
+            connect_pro_logger.info(
+                f"[CONNECT_MOMO_PAY] Response status={response.status_code} | body={response.text[:500]}"
+            )
             transaction.public_id = response.json().get("data").get("uid")
             if transaction.network.name == "orange":
                 transaction.transaction_link = (
@@ -337,16 +355,21 @@ def deposit_connect(transaction: Transaction):
             ),
             "callback_url": f"{BASE_URL}/connect-pro-webhook",
         }
+        connect_pro_logger.info(
+            f"[CONNECT_USSD_WITHDRAWAL] POST {url} | transaction_id={transaction.id} | body={data}"
+        )
         try:
             response = requests.post(url, json=data, headers=headers, timeout=30)
-            connect_pro_logger.info(f" connect pro  response {response.json()}")
+            connect_pro_logger.info(
+                f"[CONNECT_USSD_WITHDRAWAL] Response status={response.status_code} | body={response.text[:500]}"
+            )
             transaction.connect_pro_response = str(response.content)
             transaction.public_id = response.json().get("data").get("uid")
             transaction.save()
         except Exception as e:
             transaction.connect_pro_response = str(e)
             transaction.save()
-            connect_pro_logger.info(f" connect pro  response exep {e}")
+            connect_pro_logger.info(f"[CONNECT_USSD_WITHDRAWAL] Erreur: {e}")
 
 
 def connect_pro_status(reference, is_wave=False, is_momo_pay=False):
