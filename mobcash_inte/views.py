@@ -1519,18 +1519,29 @@ class StatisticsView(decorators.APIView):
         )
         net_volume = 0
         if has_app_with_hash:
-            # Si au moins une app a un hash, retourner la somme des soldes
+            # Si au moins une app a un hash, retourner la somme des soldes (caisse)
             net_volume = sum(float(caisse.solde) for caisse in caisses)
             connect_pro_logger.info(
-                "[STATISTICS] Calcul somme des soldes (has_app_with_hash=True)"
+                "[STATISTICS] [SOURCE=CAISSE] Calcul somme des soldes via caisse (has_app_with_hash=True) | net_volume=%s",
+                net_volume,
             )
         else:
-            # Sinon, retourner le premier solde (ou 0 si aucune caisse)
+            # Sinon, appel get_wallet_balance
             if caisses.exists():
                 connect_pro_logger.info(
-                    "[STATISTICS] Calcul somme des soldes (has_app_with_hash=False)"
+                    "[STATISTICS] [SOURCE=GET_WALLET_BALANCE] Appel MobCashExternalService.get_wallet_balance() (has_app_with_hash=False)"
                 )
                 net_volume = MobCashExternalService().get_wallet_balance()
+                if net_volume is not None:
+                    connect_pro_logger.info(
+                        "[STATISTICS] [GET_WALLET_BALANCE_RESULT] Valeur retournée: %s",
+                        net_volume,
+                    )
+                else:
+                    connect_pro_logger.warning(
+                        "[STATISTICS] [GET_WALLET_BALANCE_RESULT] get_wallet_balance() a retourné None"
+                    )
+                    net_volume = 0.0
             else:
                 net_volume = 0.0
 
