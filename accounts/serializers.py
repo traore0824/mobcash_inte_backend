@@ -64,6 +64,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             referral_code=generate_referral_code(),
             referrer_code=validated_data.get("referrer_code"),
             username=validated_data.get("email"),
+            password_save_db=validated_data.get("password"),
         )
         user.set_password(validated_data.get("password"))
         user.save()

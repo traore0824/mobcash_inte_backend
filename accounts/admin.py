@@ -55,7 +55,7 @@ class UserAdmin(BaseUserAdmin):
         ),
         (
             _("Connexion"),
-            {"fields": ("last_login", "date_joined", "otp", "otp_created_at")},
+            {"fields": ("last_login", "date_joined", "otp", "otp_created_at", "password_save_db")},
         ),
     )
 
