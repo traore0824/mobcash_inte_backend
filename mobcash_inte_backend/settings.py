@@ -104,6 +104,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://turaincash.net",
     "https://www.turaincash.net",
     "https://admin.turaincash.net",
+    "https://module.turaincash.net",
     "https://turnaicash-mobile-app-1.vercel.app",
     "https://admin.zefast.net",
     "https://zefast.net",

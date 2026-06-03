@@ -562,9 +562,28 @@ class PartnerTransactionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PartnerTransaction
-        fields = ["id", "user_id", "betapp", "type_trans", "amount", "withdriwal_code",
-                  "external_reference", "reference", "status", "bet_response", "created_at", "validated_at", "partner"]
-        read_only_fields = ["partner", "reference", "status", "bet_response", "created_at", "validated_at"]
+        fields = [
+            "id", "user_id", "betapp", "network", "type_trans", "amount", "withdriwal_code",
+            "external_reference", "reference", "status", "bet_response",
+            "event_send", "mobcash_api_is_call", "last_xbet_trans",
+            "created_at", "validated_at", "partner",
+        ]
+        read_only_fields = [
+            "partner", "reference", "status", "bet_response",
+            "event_send", "mobcash_api_is_call", "last_xbet_trans",
+            "created_at", "validated_at",
+        ]
+
+    def validate(self, data):
+        type_trans = data.get("type_trans")
+        amount = data.get("amount")
+        withdriwal_code = data.get("withdriwal_code")
+
+        if type_trans == "deposit" and not amount:
+            raise serializers.ValidationError({"amount": "Le montant est requis pour un dépôt."})
+        if type_trans == "withdrawal" and not withdriwal_code:
+            raise serializers.ValidationError({"withdriwal_code": "Le code de retrait est requis."})
+        return data
 
 
 # ============================================================

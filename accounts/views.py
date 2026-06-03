@@ -449,6 +449,46 @@ def generate_api_keys() -> dict:
 #         return Response(data)
 
 
+class UserToPartner(APIView):
+    """
+    POST /auth/user-to-partner?user_id={uuid}
+    Réservé aux admins. Active un utilisateur comme partenaire
+    et génère (ou retourne) sa paire de clés API.
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, *args, **kwargs):
+        user_id = request.GET.get("user_id")
+        if not user_id:
+            return Response(
+                {"details": "user_id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user = User.objects.filter(id=user_id).first()
+        if not user:
+            return Response(
+                {"details": "User not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if not user.is_partner:
+            user.is_partner = True
+            key_data = generate_api_keys()
+            user.secret_key = key_data.get("secret_key")
+            user.public_key = key_data.get("public_key")
+            user.save(update_fields=["is_partner", "secret_key", "public_key"])
+
+        return Response(
+            {
+                "id": str(user.id),
+                "email": user.email,
+                "is_partner": user.is_partner,
+                "public_key": user.public_key,
+                "secret_key": user.secret_key,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class RegisterOrGetTelegramUser(APIView):
     def post(self, request):
         telegram_user_id = request.data.get("telegram_user_id")

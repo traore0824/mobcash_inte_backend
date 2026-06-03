@@ -469,6 +469,7 @@ PARTNER_TRANS_TYPE = [
 class PartnerTransaction(models.Model):
     partner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="partner_transactions")
     app = models.ForeignKey(AppName, on_delete=models.CASCADE)
+    network = models.ForeignKey(Network, on_delete=models.SET_NULL, blank=True, null=True)
     reference = models.CharField(max_length=255, unique=True)
     external_reference = models.CharField(max_length=255, blank=True, null=True)
     type_trans = models.CharField(max_length=50, choices=PARTNER_TRANS_TYPE)
@@ -477,6 +478,9 @@ class PartnerTransaction(models.Model):
     user_app_id = models.CharField(max_length=120)
     withdriwal_code = models.CharField(max_length=50, blank=True, null=True)
     bet_response = models.TextField(blank=True, null=True)
+    event_send = models.BooleanField(default=False)
+    mobcash_api_is_call = models.BooleanField(default=False)
+    last_xbet_trans = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     validated_at = models.DateTimeField(blank=True, null=True)
 
