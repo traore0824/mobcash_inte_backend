@@ -416,10 +416,12 @@ class BlockUserViews(APIView):
         if not user.is_block:
             user.is_block = True
             user.save()
+            blacklist_user_tokens(user)
+            return Response({"blocked": True}, status=status.HTTP_200_OK)
         else:
             user.is_block = False
             user.save()
-        return Response(status=status.HTTP_200_OK)
+            return Response({"blocked": False}, status=status.HTTP_200_OK)
 
 
 def generate_api_keys() -> dict:

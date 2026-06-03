@@ -273,7 +273,7 @@ class CreateAppName(generics.ListCreateAPIView):
 
     def get_permissions(self):
         if self.request.method == "GET":
-            self.permission_classes = [IsAuthenticated]
+            self.permission_classes = [permissions.AllowAny]
         return super().get_permissions()
 
     def get_serializer_class(self):
