@@ -161,6 +161,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://www.ti-cash.net",
     "https://ti-cash.net",
     "https://ticash-mobile-app.vercel.app",
+    "https://module.turaincash.net",
 ]
 
 
@@ -214,7 +215,7 @@ ASGI_APPLICATION = "mobcash_inte_backend.asgi.application"
 #             "NAME": BASE_DIR / "db.sqlite3",
 #         }
 #     }
-# else:   
+# else:
 
 DATABASES = {
         "default": {
