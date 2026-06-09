@@ -571,12 +571,14 @@ def google_auth(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # Les client IDs autorisés (web + android + ios)
+    # Les client IDs autorisés (tous projets confondus)
     allowed_client_ids = [
         cid for cid in [
             os.getenv("GOOGLE_CLIENT_ID_WEB"),
             os.getenv("GOOGLE_CLIENT_ID_ANDROID"),
             os.getenv("GOOGLE_CLIENT_ID_IOS"),
+            os.getenv("GOOGLE_CLIENT_ID_WEB_CASHIKA"),
+            os.getenv("GOOGLE_CLIENT_ID_ANDROID_CASHIKA"),
         ] if cid and not cid.startswith("REMPLACER")
     ]
 
