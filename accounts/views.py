@@ -16,6 +16,9 @@ from dateutil.relativedelta import relativedelta
 import constant
 from django.conf.urls import handler404
 from .models import TelegramUser, User
+import os
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
 from .serializers import (
     RefreshObtainSerializer,
     TelegramUserSerializer,
@@ -548,3 +551,114 @@ def custom_404(request, exception):
 
 
 handler404 = custom_404
+
+
+@api_view(["POST"])
+def google_auth(request):
+    """
+    Authentification via Google OAuth.
+
+    Reçoit un id_token Google depuis le frontend (web ou mobile),
+    le vérifie, puis connecte ou crée le compte utilisateur.
+
+    Body: { "id_token": "<google_id_token>" }
+    Retourne: { refresh, access, exp, data } — même format que /auth/login
+    """
+    token = request.data.get("id_token")
+    if not token:
+        return Response(
+            {"success": False, "details": "id_token is required"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Les client IDs autorisés (web + android + ios)
+    allowed_client_ids = [
+        cid for cid in [
+            os.getenv("GOOGLE_CLIENT_ID_WEB"),
+            os.getenv("GOOGLE_CLIENT_ID_ANDROID"),
+            os.getenv("GOOGLE_CLIENT_ID_IOS"),
+        ] if cid and not cid.startswith("REMPLACER")
+    ]
+
+    if not allowed_client_ids:
+        return Response(
+            {"success": False, "details": "Google OAuth not configured on server"},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    # Vérification du token Google
+    google_info = None
+    last_error = None
+    for client_id in allowed_client_ids:
+        try:
+            google_info = id_token.verify_oauth2_token(
+                token,
+                google_requests.Request(),
+                client_id,
+            )
+            break  # Token valide pour ce client_id
+        except Exception as e:
+            last_error = e
+            continue
+
+    if google_info is None:
+        return Response(
+            {"success": False, "details": "Invalid or expired Google token"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    email = google_info.get("email")
+    if not email:
+        return Response(
+            {"success": False, "details": "Email not found in Google token"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if not google_info.get("email_verified", False):
+        return Response(
+            {"success": False, "details": "Google email not verified"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    first_name = google_info.get("given_name", "")
+    last_name = google_info.get("family_name", "")
+
+    # Chercher ou créer l'utilisateur
+    user = User.objects.filter(email=email, is_delete=False).first()
+
+    if user:
+        # Utilisateur existant — vérifier qu'il n'est pas bloqué
+        if user.is_block:
+            return Response(
+                {"success": False, "details": "Votre compte est bloqué pour fraude"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+    else:
+        # Nouveau compte via Google — création automatique
+        from .serializers import generate_referral_code
+
+        # On construit l'objet sans sauvegarder pour pouvoir set_unusable_password avant
+        user = User(
+            email=email,
+            username=email,
+            first_name=first_name,
+            last_name=last_name,
+            phone="",
+            referral_code=generate_referral_code(),
+            is_active=True,
+        )
+        # Aucun mot de passe — connexion uniquement via Google
+        user.set_unusable_password()
+        user.save()
+
+    # Génération des tokens JWT (même format que /auth/login)
+    refresh = RefreshToken.for_user(user)
+    return Response(
+        {
+            "refresh": str(refresh),
+            "access": str(refresh.access_token),
+            "exp": timezone.datetime.fromtimestamp(refresh["exp"]).isoformat(),
+            "data": UserDetailSerializer(user).data,
+        },
+        status=status.HTTP_200_OK,
+    )
