@@ -148,6 +148,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://admin.supercashci.net",
     "https://www.supercashci.net",
     "https://supercash-user.vercel.app",
+    "https://mobile.cashika.net",
     "https://module.cashika.net",
     "https://dashboard.cashika.net",
     "https://admin.cashika.net",
@@ -165,6 +166,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://partners.cashika.net",
     "https://partners.turaincash.net",
 ]
+
 
 
 CORS_ALLOW_METHODS = (
