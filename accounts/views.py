@@ -579,6 +579,8 @@ def google_auth(request):
             os.getenv("GOOGLE_CLIENT_ID_IOS"),
             os.getenv("GOOGLE_CLIENT_ID_WEB_CASHIKA"),
             os.getenv("GOOGLE_CLIENT_ID_ANDROID_CASHIKA"),
+            os.getenv("GOOGLE_CLIENT_ID_WEB_SLATER"),
+            os.getenv("GOOGLE_CLIENT_ID_ANDROID_SLATER"),
         ] if cid and not cid.startswith("REMPLACER")
     ]
 
