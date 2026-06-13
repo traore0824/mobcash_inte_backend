@@ -2578,17 +2578,14 @@ class LastTransactionView(generics.RetrieveAPIView):
         user = self.request.user
         if user and user.is_authenticated:
             return (
-                Transaction.objects.filter(user=user)
+                Transaction.objects.filter(
+                    user=user,
+                    status__in=["init_payment", "pending"],
+                )
                 .exclude(type_trans="withdrawal")
                 .order_by("-created_at")
                 .first()
             )
-            # return (
-            #     Transaction.objects.filter(user=user)
-            #     .exclude(status="pending")
-            #     .order_by("-created_at")
-            #     .first()
-            # )
         # Pour les utilisateurs Telegram (via le header X-USER-ID géré par IsAuthenticated)
         telegram_user = getattr(self.request, "telegram_user", None)
         if telegram_user:
