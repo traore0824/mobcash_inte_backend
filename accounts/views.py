@@ -565,65 +565,100 @@ def google_auth(request):
     Retourne: { refresh, access, exp, data } — même format que /auth/login
     """
     token = request.data.get("id_token")
-    if not token:
+    access_token = request.data.get("access_token")
+
+    if not token and not access_token:
         return Response(
-            {"success": False, "details": "id_token is required"},
+            {"success": False, "details": "id_token or access_token is required"},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # Les client IDs autorisés (tous projets confondus)
-    allowed_client_ids = [
-        cid for cid in [
-            os.getenv("GOOGLE_CLIENT_ID_WEB"),
-            os.getenv("GOOGLE_CLIENT_ID_ANDROID"),
-            os.getenv("GOOGLE_CLIENT_ID_IOS"),
-            os.getenv("GOOGLE_CLIENT_ID_WEB_CASHIKA"),
-            os.getenv("GOOGLE_CLIENT_ID_ANDROID_CASHIKA"),
-        ] if cid and not cid.startswith("REMPLACER")
-    ]
-
-    if not allowed_client_ids:
-        return Response(
-            {"success": False, "details": "Google OAuth not configured on server"},
-            status=status.HTTP_503_SERVICE_UNAVAILABLE,
-        )
-
-    # Vérification du token Google
-    google_info = None
-    last_error = None
-    for client_id in allowed_client_ids:
+    # Si on reçoit un access_token Google (flow implicit web),
+    # on récupère les infos user directement depuis l'API Google
+    if access_token and not token:
+        import urllib.request
+        import urllib.error
         try:
-            google_info = id_token.verify_oauth2_token(
-                token,
-                google_requests.Request(),
-                client_id,
+            req = urllib.request.Request(
+                f"https://www.googleapis.com/oauth2/v3/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"}
             )
-            break  # Token valide pour ce client_id
+            with urllib.request.urlopen(req) as response_google:
+                import json as json_module
+                google_info = json_module.loads(response_google.read().decode())
         except Exception as e:
-            last_error = e
-            continue
+            return Response(
+                {"success": False, "details": "Invalid or expired Google access_token"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-    if google_info is None:
-        return Response(
-            {"success": False, "details": "Invalid or expired Google token"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+        email = google_info.get("email")
+        if not email:
+            return Response(
+                {"success": False, "details": "Email not found in Google token"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not google_info.get("email_verified", False):
+            return Response(
+                {"success": False, "details": "Google email not verified"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        first_name = google_info.get("given_name", "")
+        last_name = google_info.get("family_name", "")
 
-    email = google_info.get("email")
-    if not email:
-        return Response(
-            {"success": False, "details": "Email not found in Google token"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+    else:
+        # Flow id_token classique
+        allowed_client_ids = [
+            cid for cid in [
+                os.getenv("GOOGLE_CLIENT_ID_WEB"),
+                os.getenv("GOOGLE_CLIENT_ID_ANDROID"),
+                os.getenv("GOOGLE_CLIENT_ID_IOS"),
+                os.getenv("GOOGLE_CLIENT_ID_WEB_CASHIKA"),
+                os.getenv("GOOGLE_CLIENT_ID_ANDROID_CASHIKA"),
+                os.getenv("GOOGLE_CLIENT_ID_WEB_SLATER"),
+                os.getenv("GOOGLE_CLIENT_ID_ANDROID_SLATER"),
+            ] if cid and not cid.startswith("REMPLACER")
+        ]
 
-    if not google_info.get("email_verified", False):
-        return Response(
-            {"success": False, "details": "Google email not verified"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+        if not allowed_client_ids:
+            return Response(
+                {"success": False, "details": "Google OAuth not configured on server"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
-    first_name = google_info.get("given_name", "")
-    last_name = google_info.get("family_name", "")
+        google_info = None
+        last_error = None
+        for client_id in allowed_client_ids:
+            try:
+                google_info = id_token.verify_oauth2_token(
+                    token,
+                    google_requests.Request(),
+                    client_id,
+                )
+                break
+            except Exception as e:
+                last_error = e
+                continue
+
+        if google_info is None:
+            return Response(
+                {"success": False, "details": "Invalid or expired Google token"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        email = google_info.get("email")
+        if not email:
+            return Response(
+                {"success": False, "details": "Email not found in Google token"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not google_info.get("email_verified", False):
+            return Response(
+                {"success": False, "details": "Google email not verified"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        first_name = google_info.get("given_name", "")
+        last_name = google_info.get("family_name", "")
 
     # Chercher ou créer l'utilisateur
     user = User.objects.filter(email=email, is_delete=False).first()
