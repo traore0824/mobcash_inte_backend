@@ -3342,7 +3342,7 @@ class CreateCryptocurrency(generics.ListCreateAPIView):
 
     permission_classes = [permissions.IsAdminUser]
     serializer_class = CryptocurrencySerializer
-    pagination_class = Pagination
+    pagination_class = CustomPagination
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
