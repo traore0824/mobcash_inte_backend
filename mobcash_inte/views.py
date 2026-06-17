@@ -38,6 +38,7 @@ from mobcash_inte.models import (
     CouponV2,
     CouponWallet,
     CouponWithdrawal,
+    Cryptocurrency,
     Deposit,
     IDLink,
     Network,
@@ -72,6 +73,8 @@ from mobcash_inte.serializers import (
     CouponV2CreateSerializer,
     CouponWalletSerializer,
     CouponWithdrawalSerializer,
+    CryptoBuyTransactionSerializer,
+    CryptocurrencySerializer,
     ProcessTransactionSerializer,
     UpdateTransactionStatusSerializer,
     ValidateVersionSerializer,
@@ -3324,3 +3327,259 @@ class UserCouponStatsView(APIView):
             "total_earned": str(wallet.total_earned),
             "pending_payouts": str(wallet.pending_payout),
         })
+
+
+# ============================================================
+# Cryptocurrency Views
+# ============================================================
+
+
+class CreateCryptocurrency(generics.ListCreateAPIView):
+    """
+    GET  – list all cryptocurrencies (authenticated)
+    POST – create a new cryptocurrency (admin only)
+    """
+
+    permission_classes = [permissions.IsAdminUser]
+    serializer_class = CryptocurrencySerializer
+    pagination_class = Pagination
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["type_trans"] = self.request.GET.get("type_trans")
+        return context
+
+    def get_queryset(self):
+        q = self.request.GET.get("q")
+        if q:
+            queryset = Cryptocurrency.objects.filter(
+                Q(name__icontains=q) | Q(code__icontains=q)
+            )
+        else:
+            queryset = Cryptocurrency.objects.all()
+
+        type_trans = self.request.GET.get("type_trans")
+        if type_trans == "sale":
+            queryset = queryset.filter(active_for_sale=True)
+        elif type_trans == "buy":
+            queryset = queryset.filter(active_for_buy=True)
+        return queryset
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            self.permission_classes = [permissions.IsAuthenticated]
+        else:
+            self.permission_classes = [permissions.IsAdminUser]
+        return super().get_permissions()
+
+
+class DetailsCryptocurrency(generics.RetrieveUpdateDestroyAPIView):
+    """
+    GET    – retrieve a single cryptocurrency (authenticated)
+    PUT/PATCH/DELETE – admin only
+    """
+
+    permission_classes = [permissions.IsAdminUser]
+    serializer_class = CryptocurrencySerializer
+    queryset = Cryptocurrency.objects.all()
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            self.permission_classes = [permissions.IsAuthenticated]
+        else:
+            self.permission_classes = [permissions.IsAdminUser]
+        return super().get_permissions()
+
+
+class CreateCryptoBuyTransactionView(generics.CreateAPIView):
+    """
+    Create a crypto **buy** transaction (user pays XOF, receives crypto).
+    POST body: amount, phone_number, app, user_app_id, network, crypto_id,
+               wallet_link (optional), total_crypto (optional), source
+    """
+
+    serializer_class = CryptoBuyTransactionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def create(self, request, *args, **kwargs):
+        crypto_id = request.data.get("crypto_id")
+        if not crypto_id:
+            return Response(
+                {"detail": "Le champ 'crypto_id' est requis."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        crypto = Cryptocurrency.objects.filter(id=crypto_id).first()
+        if not crypto:
+            return Response(
+                {"detail": "Cryptomonnaie non trouvée."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not crypto.active_for_buy:
+            return Response(
+                {"detail": "Cet achat de cryptomonnaie est désactivé."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = self.serializer_class(
+            data=request.data,
+            context={"request": request, "type_trans": "buy", "crypto": crypto},
+        )
+        serializer.is_valid(raise_exception=True)
+
+        transaction = serializer.save(
+            reference=generate_reference(prefix="crypto-buy-"),
+            user=request.user,
+            type_trans="buy",
+            crypto=crypto,
+        )
+        TransactionStatusHistory.objects.create(
+            transaction=transaction,
+            old_status=transaction.status,
+            new_status=transaction.status,
+            trigger_source=TransactionStatusHistory.Source.SYSTEM,
+            message="Statut initial enregistré (crypto buy)",
+        )
+        transaction.save()
+
+        payment_fonction(reference=transaction.reference)
+        transaction.refresh_from_db()
+
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CreateCryptoSaleTransactionView(generics.CreateAPIView):
+    """
+    Create a crypto **sale** transaction (user sells crypto, receives XOF).
+    POST body: amount, phone_number, app, user_app_id, network, crypto_id,
+               wallet_link, total_crypto (optional), source
+    """
+
+    serializer_class = CryptoBuyTransactionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def create(self, request, *args, **kwargs):
+        crypto_id = request.data.get("crypto_id")
+        if not crypto_id:
+            return Response(
+                {"detail": "Le champ 'crypto_id' est requis."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        crypto = Cryptocurrency.objects.filter(id=crypto_id).first()
+        if not crypto:
+            return Response(
+                {"detail": "Cryptomonnaie non trouvée."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not crypto.active_for_sale:
+            return Response(
+                {"detail": "Cette vente de cryptomonnaie est désactivée."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = self.serializer_class(
+            data=request.data,
+            context={"request": request, "type_trans": "sale", "crypto": crypto},
+        )
+        serializer.is_valid(raise_exception=True)
+
+        transaction = serializer.save(
+            reference=generate_reference(prefix="crypto-sale-"),
+            user=request.user,
+            type_trans="sale",
+            crypto=crypto,
+        )
+        TransactionStatusHistory.objects.create(
+            transaction=transaction,
+            old_status=transaction.status,
+            new_status=transaction.status,
+            trigger_source=TransactionStatusHistory.Source.SYSTEM,
+            message="Statut initial enregistré (crypto sale)",
+        )
+        transaction.save()
+
+        # Sales are manual-approval flow – no automatic payment trigger
+        transaction.refresh_from_db()
+
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ApproveCryptoTransactionView(decorators.APIView):
+    """
+    Admin-only endpoint to approve a pending crypto transaction.
+
+    For **buy**  transactions: marks status = "accept" and notifies the user.
+    For **sale** transactions: triggers the payment payout flow.
+
+    POST body: { "reference": "<transaction_reference>" }
+    """
+
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, *args, **kwargs):
+        reference = request.data.get("reference")
+        if not reference:
+            return Response(
+                {"detail": "Le champ 'reference' est requis."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        transaction = Transaction.objects.filter(reference=reference).first()
+        if not transaction:
+            return Response(
+                {"detail": "Transaction non trouvée."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if transaction.type_trans not in ("buy", "sale"):
+            return Response(
+                {"detail": "Cette transaction n'est pas une transaction crypto."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if transaction.status == "accept":
+            return Response(
+                {"detail": "Cette transaction est déjà approuvée."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if transaction.type_trans == "buy":
+            # Admin confirms crypto was sent → mark as accepted and notify user
+            transaction.change_status(
+                new_status="accept",
+                source=TransactionStatusHistory.Source.ADMIN,
+                message="Achat crypto approuvé par l'administrateur.",
+            )
+            if transaction.user and transaction.crypto:
+                from mobcash_inte.helpers import send_notification as _send_notification
+                try:
+                    _send_notification(
+                        user=transaction.user,
+                        title="Opération réussie",
+                        content=(
+                            f"Vous avez effectué un achat de {transaction.total_crypto} "
+                            f"{transaction.crypto.name} pour un montant de "
+                            f"{transaction.amount} F CFA."
+                        ),
+                    )
+                except Exception:
+                    pass
+
+        elif transaction.type_trans == "sale":
+            # Admin confirms crypto received → trigger payout to user's mobile money
+            payment_fonction(reference=transaction.reference)
+
+        transaction.refresh_from_db()
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_200_OK,
+        )

@@ -3,6 +3,115 @@ import uuid
 from django.db import models
 
 from accounts.models import AppName, TelegramUser, User
+import constant
+
+
+# ---------------------------------------------------------------------------
+# Crypto: last known price cache (fallback when CoinGecko is unavailable)
+# ---------------------------------------------------------------------------
+
+class LastPrice(models.Model):
+    crypto_id = models.CharField(max_length=150)
+    price = models.DecimalField(max_digits=15, decimal_places=6)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Last Price"
+        verbose_name_plural = "Last Prices"
+
+    def __str__(self):
+        return f"{self.crypto_id} – {self.price}"
+
+
+def get_price_in_xof(crypto_id: str) -> dict:
+    """Fetch the USD price from CoinGecko and cache it in LastPrice."""
+    import requests
+
+    url = "https://api.coingecko.com/api/v3/simple/price"
+    params = {"ids": crypto_id, "vs_currencies": "usd"}
+    price = 0
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        try:
+            price = response.json().get(crypto_id, {}).get("usd", 0)
+            last_price = LastPrice.objects.filter(crypto_id=crypto_id).first()
+            if not last_price:
+                LastPrice.objects.create(crypto_id=crypto_id, price=price)
+            else:
+                last_price.price = round(price, 6)
+                last_price.save()
+        except Exception:
+            last_price = LastPrice.objects.filter(crypto_id=crypto_id).first()
+            if last_price:
+                price = last_price.price
+        return {"data": price or 0.00, "code": constant.CODE_SUCCESS}
+    except requests.exceptions.RequestException:
+        last_price = LastPrice.objects.filter(crypto_id=crypto_id).first()
+        price = last_price.price if last_price else 0
+        return {"data": price or 0.00, "code": constant.CODE_SUCCESS}
+
+
+def get_dollar_price(dollar_marge: float) -> float:
+    """Return USD→XOF rate with an added margin percentage."""
+    import requests
+
+    key = "5eee96e8f7715f937a82a2849a5636b638d7"
+    url = f"https://currencyapi.net/api/v1/rates?key={key}&base=USD&output=json"
+    headers = {"Accept": "application/json"}
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        rate_xof = data.get("rates", {}).get("XOF")
+        if rate_xof is None:
+            raise ValueError("XOF rate not found")
+        return round(float(rate_xof) * (1 + float(dollar_marge) / 100), 2)
+    except Exception as e:
+        print(f"Error fetching USD→XOF rate: {e}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Cryptocurrency
+# ---------------------------------------------------------------------------
+
+class Cryptocurrency(models.Model):
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    logo = models.URLField(blank=True, null=True)
+    code = models.CharField(max_length=100, unique=True)
+    name = models.CharField(max_length=250, blank=True, null=True)
+    amount = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    symbol = models.CharField(max_length=100, blank=True, null=True)
+    sale_adress = models.TextField(blank=True, null=True)
+    fee = models.DecimalField(max_digits=4, decimal_places=2, blank=True, null=True)
+    minimun_buy = models.PositiveIntegerField(blank=True, null=True)
+    max_buy = models.PositiveIntegerField(blank=True, null=True)
+    minimun_sale = models.PositiveIntegerField(blank=True, null=True)
+    max_sale = models.PositiveIntegerField(blank=True, null=True)
+    sale_dollar_marge = models.DecimalField(max_digits=4, decimal_places=2, default=0.5)
+    buy_dollar_marge = models.DecimalField(max_digits=4, decimal_places=2, default=0.5)
+    active_for_sale = models.BooleanField(default=True)
+    active_for_buy = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "Cryptocurrency"
+        verbose_name_plural = "Cryptocurrencies"
+
+    def public_amount(self, type_trans: str):
+        """Return the public price (XOF) including margin."""
+        response = get_price_in_xof(crypto_id=self.code.lower())
+        if response.get("code") != constant.CODE_EXEPTION:
+            coingecko_amount = response.get("data")
+            dollar_price = get_dollar_price(
+                self.sale_dollar_marge if type_trans == "sale" else self.buy_dollar_marge
+            )
+            if dollar_price:
+                return int(float(coingecko_amount) * float(dollar_price))
+        return self.amount
+
+    def __str__(self):
+        return self.name or self.code
 
 
 class UploadFile(models.Model):
@@ -199,6 +308,8 @@ class Setting(models.Model):
 
 
 TYPE_TRANS = [
+    ("buy", "Achat Crypto"),
+    ("sale", "Vente Crypto"),
     ("deposit", "Dépôt"),
     ("withdrawal", "Retrait"),
     ("disbursements", "Disbursements"),
@@ -272,6 +383,15 @@ class Transaction(models.Model):
     ussd_code = models.CharField(max_length=200, blank=True, null=True)
     connect_pro_response = models.TextField(blank=True, null=True)
     credit_used = models.PositiveIntegerField(default=0)
+
+    # Crypto fields
+    crypto = models.ForeignKey(
+        Cryptocurrency, on_delete=models.SET_NULL, blank=True, null=True
+    )
+    wallet_link = models.CharField(max_length=120, blank=True, null=True)
+    total_crypto = models.DecimalField(decimal_places=8, max_digits=18, default=0)
+    hash = models.CharField(max_length=250, blank=True, null=True)
+    fee = models.PositiveIntegerField(default=0)
 
     class Meta:
         verbose_name = "Transaction"

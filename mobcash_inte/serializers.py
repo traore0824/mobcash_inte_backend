@@ -16,6 +16,7 @@ from mobcash_inte.models import (
     CouponV2,
     CouponWallet,
     CouponWithdrawal,
+    Cryptocurrency,
     Deposit,
     IDLink,
     Network,
@@ -167,6 +168,7 @@ class CreateBonusSerializer(serializers.ModelSerializer):
 class TransactionDetailsSerializer(serializers.ModelSerializer):
     user = SmallUserSerializer()
     app_details = serializers.SerializerMethodField()
+    crypto = serializers.SerializerMethodField()
 
     class Meta:
         model = Transaction
@@ -174,6 +176,23 @@ class TransactionDetailsSerializer(serializers.ModelSerializer):
 
     def get_app_details(self, obj):
         return ReadAppNameSerializer(obj.app).data
+
+    def get_crypto(self, obj):
+        if obj.crypto:
+            return {
+                "id": obj.crypto.id,
+                "created_at": obj.crypto.created_at,
+                "updated_at": obj.crypto.updated_at,
+                "logo": obj.crypto.logo,
+                "code": obj.crypto.code,
+                "name": obj.crypto.name,
+                "symbol": obj.crypto.symbol,
+                "sale_adress": obj.crypto.sale_adress,
+                "fee": str(obj.crypto.fee) if obj.crypto.fee else None,
+                "active_for_sale": obj.crypto.active_for_sale,
+                "active_for_buy": obj.crypto.active_for_buy,
+            }
+        return None
 
 
 class DepositTransactionSerializer(serializers.ModelSerializer):
@@ -726,3 +745,105 @@ class AuthorCouponRatingSerializer(serializers.ModelSerializer):
 class AuthorRatingCreateSerializer(serializers.Serializer):
     coupon_id = serializers.UUIDField(required=True)
     is_like = serializers.BooleanField(required=True)
+
+
+# ============================================================
+# Cryptocurrency Serializers
+# ============================================================
+
+class CryptocurrencySerializerForCrypto(serializers.ModelSerializer):
+    """Lightweight serializer used as a nested field on Transaction."""
+
+    class Meta:
+        model = Cryptocurrency
+        fields = [
+            "id",
+            "created_at",
+            "updated_at",
+            "logo",
+            "code",
+            "name",
+            "symbol",
+            "sale_adress",
+            "fee",
+            "active_for_sale",
+            "active_for_buy",
+        ]
+
+
+class CryptocurrencySerializer(serializers.ModelSerializer):
+    public_amount = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Cryptocurrency
+        fields = "__all__"
+
+    def get_public_amount(self, obj):
+        type_trans = self.context.get("type_trans")
+        return obj.public_amount(type_trans)
+
+
+class CryptoBuyTransactionSerializer(serializers.ModelSerializer):
+    """Serializer for creating a crypto buy/sale transaction."""
+
+    class Meta:
+        model = Transaction
+        fields = [
+            "id",
+            "amount",
+            "phone_number",
+            "app",
+            "user_app_id",
+            "network",
+            "source",
+            "wallet_link",
+            "total_crypto",
+        ]
+        extra_kwargs = {
+            "amount": {"required": True},
+            "phone_number": {"required": True},
+            "app": {"required": True},
+            "user_app_id": {"required": True},
+            "network": {"required": True},
+        }
+
+    def validate(self, data):
+        setting = Setting.objects.first()
+        type_trans = self.context.get("type_trans")
+        crypto = self.context.get("crypto")
+
+        amount = data.get("amount")
+
+        if type_trans == "buy":
+            min_val = (
+                crypto.minimun_buy
+                if crypto and crypto.minimun_buy is not None
+                else (setting.minimum_deposit if setting else 0)
+            )
+            if min_val and amount < min_val:
+                raise serializers.ValidationError(
+                    {"amount": f"Le montant minimum pour un achat est de {min_val}."}
+                )
+            max_val = crypto.max_buy if crypto else None
+            if max_val and amount > max_val:
+                raise serializers.ValidationError(
+                    {"amount": f"Le montant maximum pour un achat est de {max_val}."}
+                )
+
+        elif type_trans == "sale":
+            min_val = (
+                crypto.minimun_sale
+                if crypto and crypto.minimun_sale is not None
+                else (setting.minimum_withdrawal if setting else 0)
+            )
+            if min_val and amount < min_val:
+                raise serializers.ValidationError(
+                    {"amount": f"Le montant minimum pour une vente est de {min_val}."}
+                )
+            max_val = crypto.max_sale if crypto else None
+            if max_val and amount > max_val:
+                raise serializers.ValidationError(
+                    {"amount": f"Le montant maximum pour une vente est de {max_val}."}
+                )
+
+        return data

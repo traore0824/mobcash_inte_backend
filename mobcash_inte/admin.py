@@ -12,7 +12,9 @@ from .models import (
     CouponV2,
     CouponWallet,
     CouponWithdrawal,
+    Cryptocurrency,
     IDLink,
+    LastPrice,
     Network,
     Notification,
     RechargeMobcashBalance,
@@ -470,6 +472,19 @@ class TransactionAdmin(admin.ModelAdmin):
             },
         ),
         (
+            "Crypto",
+            {
+                "fields": (
+                    "crypto",
+                    "wallet_link",
+                    "total_crypto",
+                    "hash",
+                    "fee",
+                ),
+                "classes": ("collapse",),
+            },
+        ),
+        (
             "Dates",
             {
                 "fields": (
@@ -564,3 +579,80 @@ class TransactionStatusHistoryAdmin(admin.ModelAdmin):
     def transaction_ref(self, obj):
         return obj.transaction.reference or str(obj.transaction.id)
     transaction_ref.short_description = "Transaction Ref"
+
+
+# ============================================================
+# Cryptocurrency Admin
+# ============================================================
+
+@admin.register(Cryptocurrency)
+class CryptocurrencyAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "name",
+        "code",
+        "symbol",
+        "active_for_buy",
+        "active_for_sale",
+        "minimun_buy",
+        "max_buy",
+        "minimun_sale",
+        "max_sale",
+        "buy_dollar_marge",
+        "sale_dollar_marge",
+        "created_at",
+    )
+    list_filter = ("active_for_buy", "active_for_sale")
+    search_fields = ("name", "code", "symbol")
+    ordering = ("-created_at",)
+    readonly_fields = ("created_at", "updated_at")
+    fieldsets = (
+        (
+            "Informations de base",
+            {
+                "fields": (
+                    "name",
+                    "code",
+                    "symbol",
+                    "logo",
+                    "amount",
+                    "sale_adress",
+                    "fee",
+                )
+            },
+        ),
+        (
+            "Limites d'achat",
+            {
+                "fields": (
+                    "active_for_buy",
+                    "minimun_buy",
+                    "max_buy",
+                    "buy_dollar_marge",
+                )
+            },
+        ),
+        (
+            "Limites de vente",
+            {
+                "fields": (
+                    "active_for_sale",
+                    "minimun_sale",
+                    "max_sale",
+                    "sale_dollar_marge",
+                )
+            },
+        ),
+        (
+            "Metadata",
+            {"fields": ("created_at", "updated_at")},
+        ),
+    )
+
+
+@admin.register(LastPrice)
+class LastPriceAdmin(admin.ModelAdmin):
+    list_display = ("crypto_id", "price", "updated_at")
+    search_fields = ("crypto_id",)
+    ordering = ("-updated_at",)
+    readonly_fields = ("updated_at",)

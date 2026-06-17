@@ -99,4 +99,13 @@ urlpatterns = [
     path("v2/author-ratings", views.AuthorRatingView.as_view(), name="author-ratings"),
     path("v2/user/coupon-stats", views.UserCouponStatsView.as_view(), name="user-coupon-stats"),
     path("v2/author-stats/<uuid:user_id>", views.AuthorStatsView.as_view(), name="author-stats"),
+
+    # ============================================================
+    # Cryptocurrency Routes
+    # ============================================================
+    path("crypto", views.CreateCryptocurrency.as_view(), name="crypto-list"),
+    path("crypto/<int:pk>", views.DetailsCryptocurrency.as_view(), name="crypto-detail"),
+    path("crypto-buy", views.CreateCryptoBuyTransactionView.as_view(), name="crypto-buy"),
+    path("crypto-sale", views.CreateCryptoSaleTransactionView.as_view(), name="crypto-sale"),
+    path("crypto-approve", views.ApproveCryptoTransactionView.as_view(), name="crypto-approve"),
 ]
