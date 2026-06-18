@@ -57,7 +57,7 @@ kombu==5.5.4
 msgpack==1.1.1
 packaging==25.0
 pillow==11.3.0
-qrcode==8.0
+qrcode[pil]==8.0
 prompt_toolkit==3.0.52
 proto-plus==1.26.1
 protobuf==6.32.1

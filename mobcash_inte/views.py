@@ -3813,14 +3813,33 @@ class CryptoNetworkQRCodeView(decorators.APIView):
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, *args, **kwargs):
+        from io import BytesIO
+        import base64
         try:
             import qrcode
-            from io import BytesIO
-            import base64
+            from PIL import Image as PilImage
         except ImportError:
+            # Fallback: return address only without QR code
+            network_id = request.GET.get("network_id")
+            if not network_id:
+                return Response(
+                    {"error": "network_id parameter is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            try:
+                crypto_network = CryptoNetwork.objects.select_related("crypto").get(id=network_id)
+            except CryptoNetwork.DoesNotExist:
+                return Response({"error": "Crypto network not found"}, status=status.HTTP_404_NOT_FOUND)
             return Response(
-                {"error": "qrcode library not installed. Run: pip install qrcode[pil]"},
-                status=status.HTTP_501_NOT_IMPLEMENTED,
+                {
+                    "network_id": str(crypto_network.id),
+                    "network_name": crypto_network.name,
+                    "crypto": crypto_network.crypto.name if crypto_network.crypto else None,
+                    "address": crypto_network.address or "",
+                    "qr_code_base64": None,
+                    "qr_code_url": None,
+                },
+                status=status.HTTP_200_OK,
             )
 
         network_id = request.GET.get("network_id")
@@ -3885,13 +3904,14 @@ class CryptoNetworkQRCodeImageView(decorators.APIView):
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, *args, **kwargs):
+        from io import BytesIO
+        from django.http import HttpResponse
         try:
             import qrcode
-            from io import BytesIO
-            from django.http import HttpResponse
+            from PIL import Image as PilImage
         except ImportError:
             return Response(
-                {"error": "qrcode library not installed. Run: pip install qrcode[pil]"},
+                {"error": "qrcode[pil] not installed on server. Run: pip install qrcode[pil]"},
                 status=status.HTTP_501_NOT_IMPLEMENTED,
             )
 

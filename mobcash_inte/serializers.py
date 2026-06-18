@@ -938,7 +938,7 @@ class SaleCryptoV2Serializer(serializers.Serializer):
         max_digits=20, decimal_places=8, required=True,
         help_text="Quantité de crypto à vendre (ex: 0.5 BTC)"
     )
-    crypto_id = serializers.UUIDField(required=True)
+    crypto_id = serializers.CharField(max_length=255, required=True)
     network_id = serializers.UUIDField(required=True)
     phone_number = serializers.CharField(max_length=20, required=False, allow_blank=True, default="")
     wallet_link = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
