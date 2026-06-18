@@ -93,6 +93,9 @@ class Cryptocurrency(models.Model):
     buy_dollar_marge = models.DecimalField(max_digits=4, decimal_places=2, default=0.5)
     active_for_sale = models.BooleanField(default=True)
     active_for_buy = models.BooleanField(default=True)
+    # V2: fixed admin-defined prices (no CoinGecko margin calculation)
+    buy_price = models.PositiveIntegerField(blank=True, null=True, help_text="Prix fixe d'achat par unité en FCFA (V2)")
+    sale_price = models.PositiveIntegerField(blank=True, null=True, help_text="Prix fixe de vente par unité en FCFA (V2)")
 
     class Meta:
         verbose_name = "Cryptocurrency"
@@ -112,6 +115,32 @@ class Cryptocurrency(models.Model):
 
     def __str__(self):
         return self.name or self.code
+
+
+# ---------------------------------------------------------------------------
+# CryptoNetwork – blockchain network/address linked to a Cryptocurrency
+# (e.g. TRC20, ERC20, BEP20 for USDT)
+# ---------------------------------------------------------------------------
+
+class CryptoNetwork(models.Model):
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    name = models.CharField(max_length=100)
+    symbol = models.CharField(max_length=50, blank=True, null=True)
+    logo = models.TextField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+    address = models.CharField(max_length=255, blank=True, null=True)
+    fee = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)
+    crypto = models.ForeignKey(
+        Cryptocurrency, on_delete=models.CASCADE, related_name="networks", blank=True, null=True
+    )
+
+    class Meta:
+        verbose_name = "Crypto Network"
+        verbose_name_plural = "Crypto Networks"
+
+    def __str__(self):
+        return f"{self.name} ({self.symbol})"
 
 
 class UploadFile(models.Model):
@@ -243,6 +272,15 @@ class Network(models.Model):
     ussd_code = models.CharField(max_length=200, blank=True, null=True)
     reduce_fee = models.BooleanField(default=False)
     fee_payin = models.DecimalField(decimal_places=2, max_digits=10, blank=True, null=True)
+    # Crypto payment APIs
+    buy_api = models.CharField(
+        max_length=100, choices=API_CHOICES, default="connect",
+        help_text="API used to collect payment for crypto buy transactions"
+    )
+    sale_api = models.CharField(
+        max_length=100, choices=API_CHOICES, default="connect",
+        help_text="API used to send payout for crypto sale transactions"
+    )
     # Frais par tranches (ex: Orange)
     fee_slice_enabled = models.BooleanField(default=False)
     fee_slice_threshold = models.PositiveIntegerField(blank=True, null=True, help_text="Seuil de changement de tranche (ex: 50000)")

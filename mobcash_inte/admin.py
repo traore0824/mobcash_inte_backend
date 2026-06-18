@@ -13,6 +13,7 @@ from .models import (
     CouponWallet,
     CouponWithdrawal,
     Cryptocurrency,
+    CryptoNetwork,
     IDLink,
     LastPrice,
     Network,
@@ -88,6 +89,8 @@ class NetworkAdmin(admin.ModelAdmin):
                 "fields": (
                     "deposit_api",
                     "withdrawal_api",
+                    "buy_api",
+                    "sale_api",
                     "payment_by_link",
                     "payment_by_ussd_code",
                     "otp_required",
@@ -629,6 +632,7 @@ class CryptocurrencyAdmin(admin.ModelAdmin):
                     "minimun_buy",
                     "max_buy",
                     "buy_dollar_marge",
+                    "buy_price",
                 )
             },
         ),
@@ -640,6 +644,7 @@ class CryptocurrencyAdmin(admin.ModelAdmin):
                     "minimun_sale",
                     "max_sale",
                     "sale_dollar_marge",
+                    "sale_price",
                 )
             },
         ),
@@ -656,3 +661,39 @@ class LastPriceAdmin(admin.ModelAdmin):
     search_fields = ("crypto_id",)
     ordering = ("-updated_at",)
     readonly_fields = ("updated_at",)
+
+
+@admin.register(CryptoNetwork)
+class CryptoNetworkAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "name",
+        "symbol",
+        "crypto",
+        "address",
+        "fee",
+        "is_active",
+        "created_at",
+    )
+    list_filter = ("is_active", "crypto")
+    search_fields = ("name", "symbol", "address", "crypto__name", "crypto__code")
+    ordering = ("-created_at",)
+    readonly_fields = ("created_at", "updated_at")
+    autocomplete_fields = ("crypto",)
+    fieldsets = (
+        (
+            "Informations réseau",
+            {
+                "fields": (
+                    "name",
+                    "symbol",
+                    "logo",
+                    "crypto",
+                    "address",
+                    "fee",
+                    "is_active",
+                )
+            },
+        ),
+        ("Metadata", {"fields": ("created_at", "updated_at")}),
+    )

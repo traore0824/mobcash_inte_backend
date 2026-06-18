@@ -17,6 +17,7 @@ from mobcash_inte.models import (
     CouponWallet,
     CouponWithdrawal,
     Cryptocurrency,
+    CryptoNetwork,
     Deposit,
     IDLink,
     Network,
@@ -846,4 +847,138 @@ class CryptoBuyTransactionSerializer(serializers.ModelSerializer):
                     {"amount": f"Le montant maximum pour une vente est de {max_val}."}
                 )
 
+        return data
+
+
+# ============================================================
+# Cryptocurrency V2 Serializers (fixed admin-defined prices)
+# ============================================================
+
+class CryptocurrencySerializerV2(serializers.ModelSerializer):
+    """V2 — fixed prices set by admin (buy_price / sale_price), no CoinGecko margin."""
+
+    class Meta:
+        model = Cryptocurrency
+        fields = [
+            "id", "created_at", "updated_at", "logo", "code", "name", "symbol",
+            "sale_adress", "fee", "minimun_buy", "max_buy", "minimun_sale", "max_sale",
+            "active_for_sale", "active_for_buy", "buy_price", "sale_price",
+        ]
+
+
+class CryptoNetworkSerializer(serializers.ModelSerializer):
+    crypto = CryptocurrencySerializerForCrypto(read_only=True)
+    crypto_id = serializers.CharField(write_only=True, required=False, allow_null=True)
+
+    class Meta:
+        model = CryptoNetwork
+        fields = [
+            "id", "created_at", "updated_at", "name", "symbol", "logo",
+            "is_active", "address", "fee", "crypto", "crypto_id",
+        ]
+
+
+class BuyCryptoV2Serializer(serializers.Serializer):
+    """V2 — buy crypto at a fixed admin-defined price (buy_price)."""
+
+    total_crypto = serializers.DecimalField(
+        max_digits=20, decimal_places=8, required=True,
+        help_text="Quantité de crypto à acheter (ex: 0.5 BTC)"
+    )
+    crypto_id = serializers.CharField(max_length=255, required=True)
+    network_id = serializers.UUIDField(required=True)
+    phone_number = serializers.CharField(max_length=20, required=False, allow_blank=True, default="")
+    wallet_link = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+    hash = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+
+    def validate_total_crypto(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("La quantité de crypto doit être supérieure à 0.")
+        return value
+
+    def validate(self, data):
+        crypto_id = data.get("crypto_id")
+        total_crypto = data.get("total_crypto")
+
+        try:
+            crypto = Cryptocurrency.objects.get(id=crypto_id)
+        except Cryptocurrency.DoesNotExist:
+            raise serializers.ValidationError({"crypto_id": "Cryptomonnaie non trouvée."})
+
+        if not crypto.active_for_buy:
+            raise serializers.ValidationError({"crypto_id": "Cette cryptomonnaie n'est pas disponible pour l'achat."})
+
+        if not crypto.buy_price:
+            raise serializers.ValidationError({"crypto_id": "Le prix d'achat n'est pas défini par l'administrateur."})
+
+        amount = float(total_crypto) * float(crypto.buy_price)
+
+        if crypto.minimun_buy is not None and amount < crypto.minimun_buy:
+            raise serializers.ValidationError({"amount": f"Le montant minimum d'achat est de {crypto.minimun_buy} FCFA."})
+
+        if crypto.max_buy is not None and amount > crypto.max_buy:
+            raise serializers.ValidationError({"amount": f"Le montant maximum d'achat est de {crypto.max_buy} FCFA."})
+
+        network_id = data.get("network_id")
+        try:
+            network = Network.objects.get(id=network_id)
+        except Network.DoesNotExist:
+            raise serializers.ValidationError({"network_id": "Réseau de paiement non trouvé."})
+
+        data["_crypto"] = crypto
+        data["_network"] = network
+        data["_amount"] = amount
+        return data
+
+
+class SaleCryptoV2Serializer(serializers.Serializer):
+    """V2 — sell crypto at a fixed admin-defined price (sale_price)."""
+
+    total_crypto = serializers.DecimalField(
+        max_digits=20, decimal_places=8, required=True,
+        help_text="Quantité de crypto à vendre (ex: 0.5 BTC)"
+    )
+    crypto_id = serializers.UUIDField(required=True)
+    network_id = serializers.UUIDField(required=True)
+    phone_number = serializers.CharField(max_length=20, required=False, allow_blank=True, default="")
+    wallet_link = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+    hash = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+
+    def validate_total_crypto(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("La quantité de crypto doit être supérieure à 0.")
+        return value
+
+    def validate(self, data):
+        crypto_id = data.get("crypto_id")
+        total_crypto = data.get("total_crypto")
+
+        try:
+            crypto = Cryptocurrency.objects.get(id=crypto_id)
+        except Cryptocurrency.DoesNotExist:
+            raise serializers.ValidationError({"crypto_id": "Cryptomonnaie non trouvée."})
+
+        if not crypto.active_for_sale:
+            raise serializers.ValidationError({"crypto_id": "Cette cryptomonnaie n'est pas disponible pour la vente."})
+
+        if not crypto.sale_price:
+            raise serializers.ValidationError({"crypto_id": "Le prix de vente n'est pas défini par l'administrateur."})
+
+        amount = float(total_crypto) * float(crypto.sale_price)
+
+        if crypto.minimun_sale is not None and amount < crypto.minimun_sale:
+            raise serializers.ValidationError({"amount": f"Le montant minimum de vente est de {crypto.minimun_sale} FCFA."})
+
+        if crypto.max_sale is not None and amount > crypto.max_sale:
+            raise serializers.ValidationError({"amount": f"Le montant maximum de vente est de {crypto.max_sale} FCFA."})
+
+        network_id = data.get("network_id")
+        try:
+            network = Network.objects.get(id=network_id)
+        except Network.DoesNotExist:
+            raise serializers.ValidationError({"network_id": "Réseau de paiement non trouvé."})
+
+        data["_crypto"] = crypto
+        data["_network"] = network
+        data["_amount"] = amount
         return data

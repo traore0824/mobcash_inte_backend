@@ -39,6 +39,7 @@ from mobcash_inte.models import (
     CouponWallet,
     CouponWithdrawal,
     Cryptocurrency,
+    CryptoNetwork,
     Deposit,
     IDLink,
     Network,
@@ -65,6 +66,7 @@ from mobcash_inte.serializers import (
     CreateBonusSerializer,
     BotDepositTransactionSerializer,
     BotWithdrawalTransactionSerializer,
+    BuyCryptoV2Serializer,
     CaisseSerializer,
     ChangeTransactionStatusSerializer,
     CouponPayoutSerializer,
@@ -75,7 +77,10 @@ from mobcash_inte.serializers import (
     CouponWithdrawalSerializer,
     CryptoBuyTransactionSerializer,
     CryptocurrencySerializer,
+    CryptocurrencySerializerV2,
+    CryptoNetworkSerializer,
     ProcessTransactionSerializer,
+    SaleCryptoV2Serializer,
     UpdateTransactionStatusSerializer,
     ValidateVersionSerializer,
     CouponSerializer,
@@ -3428,11 +3433,16 @@ class CreateCryptoBuyTransactionView(generics.CreateAPIView):
         )
         serializer.is_valid(raise_exception=True)
 
+        # Use the network's buy_api to route the payment
+        network = serializer.validated_data.get("network")
+        buy_api = network.buy_api if (network and hasattr(network, "buy_api")) else "connect"
+
         transaction = serializer.save(
             reference=generate_reference(prefix="crypto-buy-"),
             user=request.user,
             type_trans="buy",
             crypto=crypto,
+            api=buy_api,
         )
         TransactionStatusHistory.objects.create(
             transaction=transaction,
@@ -3489,11 +3499,16 @@ class CreateCryptoSaleTransactionView(generics.CreateAPIView):
         )
         serializer.is_valid(raise_exception=True)
 
+        # Store the network's sale_api so ApproveCryptoTransactionView can route the payout
+        network = serializer.validated_data.get("network")
+        sale_api = network.sale_api if (network and hasattr(network, "sale_api")) else "connect"
+
         transaction = serializer.save(
             reference=generate_reference(prefix="crypto-sale-"),
             user=request.user,
             type_trans="sale",
             crypto=crypto,
+            api=sale_api,
         )
         TransactionStatusHistory.objects.create(
             transaction=transaction,
@@ -3504,7 +3519,7 @@ class CreateCryptoSaleTransactionView(generics.CreateAPIView):
         )
         transaction.save()
 
-        # Sales are manual-approval flow – no automatic payment trigger
+        # Sales wait for admin approval – no automatic payment trigger
         transaction.refresh_from_db()
 
         return Response(
@@ -3583,3 +3598,336 @@ class ApproveCryptoTransactionView(decorators.APIView):
             TransactionDetailsSerializer(transaction).data,
             status=status.HTTP_200_OK,
         )
+
+
+# ============================================================
+# Cryptocurrency V2 Views (fixed admin-defined prices)
+# ============================================================
+
+class CreateCryptocurrencyV2(generics.ListCreateAPIView):
+    """V2 — list/create with fixed admin-set prices (buy_price / sale_price)."""
+
+    serializer_class = CryptocurrencySerializerV2
+    pagination_class = CustomPagination
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            self.permission_classes = [permissions.AllowAny]
+        else:
+            self.permission_classes = [permissions.IsAdminUser]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        qs = Cryptocurrency.objects.all()
+        type_trans = self.request.GET.get("type_trans")
+        if type_trans == "sale":
+            qs = qs.filter(active_for_sale=True)
+        elif type_trans == "buy":
+            qs = qs.filter(active_for_buy=True)
+        q = self.request.GET.get("q")
+        if q:
+            qs = qs.filter(Q(name__icontains=q) | Q(code__icontains=q))
+        return qs
+
+
+class DetailsCryptocurrencyV2(generics.RetrieveUpdateDestroyAPIView):
+    """V2 — retrieve / update / delete a crypto with fixed prices."""
+
+    serializer_class = CryptocurrencySerializerV2
+    queryset = Cryptocurrency.objects.all()
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            self.permission_classes = [permissions.AllowAny]
+        else:
+            self.permission_classes = [permissions.IsAdminUser]
+        return super().get_permissions()
+
+
+# ============================================================
+# CryptoNetwork ViewSet (blockchain networks per crypto)
+# ============================================================
+
+class CryptoNetworkView(viewsets.ModelViewSet):
+    """
+    CRUD for blockchain networks linked to a Cryptocurrency.
+    GET (list/retrieve) — public
+    POST / PATCH / DELETE — admin only
+    Optional filters: ?crypto_id=<id>  ?is_active=true|false
+    """
+
+    serializer_class = CryptoNetworkSerializer
+    pagination_class = CustomPagination
+
+    def get_permissions(self):
+        if self.request.method in ("GET", "HEAD", "OPTIONS"):
+            self.permission_classes = [permissions.AllowAny]
+        else:
+            self.permission_classes = [permissions.IsAdminUser]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        qs = CryptoNetwork.objects.select_related("crypto").all()
+        crypto_id = self.request.GET.get("crypto_id")
+        is_active = self.request.GET.get("is_active")
+        if crypto_id:
+            qs = qs.filter(crypto_id=crypto_id)
+        if is_active is not None:
+            qs = qs.filter(is_active=is_active.lower() == "true")
+        return qs
+
+    def perform_create(self, serializer):
+        crypto_id = self.request.data.get("crypto_id")
+        crypto = None
+        if crypto_id:
+            crypto = Cryptocurrency.objects.filter(id=crypto_id).first()
+        serializer.save(crypto=crypto)
+
+    def perform_update(self, serializer):
+        crypto_id = self.request.data.get("crypto_id")
+        if crypto_id is not None:
+            crypto = Cryptocurrency.objects.filter(id=crypto_id).first()
+            serializer.save(crypto=crypto)
+        else:
+            serializer.save()
+
+
+# ============================================================
+# Crypto Buy / Sale V2 (fixed price)
+# ============================================================
+
+class CreateBuyCryptoViewV2(decorators.APIView):
+    """
+    V2 — buy crypto at the fixed admin price (buy_price).
+    Amount in FCFA = total_crypto × crypto.buy_price
+    POST body: total_crypto, crypto_id, network_id, phone_number, wallet_link, hash
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        serializer = BuyCryptoV2Serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        vd = serializer.validated_data
+        crypto: Cryptocurrency = vd["_crypto"]
+        network: Network = vd["_network"]
+        amount: float = vd["_amount"]
+
+        buy_api = network.buy_api if hasattr(network, "buy_api") else "connect"
+
+        transaction = Transaction.objects.create(
+            user=request.user,
+            reference=generate_reference(prefix="crypto-buy-v2-"),
+            type_trans="buy",
+            crypto=crypto,
+            network=network,
+            amount=int(amount),
+            total_crypto=vd["total_crypto"],
+            phone_number=vd.get("phone_number") or "",
+            wallet_link=vd.get("wallet_link") or "",
+            hash=vd.get("hash") or "",
+            api=buy_api,
+            source=request.data.get("source", "mobile"),
+        )
+
+        TransactionStatusHistory.objects.create(
+            transaction=transaction,
+            old_status=transaction.status,
+            new_status=transaction.status,
+            trigger_source=TransactionStatusHistory.Source.SYSTEM,
+            message="Statut initial enregistré (crypto buy V2)",
+        )
+
+        payment_fonction(reference=transaction.reference)
+        transaction.refresh_from_db()
+
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CreateSaleCryptoViewV2(decorators.APIView):
+    """
+    V2 — sell crypto at the fixed admin price (sale_price).
+    Amount in FCFA = total_crypto × crypto.sale_price
+    POST body: total_crypto, crypto_id, network_id, phone_number, wallet_link, hash
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        serializer = SaleCryptoV2Serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        vd = serializer.validated_data
+        crypto: Cryptocurrency = vd["_crypto"]
+        network: Network = vd["_network"]
+        amount: float = vd["_amount"]
+
+        sale_api = network.sale_api if hasattr(network, "sale_api") else "connect"
+
+        transaction = Transaction.objects.create(
+            user=request.user,
+            reference=generate_reference(prefix="crypto-sale-v2-"),
+            type_trans="sale",
+            crypto=crypto,
+            network=network,
+            amount=int(amount),
+            total_crypto=vd["total_crypto"],
+            phone_number=vd.get("phone_number") or "",
+            wallet_link=vd.get("wallet_link") or "",
+            hash=vd.get("hash") or "",
+            api=sale_api,
+            source=request.data.get("source", "mobile"),
+        )
+
+        TransactionStatusHistory.objects.create(
+            transaction=transaction,
+            old_status=transaction.status,
+            new_status=transaction.status,
+            trigger_source=TransactionStatusHistory.Source.SYSTEM,
+            message="Statut initial enregistré (crypto sale V2)",
+        )
+
+        # Sales wait for admin approval — no payment triggered here
+        transaction.refresh_from_db()
+
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+# ============================================================
+# QR Code endpoints for CryptoNetwork
+# ============================================================
+
+class CryptoNetworkQRCodeView(decorators.APIView):
+    """
+    GET /mobcash/crypto-network-qrcode?network_id=<id>
+    Returns the wallet address + a base64-encoded QR code PNG.
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, *args, **kwargs):
+        try:
+            import qrcode
+            from io import BytesIO
+            import base64
+        except ImportError:
+            return Response(
+                {"error": "qrcode library not installed. Run: pip install qrcode[pil]"},
+                status=status.HTTP_501_NOT_IMPLEMENTED,
+            )
+
+        network_id = request.GET.get("network_id")
+        if not network_id:
+            return Response(
+                {"error": "network_id parameter is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            crypto_network = CryptoNetwork.objects.select_related("crypto").get(id=network_id)
+        except CryptoNetwork.DoesNotExist:
+            return Response(
+                {"error": "Crypto network not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not crypto_network.address:
+            return Response(
+                {"error": "No address configured for this crypto network"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(crypto_network.address)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+
+        buffer = BytesIO()
+        img.save(buffer, format="PNG")
+        buffer.seek(0)
+        img_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+        image_url = request.build_absolute_uri(
+            f"/mobcash/crypto-network-qrcode-image?network_id={network_id}"
+        )
+
+        return Response(
+            {
+                "network_id": str(crypto_network.id),
+                "network_name": crypto_network.name,
+                "crypto": crypto_network.crypto.name if crypto_network.crypto else None,
+                "address": crypto_network.address,
+                "qr_code_base64": f"data:image/png;base64,{img_base64}",
+                "qr_code_url": image_url,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class CryptoNetworkQRCodeImageView(decorators.APIView):
+    """
+    GET /mobcash/crypto-network-qrcode-image?network_id=<id>
+    Returns the QR code as a raw PNG image (Content-Type: image/png).
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, *args, **kwargs):
+        try:
+            import qrcode
+            from io import BytesIO
+            from django.http import HttpResponse
+        except ImportError:
+            return Response(
+                {"error": "qrcode library not installed. Run: pip install qrcode[pil]"},
+                status=status.HTTP_501_NOT_IMPLEMENTED,
+            )
+
+        network_id = request.GET.get("network_id")
+        if not network_id:
+            return Response(
+                {"error": "network_id parameter is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            crypto_network = CryptoNetwork.objects.select_related("crypto").get(id=network_id)
+        except CryptoNetwork.DoesNotExist:
+            return Response(
+                {"error": "Crypto network not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not crypto_network.address:
+            return Response(
+                {"error": "No address configured for this crypto network"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(crypto_network.address)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+
+        buffer = BytesIO()
+        img.save(buffer, format="PNG")
+        buffer.seek(0)
+
+        return HttpResponse(buffer.getvalue(), content_type="image/png")

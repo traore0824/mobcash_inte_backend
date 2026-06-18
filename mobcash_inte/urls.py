@@ -7,6 +7,7 @@ router = DefaultRouter()
 router.register("devices", FCMDeviceAuthorizedViewSet)
 router.register(r"user-phone", views.UserPhoneViewSet, basename="user-phone")
 router.register(r"user-app-id", views.IDLinkViews, basename="user-app-id")
+router.register(r"crypto-network", views.CryptoNetworkView, basename="crypto-network")
 
 app_name = "mobcash_inte"
 urlpatterns = [
@@ -103,9 +104,15 @@ urlpatterns = [
     # ============================================================
     # Cryptocurrency Routes
     # ============================================================
+    path("crypto/v2", views.CreateCryptocurrencyV2.as_view(), name="crypto-v2-list"),
+    path("crypto/v2/<int:pk>", views.DetailsCryptocurrencyV2.as_view(), name="crypto-v2-detail"),
     path("crypto", views.CreateCryptocurrency.as_view(), name="crypto-list"),
     path("crypto/<int:pk>", views.DetailsCryptocurrency.as_view(), name="crypto-detail"),
-    path("crypto-buy", views.CreateCryptoBuyTransactionView.as_view(), name="crypto-buy"),
-    path("crypto-sale", views.CreateCryptoSaleTransactionView.as_view(), name="crypto-sale"),
+    path("buy-crypto", views.CreateCryptoBuyTransactionView.as_view(), name="crypto-buy"),
+    path("sale-crypto", views.CreateCryptoSaleTransactionView.as_view(), name="crypto-sale"),
+    path("buy-crypto/v2", views.CreateBuyCryptoViewV2.as_view(), name="crypto-buy-v2"),
+    path("sale-crypto/v2", views.CreateSaleCryptoViewV2.as_view(), name="crypto-sale-v2"),
     path("crypto-approve", views.ApproveCryptoTransactionView.as_view(), name="crypto-approve"),
+    path("crypto-network-qrcode", views.CryptoNetworkQRCodeView.as_view(), name="crypto-network-qrcode"),
+    path("crypto-network-qrcode-image", views.CryptoNetworkQRCodeImageView.as_view(), name="crypto-network-qrcode-image"),
 ]

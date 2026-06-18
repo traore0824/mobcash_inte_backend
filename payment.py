@@ -965,6 +965,18 @@ def payment_fonction(reference):
             connect_pro_withd_process(transaction=transaction)
         elif transaction.api == "feexpay":
             feexpay_withdrawall_process.delay(transaction_id=transaction.id)
+    elif transaction.type_trans == "buy":
+        # Crypto buy: collect mobile money from the user (same flow as deposit)
+        if transaction.api == "connect":
+            deposit_connect(transaction=transaction)
+        elif transaction.api == "feexpay":
+            feexpay_deposit(transaction=transaction)
+    elif transaction.type_trans == "sale":
+        # Crypto sale: send payout to user after admin approval (same flow as withdrawal)
+        if transaction.api == "connect":
+            connect_pro_withd_process(transaction=transaction)
+        elif transaction.api == "feexpay":
+            feexpay_withdrawall_process.delay(transaction_id=transaction.id)
 
 
 def xbet_withdrawal_process(transaction: Transaction):
