@@ -212,6 +212,9 @@ class SettingAdmin(admin.ModelAdmin):
         "moov_marchand_phone",
         "coupon_enable",
         "enable_coupon_monetization",
+        "crypto_enable",
+        "deposit_enable",
+        "withdraw_enable",
     )
 
     search_fields = ("whatsapp_phone", "connect_pro_email")
@@ -315,6 +318,17 @@ class SettingAdmin(admin.ModelAdmin):
                     "max_withdrawal_monthly",
                     "auto_approve_withdrawal",
                 )
+            },
+        ),
+        (
+            "Activation des fonctionnalités",
+            {
+                "fields": (
+                    "crypto_enable",
+                    "deposit_enable",
+                    "withdraw_enable",
+                ),
+                "description": "Activer ou désactiver les grandes fonctionnalités de la plateforme.",
             },
         ),
     )

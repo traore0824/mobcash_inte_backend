@@ -340,6 +340,10 @@ class Setting(models.Model):
     auto_approve_withdrawal = models.BooleanField(default=False)
     coupon_enable = models.BooleanField(default=False)
     allow_all_users_publish_coupons = models.BooleanField(default=False)
+    # Feature toggle flags (mirrored from betpay)
+    crypto_enable = models.BooleanField(default=False)
+    deposit_enable = models.BooleanField(default=True)
+    withdraw_enable = models.BooleanField(default=True)
 
     def __str__(self):
         return str(self.id)
