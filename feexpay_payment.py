@@ -55,7 +55,7 @@ def feexpay_payout(transaction: Transaction):
         return
     
     # URL pour les retraits
-    url = "https://api.feexpay.me/api/payouts/public/transfer/global"
+    url = "https://api-v2.feexpay.me/api/payouts/public/transfer/global"
     
     # Préparer les données
     amount = int(float(transaction.amount)) if transaction.amount else 0
@@ -142,13 +142,13 @@ def feexpay_deposit(transaction: Transaction):
     network_name = transaction.network.name.lower() if transaction.network else None
 
     if network_name == "moov":
-        url = "https://api.feexpay.me/api/transactions/public/requesttopay/moov"
+        url = "https://api-v2.feexpay.me/api/transactions/public/requesttopay/moov"
         connect_pro_logger.info("debut de creatuion de transaction feexpay MOOV")
     elif network_name == "mtn":
-        url = "https://api.feexpay.me/api/transactions/public/requesttopay/mtn"
+        url = "https://api-v2.feexpay.me/api/transactions/public/requesttopay/mtn"
         connect_pro_logger.info("debut de creatuion de transaction feexpay MTN")
     else:
-        url = "https://api.feexpay.me/api/transactions/public/requesttopay/celtiis_bj"
+        url = "https://api-v2.feexpay.me/api/transactions/public/requesttopay/celtiis_bj"
         connect_pro_logger.info("debut de creatuion de transaction feexpay Celtiis")
 
     if not url:
