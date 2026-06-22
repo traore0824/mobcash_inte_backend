@@ -242,6 +242,7 @@ class SettingAdmin(admin.ModelAdmin):
                     "deposit_reward_percent",
                     "requires_deposit_to_view_coupon",
                     "minimun_deposit_before_view_coupon",
+                    "requires_recent_deposit_to_view_coupon",
                 )
             },
         ),

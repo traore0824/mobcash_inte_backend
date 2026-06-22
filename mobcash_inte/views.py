@@ -24,6 +24,7 @@ from mobcash_inte.helpers import (
     resolve_api_service,
     send_admin_notification,
     send_notification,
+    user_has_recent_accepted_deposit,
 )
 from mobcash_inte.mobcash_service import CashAPIService
 from mobcash_inte.models import (
@@ -1456,6 +1457,12 @@ class CreateCoupon(generics.ListCreateAPIView):
             return Coupon.objects.all()
         else:
             last_24h = timezone.now() - relativedelta(hours=24)
+            if (
+                setting
+                and setting.requires_recent_deposit_to_view_coupon
+                and not user_has_recent_accepted_deposit(self.request.user)
+            ):
+                return Coupon.objects.none()
             if not setting.requires_deposit_to_view_coupon:
                 return Coupon.objects.filter(created_at__gte=last_24h)
             else:

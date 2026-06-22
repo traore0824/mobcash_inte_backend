@@ -262,3 +262,20 @@ def cancel_old_pending_transactions():
     connect_pro_logger.info(f"[CANCEL_PENDING] {cancel_count} transactions annulées")
 
     return f"{cancel_count} transactions annulées"
+
+
+def user_has_recent_accepted_deposit(user) -> bool:
+    """Vérifie si l'utilisateur a un dépôt accepté dans les 24 dernières heures."""
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+
+    from dateutil.relativedelta import relativedelta
+    from django.utils import timezone
+
+    last_24h = timezone.now() - relativedelta(hours=24)
+    return Transaction.objects.filter(
+        user=user,
+        type_trans="deposit",
+        status="accept",
+        created_at__gte=last_24h,
+    ).exists()
