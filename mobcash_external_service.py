@@ -161,7 +161,7 @@ class MobCashExternalService:
         Returns:
             Dict avec 'success', 'data', 'error', etc.
         """
-        url = f"{self.base_url}{endpoint}"
+        url = f"{self.base_url}/{endpoint}"
         body = ''
 
         # 🔥 NORMALISATION CRITIQUE DU BODY JSON
