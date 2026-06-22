@@ -161,7 +161,7 @@ class MobCashExternalService:
         Returns:
             Dict avec 'success', 'data', 'error', etc.
         """
-        url = f"{self.base_url}/{endpoint}"
+        url = f"{self.base_url}{endpoint}"
         body = ''
 
         # 🔥 NORMALISATION CRITIQUE DU BODY JSON
@@ -655,7 +655,7 @@ class MobCashExternalService:
         Returns:
             Dict avec 'success', 'data' contenant la Transaction
         """
-        endpoint = f'api/v1/transactions/list/external/{str(external_transaction_id)}'
+        endpoint = f'/api/v1/transactions/list/external/{str(external_transaction_id)}'
 
         params = {
             'platform_uid': str(platform_uid),
