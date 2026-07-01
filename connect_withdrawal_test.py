@@ -3,7 +3,7 @@ Test de connect_withdrawal — même logique que payment.connect_withdrawal.
 Aucune Transaction n'est créée ni sauvegardée en base.
 
 Usage: python3 manage.py connect_withdrawal_test <network> <phone> <amount>
-Exemple: python3 manage.py connect_withdrawal_test moov 0151206286 500
+Exemple: python3 manage.py connect_withdrawal_test wave 0151206286 500
 """
 
 import requests
@@ -13,17 +13,14 @@ from mobcash_inte_backend.settings import BASE_URL
 from payment import (
     CONNECT_PRO_BASE_URL,
     connect_pro_token,
+    get_connect_network_code,
     get_network_id,
     total_amount_to_send_wave,
 )
 
 
 def connect_withdrawal_test(network_name: str, phone_number: str, amount: int):
-    """
-    Reprend exactement connect_withdrawal (payment.py) sans persister de Transaction.
-    Le champ network envoyé à Connect est l'uid (UUID), pas le pays.
-    Le code MOOV-BJ sert uniquement à retrouver cet uid via get_network_id().
-    """
+    """Reprend connect_withdrawal (payment.py) sans persister de Transaction."""
     network = Network.objects.filter(name__iexact=network_name.strip()).first()
     if not network:
         print(f"ERREUR: réseau '{network_name}' introuvable en base (table Network)")
@@ -45,7 +42,7 @@ def connect_withdrawal_test(network_name: str, phone_number: str, amount: int):
         payout_amount = total_amount_to_send_wave(payout_amount)
         print(f"Montant Wave ajusté (frais inclus): {payout_amount}")
 
-    network_code = f"{network.name.upper()}-{network.country_code.upper()}"
+    network_code = get_connect_network_code(network)
     network_uid = get_network_id(name=network_code)
     if not network_uid:
         print(f"ERREUR: réseau Connect '{network_code}' introuvable")

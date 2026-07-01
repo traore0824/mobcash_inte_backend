@@ -139,6 +139,13 @@ def get_network_id(name):
     return None
 
 
+def get_connect_network_code(network) -> str:
+    """Code réseau attendu par Connect Pro (liste /api/payments/networks/)."""
+    if network.name.lower() == "wave":
+        return "WAVE-CI"
+    return f"{network.name.upper()}-{network.country_code.upper()}"
+
+
 import math
 def fee_wave(montant: int) -> int:
     """Calcule les frais Wave : 1% du montant envoyé, arrondi au multiple de 5 supérieur."""
@@ -195,9 +202,7 @@ def connect_withdrawal(transaction: Transaction):
             else (transaction.telegram_user.fullname if transaction.telegram_user else "N/A")
         ),
         "objet": "Turnaincash deposit",
-        "network": get_network_id(
-            name=f"{transaction.network.name.upper()}-{transaction.network.country_code.upper()}"
-        ),
+        "network": get_network_id(name=get_connect_network_code(transaction.network)),
         "callback_url": f"{BASE_URL}/connect-pro-webhook",
     }
     connect_pro_logger.info(
@@ -350,9 +355,7 @@ def deposit_connect(transaction: Transaction):
             ),
             "recipient_name": full_name,
             "objet": "Blaffa deposit",
-            "network": get_network_id(
-                name=f"{transaction.network.name.upper()}-{transaction.network.country_code.upper()}"
-            ),
+            "network": get_network_id(name=get_connect_network_code(transaction.network)),
             "callback_url": f"{BASE_URL}/connect-pro-webhook",
         }
         connect_pro_logger.info(
