@@ -3453,6 +3453,15 @@ class CreateCryptoBuyTransactionView(generics.CreateAPIView):
         )
         transaction.save()
 
+        # Send admin Telegram notification
+        from mobcash_inte.helpers import send_telegram_message
+        try:
+            send_telegram_message(
+                content=f"Nouvelle demande d'achat de {crypto.name}. Réf: {transaction.reference}"
+            )
+        except Exception:
+            pass
+
         payment_fonction(reference=transaction.reference)
         transaction.refresh_from_db()
 
@@ -3518,6 +3527,15 @@ class CreateCryptoSaleTransactionView(generics.CreateAPIView):
             message="Statut initial enregistré (crypto sale)",
         )
         transaction.save()
+
+        # Send admin Telegram notification
+        from mobcash_inte.helpers import send_telegram_message
+        try:
+            send_telegram_message(
+                content=f"Nouvelle demande de vente de {crypto.name}. Réf: {transaction.reference}"
+            )
+        except Exception:
+            pass
 
         # Sales wait for admin approval – no automatic payment trigger
         transaction.refresh_from_db()
@@ -3588,9 +3606,25 @@ class ApproveCryptoTransactionView(decorators.APIView):
                     )
                 except Exception:
                     pass
+            # Send admin Telegram notification
+            from mobcash_inte.helpers import send_telegram_message
+            try:
+                send_telegram_message(
+                    content=f"Nouvelle demande d'achat de {transaction.crypto.name}. Réf: {transaction.reference}"
+                )
+            except Exception:
+                pass
 
         elif transaction.type_trans == "sale":
             # Admin confirms crypto received → trigger payout to user's mobile money
+            # Send admin Telegram notification
+            from mobcash_inte.helpers import send_telegram_message
+            try:
+                send_telegram_message(
+                    content=f"Demande de vente de {transaction.crypto.name} approuvée. Réf: {transaction.reference}"
+                )
+            except Exception:
+                pass
             payment_fonction(reference=transaction.reference)
 
         transaction.refresh_from_db()

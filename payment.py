@@ -579,7 +579,7 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                     exc_info=True,
                 )
                 raise
-        else:
+        elif transaction.type_trans == "withdrawal" and transaction.status != "accept":
             try:
                 connect_pro_logger.info(f"Operation success")
                 transaction.change_status(
@@ -604,6 +604,55 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                     exc_info=True,
                 )
                 raise
+        # ----------------------------------------------
+        # 💰 TRAITEMENT DES ACHATS ET VENTES CRYPTO
+        # ----------------------------------------------
+        elif transaction.type_trans in ["buy", "sale"] and transaction.status != "accept":
+            new_status = "payment_init_success" if transaction.type_trans == "buy" else "accept"
+            transaction.change_status(
+                new_status=new_status,
+                source="WEBHOOK",
+                message=f"Statut mis à jour pour {transaction.type_trans}"
+            )
+
+            # ✅ WebSocket pour utilisateur normal uniquement
+            if transaction.user:
+                channel_layer = get_channel_layer()
+                async_to_sync(channel_layer.group_send)(
+                    f"private_channel_{str(transaction.user.id)}",
+                    {
+                        "type": "transaction",
+                        "data": TransactionDetailsSerializer(transaction).data,
+                    },
+                )
+
+            # ✅ Notification Telegram admin
+            try:
+                trans_type_text = "d'achat" if transaction.type_trans == 'buy' else "de vente"
+                send_telegram_message(
+                    content=f"Nouvelle demande {trans_type_text} de {transaction.crypto.name if transaction.crypto else 'crypto'}. Référence: {transaction.reference}"
+                )
+            except Exception as e:
+                connect_pro_logger.error(f"Erreur envoi notification Telegram admin pour crypto transaction {transaction.id}: {str(e)}")
+
+            # ✅ Notification à l'utilisateur pour la vente crypto
+            if transaction.type_trans == "sale":
+                transaction.change_status(
+                    new_status="approve",
+                    source="WEBHOOK",
+                    message="Vente approuvée"
+                )
+                if transaction.user:
+                    send_notification(
+                        title="Opération réussie",
+                        content=f"Vous avez effectué une vente de {transaction.total_crypto} {transaction.crypto.name if transaction.crypto else 'crypto'} pour {transaction.amount} FCFA",
+                        user=transaction.user,
+                    )
+                elif transaction.telegram_user:
+                    send_telegram_message(
+                        chat_id=transaction.telegram_user.telegram_user_id,
+                        content=f"Vous avez effectué une vente de {transaction.total_crypto} {transaction.crypto.name if transaction.crypto else 'crypto'} pour {transaction.amount} FCFA",
+                    )
     except Exception as e:
         connect_pro_logger.error(
             f"Erreur globale webhook_transaction_success transaction {transaction.id}: {str(e)}"
