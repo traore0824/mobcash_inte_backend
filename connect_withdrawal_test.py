@@ -1,80 +1,83 @@
 """
-Test standalone de connect_withdrawal (Connect Pro payout).
-Aucune transaction n'est créée en base — appel API Connect Pro uniquement.
+Test de connect_withdrawal — même logique que payment.connect_withdrawal.
+Aucune Transaction n'est créée ni sauvegardée en base.
 
 Usage: python3 manage.py connect_withdrawal_test <network> <phone> <amount>
+Exemple: python3 manage.py connect_withdrawal_test moov 0151206286 500
 """
-
-import os
 
 import requests
 
-from payment import CONNECT_PRO_BASE_URL, connect_pro_token, get_network_id
-
-
-def _normalize_network_code(network_name: str) -> str:
-    network_name = network_name.strip()
-    if "-" in network_name:
-        return network_name.upper()
-    return f"{network_name.upper()}-BJ"
+from mobcash_inte.models import Network
+from mobcash_inte_backend.settings import BASE_URL
+from payment import (
+    CONNECT_PRO_BASE_URL,
+    connect_pro_token,
+    get_network_id,
+    total_amount_to_send_wave,
+)
 
 
 def connect_withdrawal_test(network_name: str, phone_number: str, amount: int):
     """
-    Appelle l'API Connect Pro pour un retrait test (même payload que connect_withdrawal).
+    Reprend exactement connect_withdrawal (payment.py) sans persister de Transaction.
+    Le champ network envoyé à Connect est l'uid (UUID), pas le pays.
+    Le code MOOV-BJ sert uniquement à retrouver cet uid via get_network_id().
     """
+    network = Network.objects.filter(name__iexact=network_name.strip()).first()
+    if not network:
+        print(f"ERREUR: réseau '{network_name}' introuvable en base (table Network)")
+        return None
+
     token = connect_pro_token()
     if not token:
         print("ERREUR: impossible de récupérer le token Connect Pro")
         return None
 
-    network_code = _normalize_network_code(network_name)
-    payout_amount = int(amount)
-    recipient_phone = phone_number[3:] if len(phone_number) > 10 else phone_number
-
-    network_id = get_network_id(name=network_code)
-    if not network_id:
-        print(f"ERREUR: réseau '{network_code}' introuvable sur Connect Pro")
-        return None
-
-    callback_base = os.getenv("BASE_URL", "https://example.com")
-    url = CONNECT_PRO_BASE_URL + "/api/payments/user/transactions/"
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
+    url = CONNECT_PRO_BASE_URL + "/api/payments/user/transactions/"
+
+    payout_amount = int(amount)
+    if network.name.lower() == "wave" and not network.customer_pay_fee:
+        payout_amount = total_amount_to_send_wave(payout_amount)
+        print(f"Montant Wave ajusté (frais inclus): {payout_amount}")
+
+    network_code = f"{network.name.upper()}-{network.country_code.upper()}"
+    network_uid = get_network_id(name=network_code)
+    if not network_uid:
+        print(f"ERREUR: réseau Connect '{network_code}' introuvable")
+        return None
+
     data = {
         "type": "deposit",
         "amount": f"{payout_amount}",
-        "recipient_phone": recipient_phone,
+        "recipient_phone": (
+            phone_number[3:] if len(phone_number) > 10 else phone_number
+        ),
         "recipient_name": "Test Mobcash",
         "objet": "Turnaincash deposit",
-        "network": network_id,
-        "callback_url": f"{callback_base}/connect-pro-webhook",
+        "network": network_uid,
+        "callback_url": f"{BASE_URL}/connect-pro-webhook",
     }
 
-    print(f"URL: {url}")
-    print(f"Réseau Connect: {network_code} (uid={network_id})")
-    print(f"Payload: {data}")
+    print(f"[CONNECT_WITHDRAWAL_TEST] POST {url}")
+    print(f"[CONNECT_WITHDRAWAL_TEST] network_code={network_code} | network_uid={network_uid}")
+    print(f"[CONNECT_WITHDRAWAL_TEST] body={data}")
 
     try:
         response = requests.post(url, json=data, headers=headers, timeout=30)
-        print(f"Status HTTP: {response.status_code}")
+        print(f"[CONNECT_WITHDRAWAL_TEST] status={response.status_code} | body={response.text[:500]}")
         try:
             body = response.json()
         except ValueError:
             body = response.text
-        print(f"Réponse: {body}")
-
         if response.ok and isinstance(body, dict):
             uid = (body.get("data") or {}).get("uid")
-            print(f"UID Connect Pro: {uid}")
+            print(f"[CONNECT_WITHDRAWAL_TEST] uid={uid}")
         return body
-    except requests.exceptions.Timeout as exc:
-        print(f"ERREUR: timeout {exc}")
-    except requests.exceptions.RequestException as exc:
-        print(f"ERREUR: requête {exc}")
     except Exception as exc:
-        print(f"ERREUR: {exc}")
-
-    return None
+        print(f"[CONNECT_WITHDRAWAL_TEST] Erreur: {exc}")
+        return None

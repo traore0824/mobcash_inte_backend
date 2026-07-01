@@ -10,8 +10,8 @@ class Command(BaseCommand):
     )
 
     def add_arguments(self, parser):
-        parser.add_argument("network", type=str, help="Réseau: moov, mtn, wave ou MOOV-BJ")
-        parser.add_argument("phone", type=str, help="Numéro bénéficiaire (ex: 2290155187395)")
+        parser.add_argument("network", type=str, help="Nom réseau en base (ex: moov, mtn, wave)")
+        parser.add_argument("phone", type=str, help="Numéro bénéficiaire (ex: 0151206286 ou 2290151206286)")
         parser.add_argument("amount", type=int, help="Montant en FCFA")
 
     def handle(self, *args, **options):
