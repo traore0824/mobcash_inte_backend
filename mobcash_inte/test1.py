@@ -25,8 +25,11 @@ def total_amount_to_send_wave(montant_souhaite: int) -> int:
         montant_envoye += 1  # on teste le prochain montant
 
 
-# 🔥 Tests
-print(total_amount_to_send_wave(1000))  # 1010
-print(total_amount_to_send_wave(8973))  # 9063
-print(total_amount_to_send_wave(2500))  # 2530
-print(total_amount_to_send_wave(5200))  # 5255
+# # 🔥 Tests
+# print(total_amount_to_send_wave(1000))  # 1010
+# print(total_amount_to_send_wave(8973))  # 9063
+# print(total_amount_to_send_wave(2500))  # 2530
+# print(total_amount_to_send_wave(5200))  # 5255
+
+
+

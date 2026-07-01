@@ -328,6 +328,10 @@ class Setting(models.Model):
     bf_orange_marchand_phone = models.CharField(max_length=250, blank=True, null=True)
     requires_deposit_to_view_coupon = models.BooleanField(default=False)
     minimun_deposit_before_view_coupon = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    requires_recent_deposit_to_view_coupon = models.BooleanField(
+        default=False,
+        help_text="Si activé, l'utilisateur doit avoir un dépôt accepté dans les 24 dernières heures pour voir les coupons.",
+    )
     max_coupons_per_day = models.PositiveIntegerField(default=10)
     max_coupons_per_week = models.PositiveIntegerField(default=50)
     enable_coupon_monetization = models.BooleanField(default=False)
