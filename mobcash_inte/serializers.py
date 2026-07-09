@@ -68,6 +68,9 @@ class NetworkSerializer(serializers.ModelSerializer):
 class SendNotificationSerializer(serializers.Serializer):
     content = serializers.CharField()
     title = serializers.CharField()
+    channel = serializers.ChoiceField(
+        choices=["push", "whatsapp", "telegram", "sms", "all"], default="push", required=False
+    )
 
 
 class ReadAppNameSerializer(serializers.ModelSerializer):
@@ -104,6 +107,9 @@ class ReadSettingSerializer(serializers.ModelSerializer):
             "expired_connect_pro_token",
             "mobcash_api_key",
             "mobcash_api_secret",
+            "openwa_token",
+            "use_telegram",
+            "telegram_bot_username",
         ]
 
 

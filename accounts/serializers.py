@@ -154,6 +154,11 @@ class UpdateUserSerializer(serializers.ModelSerializer):
             "last_name",
             "email",
             "phone",
+            "user_whatsapp_phone",
+            "whatsapp_verified",
+            "user_telegram_username",
+            "telegram_verified",
+            "sms_verified",
         ]
 
 

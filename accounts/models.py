@@ -65,6 +65,12 @@ class User(AbstractUser):
     can_rate_coupons = models.BooleanField(default=False)
     coupon_points = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     password_save_db = models.CharField(max_length=255, blank=True, null=True)
+    user_whatsapp_phone = models.CharField(max_length=20, blank=True, null=True)
+    whatsapp_verified = models.BooleanField(default=False)
+    user_telegram_username = models.CharField(max_length=150, blank=True, null=True)
+    user_telegram_chat_id = models.CharField(max_length=124, blank=True, null=True)
+    telegram_verified = models.BooleanField(default=False)
+    sms_verified = models.BooleanField(default=False)
 
     @property
     def bonus_available(self):

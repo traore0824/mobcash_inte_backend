@@ -390,6 +390,7 @@ class TransactionAdmin(admin.ModelAdmin):
         "type_trans",
         "api",
         "reference",
+        "betmomo_operation_ref",
         "created_at",
         "validated_at",
     )
@@ -483,6 +484,8 @@ class TransactionAdmin(admin.ModelAdmin):
                     "all_status",
                     "webhook_data",
                     "mobcash_response",
+                    "connect_pro_response",
+                    "betmomo_operation_ref",
                     "error_message",
                     "message",
                     "transaction_link",

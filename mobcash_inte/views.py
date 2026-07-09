@@ -26,6 +26,9 @@ from mobcash_inte.helpers import (
     send_notification,
     user_has_recent_accepted_deposit,
 )
+from mobcash_inte.whatsapp_service import send_whatsapp_to_user
+from mobcash_inte.telegram_service import send_telegram_to_user
+from mobcash_inte.sms_service import send_sms_to_user
 from mobcash_inte.mobcash_service import CashAPIService
 from mobcash_inte.models import (
     TYPE_TRANS,
@@ -188,6 +191,9 @@ class NotificationView(generics.ListCreateAPIView):
     def create(self, request, *args, **kwargs):
         serializer = SendNotificationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        title = serializer.validated_data.get("title")
+        content = serializer.validated_data.get("content")
+        channel = serializer.validated_data.get("channel", "push")
         user_id = self.request.GET.get("user_id")
         if user_id:
             try:
@@ -197,17 +203,60 @@ class NotificationView(generics.ListCreateAPIView):
             if not user:
                 return Response(status=status.HTTP_404_NOT_FOUND)
 
-            send_notification(
-                user=user,
-                title=serializer.validated_data.get("title"),
-                content=serializer.validated_data.get("content"),
-            )
+            if channel in ("push", "all"):
+                send_notification(user=user, title=title, content=content)
+            elif channel == "whatsapp":
+                if isinstance(user, User):
+                    result = send_whatsapp_to_user(user=user, title=title, content=content)
+                    if not result.get("success"):
+                        return Response(
+                            {"success": False, "details": result.get("error")},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                else:
+                    return Response(
+                        {"success": False, "details": "WhatsApp non disponible pour cet utilisateur"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            elif channel == "telegram":
+                if isinstance(user, User):
+                    result = send_telegram_to_user(user=user, title=title, content=content)
+                    if not result.get("success"):
+                        return Response(
+                            {"success": False, "details": result.get("error")},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                else:
+                    return Response(
+                        {"success": False, "details": "Telegram non disponible pour cet utilisateur"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            elif channel == "sms":
+                if isinstance(user, User):
+                    result = send_sms_to_user(user=user, title=title, content=content)
+                    if not result.get("success"):
+                        return Response(
+                            {"success": False, "details": result.get("error")},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                else:
+                    return Response(
+                        {"success": False, "details": "SMS non disponible pour cet utilisateur"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
         else:
-            send_admin_notification.delay(
-                title=serializer.validated_data.get("title"),
-                content=serializer.validated_data.get("content"),
-            )
+            if channel in ("push", "all"):
+                send_admin_notification.delay(title=title, content=content)
+            elif channel == "whatsapp":
+                for user in User.objects.filter(is_staff=False):
+                    send_whatsapp_to_user(user=user, title=title, content=content)
+            elif channel == "telegram":
+                for user in User.objects.filter(is_staff=False):
+                    send_telegram_to_user(user=user, title=title, content=content)
+            elif channel == "sms":
+                for user in User.objects.filter(is_staff=False):
+                    send_sms_to_user(user=user, title=title, content=content)
         return Response(status=status.HTTP_200_OK)
 
 

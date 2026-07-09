@@ -33,6 +33,22 @@ from .serializers import (
     ValidateOtpSerializer,
 )
 from .helpers import CustomPagination, create_otp, send_mails
+from mobcash_inte.whatsapp_service import (
+    is_whatsapp_enabled,
+    normalize_whatsapp_phone,
+    send_whatsapp_message,
+    send_whatsapp_to_user,
+    validate_whatsapp_phone,
+)
+from mobcash_inte.telegram_service import (
+    get_telegram_link,
+    is_telegram_enabled,
+    link_telegram_to_user,
+    send_telegram_message,
+    validate_telegram_username,
+)
+from mobcash_inte.sms_service import is_sms_enabled, send_sms_message, _get_user_sms_phone
+from mobcash_inte.models import Setting
 
 from django.contrib.gis.geoip2 import GeoIP2
 from rest_framework_simplejwt.token_blacklist.models import (
@@ -246,6 +262,222 @@ def reset_password(request):
     user.otp = None
     user.save()
     return Response(status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+def send_otp_whatsapp(request):
+    email = request.data.get("email")
+    user = User.objects.filter(email=email).first()
+    if not user:
+        return Response(status=status.HTTP_200_OK)
+    if not is_whatsapp_enabled():
+        return Response(
+            {"success": False, "details": "WhatsApp non activé"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not user.user_whatsapp_phone:
+        return Response(
+            {"success": False, "details": "Aucun numéro WhatsApp enregistré"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    otp = create_otp()
+    user.otp = otp
+    user.otp_created_at = timezone.now() + relativedelta(minutes=2)
+    user.save()
+    result = send_whatsapp_message(
+        user.user_whatsapp_phone,
+        f"*Réinitialisation de mot de passe*\n\nVotre code OTP : *{otp}*\n\nValide 2 minutes.",
+    )
+    if not result.get("success"):
+        return Response(
+            {"success": False, "details": "Échec envoi WhatsApp"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    return Response(status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def update_whatsapp_phone(request):
+    phone = request.data.get("user_whatsapp_phone")
+    user = request.user
+    if phone in (None, ""):
+        user.user_whatsapp_phone = None
+        user.whatsapp_verified = False
+        user.save()
+        return Response({"success": True, "user_whatsapp_phone": None, "whatsapp_verified": False})
+    if not is_whatsapp_enabled():
+        return Response(
+            {"success": False, "details": "WhatsApp non activé"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    validation = validate_whatsapp_phone(phone)
+    if not validation.get("exists"):
+        return Response(
+            {"success": False, "details": "Numéro WhatsApp invalide ou introuvable"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    normalized = normalize_whatsapp_phone(phone)
+    user.user_whatsapp_phone = normalized
+    user.whatsapp_verified = True
+    user.save()
+    return Response(
+        {
+            "success": True,
+            "user_whatsapp_phone": normalized,
+            "whatsapp_verified": True,
+        }
+    )
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def update_sms_phone(request):
+    user = request.user
+    phone = request.data.get("phone")
+
+    if phone in (None, ""):
+        user.sms_verified = False
+        user.save()
+        return Response({"success": True, "sms_verified": False})
+
+    if not is_sms_enabled():
+        return Response(
+            {"success": False, "details": "SMS non activé"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    user.phone = phone
+    user.save()
+
+    to_phone = _get_user_sms_phone(user)
+    if not to_phone:
+        return Response(
+            {"success": False, "details": "Numéro invalide"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    result = send_sms_message(
+        to_phone,
+        "Votre numéro BLAFFA est confirmé. Vous recevrez vos alertes par SMS.",
+    )
+    if not result.get("success"):
+        return Response(
+            {"success": False, "details": "Échec envoi SMS"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    user.sms_verified = True
+    user.save()
+    return Response(
+        {
+            "success": True,
+            "phone": user.phone,
+            "sms_verified": True,
+        }
+    )
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def telegram_link(request):
+    if not is_telegram_enabled():
+        return Response(
+            {"success": False, "details": "Telegram non activé"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    link = get_telegram_link(request.user.id)
+    return Response(
+        {
+            "success": True,
+            "link": link or "",
+            "telegram_verified": request.user.telegram_verified,
+        }
+    )
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def telegram_status(request):
+    return Response(
+        {
+            "success": True,
+            "telegram_verified": request.user.telegram_verified,
+            "user_telegram_username": request.user.user_telegram_username,
+        }
+    )
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def update_telegram_username(request):
+    username = request.data.get("user_telegram_username") or request.data.get("telegram")
+    user = request.user
+    if username in (None, ""):
+        user.user_telegram_username = None
+        user.user_telegram_chat_id = None
+        user.telegram_verified = False
+        user.save()
+        return Response({"success": True, "telegram_verified": False})
+
+    if not is_telegram_enabled():
+        return Response(
+            {"success": False, "details": "Telegram non activé"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    validation = validate_telegram_username(username)
+    if not validation.get("exists"):
+        return Response(
+            {
+                "success": False,
+                "details": "Démarrez d'abord le bot Telegram",
+                "link": get_telegram_link(user.id),
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    user.user_telegram_username = validation.get("username")
+    user.user_telegram_chat_id = validation.get("chat_id")
+    user.telegram_verified = True
+    user.save()
+    send_telegram_message(
+        user.user_telegram_chat_id,
+        "✅ Votre compte est connecté à Telegram.\n\n"
+        "Vous recevrez ici vos notifications de transactions et les annonces importantes.",
+    )
+    return Response(
+        {
+            "success": True,
+            "user_telegram_username": user.user_telegram_username,
+            "telegram_verified": True,
+        }
+    )
+
+
+@api_view(["POST"])
+def telegram_webhook(request):
+    if not is_telegram_enabled():
+        return Response({"ok": True})
+
+    message = request.data.get("message") or {}
+    text = message.get("text") or ""
+    chat = message.get("chat") or {}
+    chat_id = chat.get("id")
+    username = chat.get("username")
+
+    if text.startswith("/start link_") and chat_id:
+        link_token = text.replace("/start link_", "").strip()
+        user = User.objects.filter(id=link_token).first()
+        if user:
+            link_telegram_to_user(user, chat_id, username)
+            send_telegram_message(
+                chat_id,
+                "✅ Votre compte est connecté à Telegram.\n\n"
+                "Vous recevrez ici vos notifications de transactions et les annonces importantes.",
+            )
+
+    return Response({"ok": True})
 
 
 @api_view(["PATCH"])

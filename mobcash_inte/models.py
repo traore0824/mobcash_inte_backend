@@ -348,6 +348,12 @@ class Setting(models.Model):
     crypto_enable = models.BooleanField(default=False)
     deposit_enable = models.BooleanField(default=True)
     withdraw_enable = models.BooleanField(default=True)
+    use_whatsapp = models.BooleanField(default=False)
+    openwa_session_id = models.CharField(max_length=255, blank=True, null=True)
+    openwa_token = models.CharField(max_length=500, blank=True, null=True)
+    use_telegram = models.BooleanField(default=False)
+    telegram_bot_username = models.CharField(max_length=150, blank=True, null=True)
+    use_sms = models.BooleanField(default=False)
 
     def __str__(self):
         return str(self.id)
@@ -429,6 +435,12 @@ class Transaction(models.Model):
     ussd_code = models.CharField(max_length=200, blank=True, null=True)
     connect_pro_response = models.TextField(blank=True, null=True)
     credit_used = models.PositiveIntegerField(default=0)
+    betmomo_operation_ref = models.CharField(
+        max_length=120,
+        blank=True,
+        null=True,
+        help_text="Référence opération BetMomo (ex: BWTSP..., BWTBD...)"
+    )
 
     # Crypto fields
     crypto = models.ForeignKey(

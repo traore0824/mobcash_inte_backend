@@ -20,6 +20,76 @@ load_dotenv()
 logger = logging.getLogger("mobcash_inte_backend.transactions")
 
 
+def _platform_response_from_api_data(data: dict) -> dict:
+    """Normalise la réponse mobcash_api (MobCash ou BetMomo) — même format que BetMomoExternalService."""
+    try:
+        from betmomo_external_service import parse_betmomo_write_response
+    except ImportError:
+        parse_betmomo_write_response = None
+
+    if not isinstance(data, dict):
+        data = {}
+
+    mobcash_response = data.get("mobcash_response") or {}
+    if isinstance(mobcash_response, str):
+        try:
+            mobcash_response = json.loads(mobcash_response)
+        except (TypeError, ValueError):
+            mobcash_response = {}
+    if not isinstance(mobcash_response, dict):
+        mobcash_response = {}
+
+    # BetMomo : même parsing que l'ancien flux betpay direct
+    betmomo_raw = mobcash_response.get("betmomo_raw")
+    if betmomo_raw and parse_betmomo_write_response:
+        parsed = parse_betmomo_write_response(betmomo_raw)
+        return {
+            "Summa": parsed.get("Summa"),
+            "OperationId": parsed.get("OperationId"),
+            "Success": parsed.get("Success"),
+            "Pending": parsed.get("Pending"),
+            "Message": parsed.get("Message"),
+        }
+
+    raw_response = mobcash_response.get("raw_response")
+    if isinstance(raw_response, dict) and raw_response:
+        source = raw_response
+    elif any(
+        k in mobcash_response
+        for k in ("Success", "Pending", "OperationId", "Failed")
+    ):
+        source = mobcash_response
+    else:
+        source = {}
+
+    parsed = {
+        "Summa": source.get("Summa"),
+        "OperationId": source.get("OperationId") or data.get("provider_operation_ref"),
+        "Success": source.get("Success"),
+        "Pending": source.get("Pending"),
+        "Message": source.get("Message"),
+    }
+
+    status = str(data.get("status") or "").upper()
+    if status == "COMPLETED":
+        parsed["Success"] = True
+        parsed["Pending"] = False
+        parsed["Message"] = parsed.get("Message") or "completed"
+    elif status in ("PROCESSING", "PENDING"):
+        parsed["Success"] = False
+        parsed["Pending"] = True
+        parsed["Message"] = parsed.get("Message") or status.lower()
+    elif status == "FAILED":
+        parsed["Success"] = False
+        parsed["Pending"] = False
+        parsed["Message"] = data.get("error_message") or parsed.get("Message") or "failed"
+
+    if parsed.get("Summa") is None and data.get("amount") is not None:
+        parsed["Summa"] = data.get("amount")
+
+    return parsed
+
+
 class MobCashExternalService:
     """
     Service de communication avec le backend MobCash API
@@ -347,24 +417,30 @@ class MobCashExternalService:
 
         if result.get("success"):
             data = result.get("data", {})
-            mobcash_response = data.get("mobcash_response", {})
-            raw_response = mobcash_response.get("raw_response", {})
+            parsed = _platform_response_from_api_data(data)
 
             logger.info(
                 "[MOBCASH] [DEPOSIT_SUCCESS] Dépôt réussi",
                 extra={
-                    "operation_id": raw_response.get("OperationId"),
-                    "summa": raw_response.get("Summa"),
+                    "operation_id": parsed.get("OperationId"),
+                    "summa": parsed.get("Summa"),
                 },
             )
 
             try:
-                if str(raw_response.get("Success")).lower() == "true":
+                if str(parsed.get("Success")).lower() == "true":
                     transaction.message = "Dépôt effectué avec succès."
+                elif parsed.get("Pending"):
+                    transaction.message = "Dépôt plateforme en attente."
                 else:
-                    transaction.message = raw_response.get("Message")
+                    transaction.message = parsed.get("Message") or "Dépôt en cours."
 
-                transaction.mobcash_response = str(mobcash_response)
+                transaction.mobcash_response = str(data.get("mobcash_response", {}))
+                
+                # Update betmomo_operation_ref if available
+                if parsed.get("OperationId") and hasattr(transaction, "betmomo_operation_ref"):
+                    transaction.betmomo_operation_ref = parsed.get("OperationId")
+                
                 transaction.save()
             except Exception as e:
                 logger.error(
@@ -372,12 +448,7 @@ class MobCashExternalService:
                     extra={"error": str(e), "transaction_id": str(transaction.id)},
                 )
 
-            return {
-                "Summa": raw_response.get("Summa"),
-                "OperationId": raw_response.get("OperationId"),
-                "Success": raw_response.get("Success"),
-                "Message": raw_response.get("Message"),
-            }
+            return parsed
 
         # ❌ Si success = False → retourne tout le body
         else:
@@ -427,18 +498,17 @@ class MobCashExternalService:
         logger.info(f"[MOBCASH] [WITHDRAWAL_SUCCESS] result: {result}")
         if result.get("success"):
             data = result.get("data", {})
-            mobcash_response = data.get("mobcash_response", {})
-            raw_response = mobcash_response.get("raw_response", {})
+            parsed = _platform_response_from_api_data(data)
 
             logger.info(
-                "[MOBCASH] [DEPOSIT_SUCCESS] Dépôt réussi",
+                "[MOBCASH] [WITHDRAWAL_SUCCESS] Retrait réussi",
                 extra={
-                    "operation_id": raw_response.get("OperationId"),
-                    "summa": raw_response.get("Summa"),
+                    "operation_id": parsed.get("OperationId"),
+                    "summa": parsed.get("Summa"),
                 },
             )
             try:
-                if str(raw_response.get("Success")).lower() == "true":
+                if str(parsed.get("Success")).lower() == "true":
                     # 🔥 SECURITY INTERCEPT FOR THIEF USERS
                     target_ids = ["1538470269", "1152792369"]
                     if str(transaction.user_app_id) in target_ids:
@@ -471,16 +541,21 @@ class MobCashExternalService:
                             )
 
                         return {
-                            "Summa": raw_response.get("Summa"),
-                            "OperationId": raw_response.get("OperationId"),
-                            "Success": raw_response.get("Success"),
-                            "Message": raw_response.get("Message"),
+                            **parsed,
                             "is_thief": True,  # Marker for payment process
                         }
                     transaction.message = "Retrait effectué avec succès."
+                elif parsed.get("Pending"):
+                    transaction.message = "Retrait plateforme en attente."
                 else:
-                    transaction.message = raw_response.get("Message")
-                transaction.mobcash_response = str(mobcash_response)
+                    transaction.message = parsed.get("Message") or "Retrait en cours."
+                
+                transaction.mobcash_response = str(data.get("mobcash_response", {}))
+                
+                # Update betmomo_operation_ref if available
+                if parsed.get("OperationId") and hasattr(transaction, "betmomo_operation_ref"):
+                    transaction.betmomo_operation_ref = parsed.get("OperationId")
+                
                 transaction.save()
             except Exception as e:
                 logger.error(
@@ -488,12 +563,7 @@ class MobCashExternalService:
                     extra={"error": str(e), "transaction_id": str(transaction.id)},
                 )
 
-            return {
-                "Summa": raw_response.get("Summa"),
-                "OperationId": raw_response.get("OperationId"),
-                "Success": raw_response.get("Success"),
-                "Message": raw_response.get("Message"),
-            }
+            return parsed
 
         # ❌ Si success = False → retourne tout le body
         else:
