@@ -77,22 +77,28 @@ class ReadAppNameSerializer(serializers.ModelSerializer):
     class Meta:
         model = AppName
         exclude = [
-            "hash",
+            "_hash",
             "cashdeskid",
-            "cashierpass",
+            "_cashierpass",
         ]
 
 
 class CreateAppNameSerializer(serializers.ModelSerializer):
+    hash = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    cashierpass = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+
     class Meta:
         model = AppName
-        fields = "__all__"
+        exclude = ["_hash", "_cashierpass"]
 
 
 class UpdateSettingSerializer(serializers.ModelSerializer):
+    connect_pro_token = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    connect_pro_refresh = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+
     class Meta:
         model = Setting
-        fields = "__all__"
+        exclude = ["_connect_pro_token", "_connect_pro_refresh"]
 
 
 class ReadSettingSerializer(serializers.ModelSerializer):
@@ -102,8 +108,8 @@ class ReadSettingSerializer(serializers.ModelSerializer):
         exclude = [
             "connect_pro_password",
             "connect_pro_email",
-            "connect_pro_token",
-            "connect_pro_refresh",
+            "_connect_pro_token",
+            "_connect_pro_refresh",
             "expired_connect_pro_token",
             "mobcash_api_key",
             "mobcash_api_secret",
@@ -114,9 +120,12 @@ class ReadSettingSerializer(serializers.ModelSerializer):
 
 
 class CreateSettingSerializer(serializers.ModelSerializer):
+    connect_pro_token = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    connect_pro_refresh = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+
     class Meta:
         model = Setting
-        fields = "__all__"
+        exclude = ["_connect_pro_token", "_connect_pro_refresh"]
 
 
 class ValidateVersionSerializer(serializers.Serializer):
