@@ -73,7 +73,7 @@ def feexpay_deposit(transaction):
         "phoneNumber": phone_number,
         "amount": amount,
         "shop": shop,
-        "description": f"Demande de paiement - Transaction {transaction.reference}",
+        "description": f"Demande de paiement - Transaction",
         "firstName": first_name,
         "lastName": last_name,
         "email": (
