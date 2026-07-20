@@ -38,10 +38,10 @@ cred = credentials.Certificate(os.path.join(BASE_DIR, "mobcash.json"))
 initialize_app(cred)
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
-# if DEBUG == "False":
-#     DEBUG = False
-# else:
-#     DEBUG = True
+if DEBUG == "False":
+    DEBUG = False
+else:
+    DEBUG = True
 
 ALLOWED_HOSTS = [
     "dev.slaterci.net",
