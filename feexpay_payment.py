@@ -5,6 +5,7 @@ from mobcash_inte.models import (
 )
 from accounts.models import User
 import os
+import re
 from dotenv import load_dotenv
 from django.db.models import Q
 from mobcash_inte.serializers import TransactionDetailsSerializer
@@ -37,6 +38,24 @@ def send_event(channel_name, event_name, data):
         },
     )
 
+def normalize_feexpay_phone_number(transaction: Transaction) -> str:
+    phone_number = re.sub(r"\D", "", str(transaction.phone_number or ""))
+    network = getattr(transaction, "network", None)
+
+    indication = re.sub(r"\D", "", str(getattr(network, "indication", "") or ""))
+    country_code = (getattr(network, "country_code", "") or "").strip().lower()
+    is_benin = indication == "229" or country_code == "bj"
+
+    local_number = phone_number
+    if indication and phone_number.startswith(indication):
+        local_number = phone_number[len(indication):]
+
+    if is_benin and len(local_number) != 10:
+        local_number = f"01{local_number}"
+
+    if indication:
+        return f"{indication}{local_number}"
+    return phone_number
 
 def feexpay_payout(transaction: Transaction):
     """
@@ -64,7 +83,7 @@ def feexpay_payout(transaction: Transaction):
         return
     
     # Récupérer le numéro de téléphone
-    phone_number = transaction.phone_number 
+    phone_number = normalize_feexpay_phone_number(transaction)
     # Nettoyer le numéro (retirer le préfixe si présent, comme dans deposit_connect)
     # if len(phone_number) > 10:
     #     phone_number = phone_number[3:] if phone_number.startswith("229") else phone_number
@@ -162,7 +181,7 @@ def feexpay_deposit(transaction: Transaction):
         return
 
     # Récupérer le numéro de téléphone
-    phone_number = transaction.phone_number 
+    phone_number = normalize_feexpay_phone_number(transaction)
     # Nettoyer le numéro (retirer le préfixe si présent, comme dans deposit_connect)
     # if len(phone_number) > 10:
     #     phone_number = phone_number[3:] if phone_number.startswith("229") else phone_number

@@ -1,6 +1,7 @@
 import asyncio
 import requests
 import os
+import re
 from accounts.models import User
 import constant
 from dotenv import load_dotenv
@@ -1146,6 +1147,25 @@ def disbursment_process(transaction: Transaction):
 
 # ==================== FEEXPAY FUNCTIONS ====================
 
+def normalize_feexpay_phone_number(transaction: Transaction) -> str:
+    phone_number = re.sub(r"\D", "", str(transaction.phone_number or ""))
+    network = getattr(transaction, "network", None)
+
+    indication = re.sub(r"\D", "", str(getattr(network, "indication", "") or ""))
+    country_code = (getattr(network, "country_code", "") or "").strip().lower()
+    is_benin = indication == "229" or country_code == "bj"
+
+    local_number = phone_number
+    if indication and phone_number.startswith(indication):
+        local_number = phone_number[len(indication):]
+
+    if is_benin and len(local_number) != 10:
+        local_number = f"01{local_number}"
+
+    if indication:
+        return f"{indication}{local_number}"
+    return phone_number
+
 def feexpay_payout(transaction: Transaction):
     """
     Fonction pour créer un retrait Feexpay
@@ -1178,7 +1198,7 @@ def feexpay_payout(transaction: Transaction):
         return
 
     # Récupérer le numéro de téléphone
-    phone_number = transaction.phone_number 
+    phone_number = normalize_feexpay_phone_number(transaction)
 
     # Déterminer le réseau depuis payment_mode ou network
 
@@ -1263,7 +1283,7 @@ def feexpay_deposit(transaction: Transaction):
         return
 
     # Récupérer le numéro de téléphone
-    phone_number = transaction.phone_number
+    phone_number = normalize_feexpay_phone_number(transaction)
 
     # Récupérer les informations utilisateur
     user = transaction.user if transaction.user else transaction.telegram_user
