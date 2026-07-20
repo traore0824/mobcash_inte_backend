@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django import forms
 
 from accounts.models import Advertisement
 from .models import (
@@ -198,8 +199,36 @@ class NotificationAdmin(admin.ModelAdmin):
     )
 
 
+class SettingAdminForm(forms.ModelForm):
+    connect_pro_token = forms.CharField(
+        required=False, widget=forms.Textarea(attrs={"rows": 2}), label="Connect Pro Token"
+    )
+    connect_pro_refresh = forms.CharField(
+        required=False, widget=forms.Textarea(attrs={"rows": 2}), label="Connect Pro Refresh"
+    )
+
+    class Meta:
+        model = Setting
+        exclude = ["_connect_pro_token", "_connect_pro_refresh"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance and self.instance.pk:
+            self.fields["connect_pro_token"].initial = self.instance.connect_pro_token
+            self.fields["connect_pro_refresh"].initial = self.instance.connect_pro_refresh
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        instance.connect_pro_token = self.cleaned_data.get("connect_pro_token") or ""
+        instance.connect_pro_refresh = self.cleaned_data.get("connect_pro_refresh") or ""
+        if commit:
+            instance.save()
+        return instance
+
+
 @admin.register(Setting)
 class SettingAdmin(admin.ModelAdmin):
+    form = SettingAdminForm
     list_display = (
         "id",
         "minimum_deposit",

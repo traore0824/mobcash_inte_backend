@@ -91,6 +91,29 @@ class CreateAppNameSerializer(serializers.ModelSerializer):
         model = AppName
         exclude = ["_hash", "_cashierpass"]
 
+    def create(self, validated_data):
+        hash_value = validated_data.pop("hash", None)
+        cashierpass_value = validated_data.pop("cashierpass", None)
+        instance = AppName(**validated_data)
+        if hash_value is not None:
+            instance.hash = hash_value
+        if cashierpass_value is not None:
+            instance.cashierpass = cashierpass_value
+        instance.save()
+        return instance
+
+    def update(self, instance, validated_data):
+        hash_value = validated_data.pop("hash", None)
+        cashierpass_value = validated_data.pop("cashierpass", None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        if hash_value is not None:
+            instance.hash = hash_value
+        if cashierpass_value is not None:
+            instance.cashierpass = cashierpass_value
+        instance.save()
+        return instance
+
 
 class UpdateSettingSerializer(serializers.ModelSerializer):
     connect_pro_token = serializers.CharField(required=False, allow_null=True, allow_blank=True)
@@ -99,6 +122,18 @@ class UpdateSettingSerializer(serializers.ModelSerializer):
     class Meta:
         model = Setting
         exclude = ["_connect_pro_token", "_connect_pro_refresh"]
+
+    def update(self, instance, validated_data):
+        token = validated_data.pop("connect_pro_token", None)
+        refresh = validated_data.pop("connect_pro_refresh", None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        if token is not None:
+            instance.connect_pro_token = token
+        if refresh is not None:
+            instance.connect_pro_refresh = refresh
+        instance.save()
+        return instance
 
 
 class ReadSettingSerializer(serializers.ModelSerializer):
@@ -126,6 +161,29 @@ class CreateSettingSerializer(serializers.ModelSerializer):
     class Meta:
         model = Setting
         exclude = ["_connect_pro_token", "_connect_pro_refresh"]
+
+    def create(self, validated_data):
+        token = validated_data.pop("connect_pro_token", None)
+        refresh = validated_data.pop("connect_pro_refresh", None)
+        instance = Setting(**validated_data)
+        if token is not None:
+            instance.connect_pro_token = token
+        if refresh is not None:
+            instance.connect_pro_refresh = refresh
+        instance.save()
+        return instance
+
+    def update(self, instance, validated_data):
+        token = validated_data.pop("connect_pro_token", None)
+        refresh = validated_data.pop("connect_pro_refresh", None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        if token is not None:
+            instance.connect_pro_token = token
+        if refresh is not None:
+            instance.connect_pro_refresh = refresh
+        instance.save()
+        return instance
 
 
 class ValidateVersionSerializer(serializers.Serializer):

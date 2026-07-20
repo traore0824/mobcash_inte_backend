@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django import forms
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.utils.translation import gettext_lazy as _
 from .models import AppName, TelegramUser, User
@@ -70,8 +71,32 @@ class UserAdmin(BaseUserAdmin):
     )
 
 
+class AppNameAdminForm(forms.ModelForm):
+    hash = forms.CharField(required=False, label="Hash")
+    cashierpass = forms.CharField(required=False, label="Cashier pass")
+
+    class Meta:
+        model = AppName
+        exclude = ["_hash", "_cashierpass"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance and self.instance.pk:
+            self.fields["hash"].initial = self.instance.hash
+            self.fields["cashierpass"].initial = self.instance.cashierpass
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        instance.hash = self.cleaned_data.get("hash") or ""
+        instance.cashierpass = self.cleaned_data.get("cashierpass") or ""
+        if commit:
+            instance.save()
+        return instance
+
+
 @admin.register(AppName)
 class AppNameAdmin(admin.ModelAdmin):
+    form = AppNameAdminForm
     list_display = (
         "name",
         "enable",

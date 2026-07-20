@@ -1619,7 +1619,7 @@ class StatisticsView(decorators.APIView):
         apps = AppName.objects.all()
         connect_pro_logger.info("[STATISTICS] Nombre d'apps: %s", apps.count())
 
-        has_app_with_hash = apps.filter(hash__isnull=False).exclude(hash="").exists()
+        has_app_with_hash = apps.filter(_hash__isnull=False).exclude(_hash="").exists()
         connect_pro_logger.info("[STATISTICS] has_app_with_hash=%s", has_app_with_hash)
 
         net_volume = 0

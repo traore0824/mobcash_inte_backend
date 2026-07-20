@@ -28,7 +28,11 @@ def _is_already_encrypted(value: str | None) -> bool:
     """
     if not value:
         return True  # rien à faire
-    return value.startswith("gAAAAA")
+    if not value.startswith("gAAAAA"):
+        return False
+    # Déjà chiffré : on vérifie qu'après decrypt on a du clair (pas une 2e couche)
+    plain = decrypt(value)
+    return bool(plain) and not plain.startswith("gAAAAA")
 
 
 class Command(BaseCommand):
@@ -70,9 +74,11 @@ class Command(BaseCommand):
                 self.stdout.write(f"  [{app.name}] hash → déjà chiffré, skip")
                 total_skipped += 1
             else:
-                self.stdout.write(f"  [{app.name}] hash → chiffrement en clair '{raw_hash[:6]}...'")
+                # Peut être clair OU double-chiffré : decrypt() normalise puis on re-chiffre 1 fois
+                plain = decrypt(raw_hash)
+                self.stdout.write(f"  [{app.name}] hash → chiffrement (len={len(plain or '')})")
                 if not dry_run:
-                    app._hash = encrypt(raw_hash)
+                    app._hash = encrypt(plain)
                 changed = True
                 total_encrypted += 1
 
@@ -84,9 +90,10 @@ class Command(BaseCommand):
                 self.stdout.write(f"  [{app.name}] cashierpass → déjà chiffré, skip")
                 total_skipped += 1
             else:
-                self.stdout.write(f"  [{app.name}] cashierpass → chiffrement en clair")
+                plain = decrypt(raw_pass)
+                self.stdout.write(f"  [{app.name}] cashierpass → chiffrement")
                 if not dry_run:
-                    app._cashierpass = encrypt(raw_pass)
+                    app._cashierpass = encrypt(plain)
                 changed = True
                 total_encrypted += 1
 
@@ -112,9 +119,10 @@ class Command(BaseCommand):
                 self.stdout.write(f"  [Setting #{setting.id}] connect_pro_token → déjà chiffré, skip")
                 total_skipped += 1
             else:
-                self.stdout.write(f"  [Setting #{setting.id}] connect_pro_token → chiffrement en clair")
+                plain = decrypt(raw_token)
+                self.stdout.write(f"  [Setting #{setting.id}] connect_pro_token → chiffrement")
                 if not dry_run:
-                    setting._connect_pro_token = encrypt(raw_token)
+                    setting._connect_pro_token = encrypt(plain)
                 changed = True
                 total_encrypted += 1
 
@@ -126,9 +134,10 @@ class Command(BaseCommand):
                 self.stdout.write(f"  [Setting #{setting.id}] connect_pro_refresh → déjà chiffré, skip")
                 total_skipped += 1
             else:
-                self.stdout.write(f"  [Setting #{setting.id}] connect_pro_refresh → chiffrement en clair")
+                plain = decrypt(raw_refresh)
+                self.stdout.write(f"  [Setting #{setting.id}] connect_pro_refresh → chiffrement")
                 if not dry_run:
-                    setting._connect_pro_refresh = encrypt(raw_refresh)
+                    setting._connect_pro_refresh = encrypt(plain)
                 changed = True
                 total_encrypted += 1
 
