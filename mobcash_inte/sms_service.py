@@ -5,7 +5,6 @@ import requests
 
 from accounts.models import User
 from mobcash_inte.models import Setting
-from payment import CONNECT_PRO_BASE_URL, connect_pro_token
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +27,8 @@ def _get_user_sms_phone(user) -> str:
 
 
 def send_sms_message(to_phone: str, message: str) -> dict:
+    from payment import CONNECT_PRO_BASE_URL, connect_pro_token
+
     if not is_sms_enabled():
         return {"success": False, "error": "sms_disabled"}
 

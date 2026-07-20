@@ -4,6 +4,7 @@ from django.db import models
 
 from accounts.models import AppName, TelegramUser, User
 import constant
+from crypto_fields import encrypt, decrypt
 
 
 # ---------------------------------------------------------------------------
@@ -311,9 +312,25 @@ class Setting(models.Model):
     wave_default_link = models.URLField(blank=True, null=True)
     connect_pro_password = models.CharField(max_length=250, blank=True, null=True)
     connect_pro_email = models.CharField(max_length=250, blank=True, null=True)
-    connect_pro_token = models.TextField(blank=True, null=True)
-    connect_pro_refresh = models.TextField(blank=True, null=True)
+    _connect_pro_token = models.TextField(blank=True, null=True, db_column='connect_pro_token')
+    _connect_pro_refresh = models.TextField(blank=True, null=True, db_column='connect_pro_refresh')
     expired_connect_pro_token = models.DateTimeField(blank=True, null=True)
+
+    @property
+    def connect_pro_token(self):
+        return decrypt(self._connect_pro_token)
+
+    @connect_pro_token.setter
+    def connect_pro_token(self, value):
+        self._connect_pro_token = encrypt(value)
+
+    @property
+    def connect_pro_refresh(self):
+        return decrypt(self._connect_pro_refresh)
+
+    @connect_pro_refresh.setter
+    def connect_pro_refresh(self, value):
+        self._connect_pro_refresh = encrypt(value)
     orange_default_link = models.URLField(blank=True, null=True)
     mtn_default_link = models.URLField(blank=True, null=True)
     telegram = models.CharField(blank=True, null=True, max_length=500)

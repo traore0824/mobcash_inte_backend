@@ -5,6 +5,7 @@ from django.contrib.auth.models import AbstractUser
 # from tinymce.models import HTMLField
 from django.db.models import Sum
 from .manager import UserManager
+from crypto_fields import encrypt, decrypt
 
 
 class AppName(models.Model):
@@ -15,9 +16,27 @@ class AppName(models.Model):
     )
     image = models.TextField(blank=True, null=True)
     enable = models.BooleanField(default=True)
-    hash = models.CharField(blank=True, null=True, max_length=120)
+
+    # Champs chiffrés — stockés en clair dans la colonne DB mais accédés via property
+    _hash = models.TextField(blank=True, null=True, db_column='hash')
     cashdeskid = models.CharField(blank=True, null=True, max_length=120)
-    cashierpass = models.CharField(blank=True, null=True, max_length=120)
+    _cashierpass = models.TextField(blank=True, null=True, db_column='cashierpass')
+
+    @property
+    def hash(self):
+        return decrypt(self._hash)
+
+    @hash.setter
+    def hash(self, value):
+        self._hash = encrypt(value)
+
+    @property
+    def cashierpass(self):
+        return decrypt(self._cashierpass)
+
+    @cashierpass.setter
+    def cashierpass(self, value):
+        self._cashierpass = encrypt(value)
     deposit_tuto_link = models.URLField(blank=True, null=True)
     withdrawal_tuto_link = models.URLField(blank=True, null=True)
     why_withdrawal_fail = models.URLField(blank=True, null=True)
