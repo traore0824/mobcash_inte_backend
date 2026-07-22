@@ -1635,7 +1635,13 @@ class StatisticsView(decorators.APIView):
             connect_pro_logger.info(
                 "[STATISTICS] [SOURCE=GET_WALLET_BALANCE] Appel get_wallet_balance()"
             )
-            net_volume = MobCashExternalService().get_wallet_balance()
+            try:
+                net_volume = MobCashExternalService().get_wallet_balance()
+            except Exception as e:
+                connect_pro_logger.error(
+                    "[STATISTICS] [GET_WALLET_BALANCE] Erreur: %s", e, exc_info=True
+                )
+                net_volume = None
             if net_volume is not None:
                 connect_pro_logger.info(
                     "[STATISTICS] [GET_WALLET_BALANCE_RESULT] Valeur retournée: %s",

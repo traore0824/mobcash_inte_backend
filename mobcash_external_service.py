@@ -120,11 +120,16 @@ class MobCashExternalService:
         self.api_secret = os.getenv("MOBCASHAPI_API_SECRET")
         self.timeout = 300
 
+        if not self.api_key or not self.api_secret:
+            logger.warning(
+                "[MOBCASH] [INIT] MOBCASHAPI_API_KEY ou MOBCASHAPI_API_SECRET manquant"
+            )
+
         logger.info(
             "[MOBCASH] [INIT] Service initialisé",
             extra={
                 'base_url': self.base_url,
-                'api_key': self.api_key[:10] + '...',  # Log seulement le début
+                'api_key': (self.api_key[:10] + '...') if self.api_key else None,
                 'timeout': self.timeout
             }
         )
@@ -145,6 +150,9 @@ class MobCashExternalService:
             Signature hexadécimale
         """
         message = f"{timestamp}{method}{path}{body}"
+
+        if not self.api_secret:
+            raise ValueError("MOBCASHAPI_API_SECRET non configuré")
 
         signature = hmac.new(
             self.api_secret.encode('utf-8'),
@@ -1074,6 +1082,12 @@ class MobCashExternalService:
             float: Le solde du wallet en float, 0.0 en cas d'erreur
         """
         endpoint = "/api/v1/wallets/balance/"
+
+        if not self.api_key or not self.api_secret or not self.base_url:
+            logger.warning(
+                "[MOBCASH] [GET_WALLET_BALANCE] Config MobCash incomplète, solde=0"
+            )
+            return 0.0
 
         logger.info(
             "[MOBCASH] [GET_WALLET_BALANCE_START] Récupération du solde du wallet"
