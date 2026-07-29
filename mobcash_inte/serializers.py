@@ -154,6 +154,31 @@ class ReadSettingSerializer(serializers.ModelSerializer):
         ]
 
 
+class SettingMobileSerializer(serializers.ModelSerializer):
+    """Champs settings utilisés par turaincash-mobile et turnaicash (même pattern Betpay + champs TurainCash)."""
+
+    class Meta:
+        model = Setting
+        fields = [
+            "crypto_enable",
+            "deposit_enable",
+            "withdraw_enable",
+            "coupon_enable",
+            "referral_bonus",
+            "whatsapp_phone",
+            "telegram",
+            "dowload_apk_link",
+            "use_whatsapp",
+            "use_chatbot",
+            "use_telegram",
+            "use_sms",
+            "moov_marchand_phone",
+            "orange_marchand_phone",
+            "bf_moov_marchand_phone",
+            "bf_orange_marchand_phone",
+        ]
+
+
 class CreateSettingSerializer(serializers.ModelSerializer):
     connect_pro_token = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     connect_pro_refresh = serializers.CharField(required=False, allow_null=True, allow_blank=True)

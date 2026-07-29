@@ -99,6 +99,7 @@ from mobcash_inte.serializers import (
     PartnerTransactionSerializer,
     ReadAppNameSerializer,
     ReadSettingSerializer,
+    SettingMobileSerializer,
     RechargeMobcashBalanceSerializer,
     RewardTransactionSerializer,
     SearchUserBetSerializer,
@@ -441,6 +442,20 @@ class SettingViews(decorators.APIView):
     def get(self, request, *args, **kwargs):
         setting = Setting.objects.first()
         return Response(ReadSettingSerializer(setting).data)
+
+
+class SettingMobileView(decorators.APIView):
+    """Settings allégés pour mobile et site (v2) — même pattern que Betpay."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        setting = Setting.objects.first()
+        if not setting:
+            return Response({})
+        response = Response(SettingMobileSerializer(setting).data)
+        response["Cache-Control"] = "public, max-age=300"
+        return response
 
 
 class ValidateVersionView(decorators.APIView):

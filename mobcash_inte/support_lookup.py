@@ -72,6 +72,53 @@ def _normalize_type(raw: str | None) -> str | None:
     return TYPE_ALIASES.get(key)
 
 
+# Préfixes générés par generate_reference() — lookup accepte avec ou sans.
+_REFERENCE_PREFIXES = (
+    "depot-",
+    "retrait-",
+    "deposit-",
+    "withdrawal-",
+    "partner-",
+)
+
+
+def _reference_candidates(reference: str) -> list[str]:
+    """Variantes de référence pour match exact en base (avec/sans préfixe)."""
+    raw = (reference or "").strip()
+    if not raw:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: str) -> None:
+        v = (value or "").strip()
+        if v and v not in seen:
+            seen.add(v)
+            out.append(v)
+
+    add(raw)
+    low = raw.lower()
+    bare = raw
+    for prefix in _REFERENCE_PREFIXES:
+        if low.startswith(prefix):
+            bare = raw[len(prefix) :]
+            add(bare)
+            break
+    for prefix in _REFERENCE_PREFIXES:
+        add(f"{prefix}{bare}")
+    return out
+
+
+def _find_transaction_by_reference(reference: str):
+    """Retrouve une TX en essayant référence brute puis variantes préfixe."""
+    qs = Transaction.objects.select_related("app", "network")
+    for ref in _reference_candidates(reference):
+        tx = qs.filter(reference=ref).first()
+        if tx:
+            return tx
+    return None
+
+
 def _normalize_boolish(raw: str | None) -> bool | None:
     if raw is None:
         return None
@@ -405,11 +452,7 @@ def _resolve_transaction(reference: str, type_raw: str, phone_number: str):
             ),
         }, status.HTTP_400_BAD_REQUEST
 
-    transaction = (
-        Transaction.objects.select_related("app", "network")
-        .filter(reference=reference.strip())
-        .first()
-    )
+    transaction = _find_transaction_by_reference(reference)
     if not transaction:
         return None, type_trans, {
             "found": False,
@@ -1015,11 +1058,7 @@ def build_verify_sms_proof_response(
             "nearby_messages": [],
         }, status.HTTP_400_BAD_REQUEST
 
-    transaction = (
-        Transaction.objects.select_related("app", "network")
-        .filter(reference=reference.strip())
-        .first()
-    )
+    transaction = _find_transaction_by_reference(reference)
     if not transaction:
         return {
             "found": False,
@@ -1337,11 +1376,7 @@ def _resolve_tx_for_connect_action(
             "message": "Merci d'indiquer la référence de la transaction.",
         }, status.HTTP_400_BAD_REQUEST
 
-    transaction = (
-        Transaction.objects.select_related("app", "network")
-        .filter(reference=reference.strip())
-        .first()
-    )
+    transaction = _find_transaction_by_reference(reference)
     if not transaction:
         return None, {
             "ok": False,

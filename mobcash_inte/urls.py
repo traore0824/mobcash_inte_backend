@@ -43,6 +43,7 @@ urlpatterns = [
     path("transaction-detail", views.TransactionDetailView.as_view()),
     path("change-transaction", views.ChangeTransactionStatus.as_view()),
     path("setting", views.SettingViews.as_view()),
+    path("v2/setting/", views.SettingMobileView.as_view()),
     path("validate-version", views.ValidateVersionView.as_view()),
     path("deposit", views.CreateDeposit.as_view()),
     path("list-deposit", views.ListDeposit.as_view()),
