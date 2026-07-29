@@ -432,7 +432,8 @@ def _base_payload(transaction: Transaction, *, message: str, **extra) -> dict:
         "mobcash_message": _mobcash_message(transaction),
         "app": {
             "name": transaction.app.name if transaction.app else None,
-            "public_name": transaction.app.public_name if transaction.app else None,
+            # Mobcash AppName n'a pas public_name (contrairement à Betpay) — on renvoie name.
+            "public_name": transaction.app.name if transaction.app else None,
         },
         "user_app_id": transaction.user_app_id,
         "phone_number": transaction.phone_number,
