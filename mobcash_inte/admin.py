@@ -244,10 +244,29 @@ class SettingAdmin(admin.ModelAdmin):
         "crypto_enable",
         "deposit_enable",
         "withdraw_enable",
+        "use_whatsapp",
+        "use_chatbot",
+        "use_telegram",
+        "use_sms",
     )
 
-    search_fields = ("whatsapp_phone", "connect_pro_email")
-    list_filter = ("referral_bonus", "deposit_reward", "coupon_enable", "enable_coupon_monetization", "auto_approve_withdrawal")
+    search_fields = (
+        "whatsapp_phone",
+        "connect_pro_email",
+        "openwa_token",
+        "telegram_bot_username",
+    )
+    list_filter = (
+        "referral_bonus",
+        "deposit_reward",
+        "coupon_enable",
+        "enable_coupon_monetization",
+        "auto_approve_withdrawal",
+        "use_whatsapp",
+        "use_chatbot",
+        "use_telegram",
+        "use_sms",
+    )
     readonly_fields = ("id",)
     fieldsets = (
         (
@@ -301,11 +320,30 @@ class SettingAdmin(admin.ModelAdmin):
             },
         ),
         (
-            "WhatsApp & Social",
+            "My Customer (WhatsApp & Chatbot)",
             {
                 "fields": (
+                    "use_whatsapp",
+                    "use_chatbot",
+                    "openwa_token",
+                    "openwa_session_id",
                     "whatsapp_phone",
+                ),
+                "description": (
+                    "Clé développeur My Customer (X-API-Key) + activation WhatsApp / chatbot. "
+                    "Le Session ID est obsolète : la ligne WhatsApp se gère dans le dashboard My Customer."
+                ),
+            },
+        ),
+        (
+            "Telegram & SMS",
+            {
+                "fields": (
+                    "use_telegram",
                     "telegram",
+                    "telegram_bot_username",
+                    "telegram_bot_token",
+                    "use_sms",
                 )
             },
         ),
