@@ -8,6 +8,8 @@ from mobcash_inte.models import Setting
 
 logger = logging.getLogger("mobcash_inte_backend.transactions")
 
+DEFAULT_TELEGRAM_WEBHOOK_URL = "https://api.fastxof.com/auth/telegram-webhook"
+
 
 def normalize_telegram_username(value: str) -> str:
     if not value:
@@ -18,13 +20,25 @@ def normalize_telegram_username(value: str) -> str:
     return username.lstrip("@").lower()
 
 
+def _get_setting():
+    return Setting.objects.first()
+
+
+def get_bot_token() -> str:
+    """Token du bot (Setting), fallback env TOKEN_BOT."""
+    setting = _get_setting()
+    if setting and getattr(setting, "telegram_bot_token", None):
+        return setting.telegram_bot_token.strip()
+    return (os.getenv("TOKEN_BOT") or "").strip()
+
+
 def is_telegram_enabled() -> bool:
-    setting = Setting.objects.first()
-    return bool(setting and setting.use_telegram and os.getenv("TOKEN_BOT"))
+    setting = _get_setting()
+    return bool(setting and setting.use_telegram and get_bot_token())
 
 
 def get_bot_username() -> str:
-    setting = Setting.objects.first()
+    setting = _get_setting()
     if setting and setting.telegram_bot_username:
         return normalize_telegram_username(setting.telegram_bot_username)
     return normalize_telegram_username(os.getenv("TELEGRAM_BOT_USERNAME", ""))
@@ -38,7 +52,7 @@ def get_telegram_link(user_id) -> str:
 
 
 def _bot_api(method: str, params: dict = None) -> dict:
-    bot_token = os.getenv("TOKEN_BOT")
+    bot_token = get_bot_token()
     if not bot_token:
         return {"ok": False, "error": "telegram_bot_not_configured"}
     url = f"https://api.telegram.org/bot{bot_token}/{method}"
@@ -48,6 +62,32 @@ def _bot_api(method: str, params: dict = None) -> dict:
     except Exception as e:
         logger.error(f"telegram api {method} error: {e}", exc_info=True)
         return {"ok": False, "error": str(e)}
+
+
+def _bot_api_post(method: str, params: dict = None) -> dict:
+    bot_token = get_bot_token()
+    if not bot_token:
+        return {"ok": False, "error": "telegram_bot_not_configured"}
+    url = f"https://api.telegram.org/bot{bot_token}/{method}"
+    try:
+        response = requests.post(url, data=params or {}, timeout=15)
+        return response.json()
+    except Exception as e:
+        logger.error(f"telegram api POST {method} error: {e}", exc_info=True)
+        return {"ok": False, "error": str(e)}
+
+
+def get_telegram_webhook_info() -> dict:
+    if not get_bot_token():
+        return {"ok": False, "error": "telegram_bot_not_configured"}
+    return _bot_api("getWebhookInfo")
+
+
+def configure_telegram_webhook(webhook_url: str = None) -> dict:
+    if not is_telegram_enabled():
+        return {"ok": False, "error": "telegram_disabled"}
+    url = (webhook_url or DEFAULT_TELEGRAM_WEBHOOK_URL).strip()
+    return _bot_api_post("setWebhook", {"url": url})
 
 
 def validate_telegram_username(username: str) -> dict:
@@ -80,7 +120,7 @@ def send_telegram_message(chat_id: str, text: str) -> dict:
     if not is_telegram_enabled():
         return {"success": False, "error": "telegram_disabled"}
 
-    bot_token = os.getenv("TOKEN_BOT")
+    bot_token = get_bot_token()
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     try:
         response = requests.post(
@@ -120,5 +160,9 @@ def send_telegram_to_user(user, title: str, content: str) -> dict:
     if not user.telegram_verified or not user.user_telegram_chat_id:
         return {"success": False, "error": "telegram_not_verified"}
 
-    text = f"*{title}*\n\n{content}" if title else content
+    from mobcash_inte.helpers import html_to_plain_text
+
+    plain_content = html_to_plain_text(content)
+    plain_title = html_to_plain_text(title) if title else ""
+    text = f"*{plain_title}*\n\n{plain_content}" if plain_title else plain_content
     return send_telegram_message(user.user_telegram_chat_id, text)

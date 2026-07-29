@@ -1,5 +1,13 @@
 from django.urls import path, include
 from . import views
+from .chatbot_webhook import ChatbotHumanMessagesView, ChatbotWebhookView
+from .support_lookup import (
+    PublicTransactionLookupView,
+    PublicTransactionConfirmPaymentView,
+    PublicTransactionVerifySmsProofView,
+    PublicTransactionConfirmWithdrawalView,
+    PublicTransactionRetryDepositView,
+)
 from rest_framework.routers import DefaultRouter
 from fcm_django.api.rest_framework import FCMDeviceAuthorizedViewSet
 
@@ -40,7 +48,36 @@ urlpatterns = [
     path("list-deposit", views.ListDeposit.as_view()),
     path("caisses", views.ListCaisse.as_view()),
     path("upload", views.UploadFileView.as_view()),
+    path("upload/file", views.UploadFileView.as_view()),
     path("search-user", views.SearchUserBet.as_view()),
+    path("v2/chatbot/message/", views.ChatbotMessageView.as_view()),
+    path("v2/chatbot/webhook/", ChatbotWebhookView.as_view()),
+    path("v2/chatbot/human-messages/", ChatbotHumanMessagesView.as_view()),
+    path(
+        "public/transaction-lookup",
+        PublicTransactionLookupView.as_view(),
+        name="public-transaction-lookup",
+    ),
+    path(
+        "public/transaction-lookup/confirm-payment",
+        PublicTransactionConfirmPaymentView.as_view(),
+        name="public-transaction-confirm-payment",
+    ),
+    path(
+        "public/transaction-lookup/verify-sms-proof",
+        PublicTransactionVerifySmsProofView.as_view(),
+        name="public-transaction-verify-sms-proof",
+    ),
+    path(
+        "public/transaction-lookup/confirm-withdrawal",
+        PublicTransactionConfirmWithdrawalView.as_view(),
+        name="public-transaction-confirm-withdrawal",
+    ),
+    path(
+        "public/transaction-lookup/retry-deposit",
+        PublicTransactionRetryDepositView.as_view(),
+        name="public-transaction-retry-deposit",
+    ),
     path("coupon", views.CreateCoupon.as_view()),
     path("coupon/<int:pk>", views.CouponDetailAPIView.as_view()),
     path("ann", views.CreateAdvertisementViews.as_view()),
@@ -60,6 +97,11 @@ urlpatterns = [
         views.ChangeTransactionStatusManuelViews.as_view(),
     ),
     path("finalize-transaction", views.FinalizeDepositTransaction.as_view()),
+    path(
+        "public/finalize-transaction",
+        views.PublicFinalizeDepositTransaction.as_view(),
+        name="public-finalize-transaction",
+    ),
     path(
         "last-transaction", views.LastTransactionView.as_view(), name="last-transaction"
     ),

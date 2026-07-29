@@ -115,8 +115,59 @@ else
 fi
 
 # Étape 3.5: Créer et appliquer les migrations
+# Backup de TOUS les champs chiffrés AVANT migrate (évite wipe RemoveField+AddField)
+# - AppName: hash, cashierpass
+# - Setting: connect_pro_token, connect_pro_refresh
 info "Étape 3.5: Création et application des migrations..."
+ENCRYPTED_FIELDS_BACKUP="$(pwd)/.deploy_encrypted_fields_backup.json"
 if [ -f "manage.py" ]; then
+    info "Backup des champs chiffrés (AppName + Setting)..."
+    if python3 manage.py shell <<'PY'
+import json
+from pathlib import Path
+from django.conf import settings
+
+backup_path = Path(settings.BASE_DIR) / ".deploy_encrypted_fields_backup.json"
+payload = {"app_names": [], "settings": []}
+
+try:
+    from accounts.models import AppName
+    for app in AppName.objects.all().only("id", "_hash", "_cashierpass"):
+        payload["app_names"].append({
+            "id": str(app.id),
+            "hash": app._hash,
+            "cashierpass": app._cashierpass,
+        })
+except Exception as e:
+    print(f"WARN_APPNAME_BACKUP: {e}")
+
+try:
+    from mobcash_inte.models import Setting
+    for setting in Setting.objects.all().only(
+        "id", "_connect_pro_token", "_connect_pro_refresh", "expired_connect_pro_token"
+    ):
+        expired = setting.expired_connect_pro_token
+        payload["settings"].append({
+            "id": str(setting.id),
+            "connect_pro_token": setting._connect_pro_token,
+            "connect_pro_refresh": setting._connect_pro_refresh,
+            "expired_connect_pro_token": expired.isoformat() if expired else None,
+        })
+except Exception as e:
+    print(f"WARN_SETTING_BACKUP: {e}")
+
+backup_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+print(
+    f"BACKUP_OK apps={len(payload['app_names'])} "
+    f"settings={len(payload['settings'])} path={backup_path}"
+)
+PY
+    then
+        info "Backup champs chiffrés OK → $ENCRYPTED_FIELDS_BACKUP"
+    else
+        warn "Backup champs chiffrés impossible (on continue quand même)"
+    fi
+
     # Créer les migrations
     if python3 manage.py makemigrations; then
         info "Migrations créées avec succès"
@@ -130,6 +181,89 @@ if [ -f "manage.py" ]; then
     else
         error "Erreur lors de l'application des migrations"
         exit 1
+    fi
+
+    # Restore des champs chiffrés si le backup existe
+    if [ -f "$ENCRYPTED_FIELDS_BACKUP" ]; then
+        info "Restore des champs chiffrés depuis le backup..."
+        if python3 manage.py shell <<'PY'
+import json
+from pathlib import Path
+from django.conf import settings
+from django.utils.dateparse import parse_datetime
+
+backup_path = Path(settings.BASE_DIR) / ".deploy_encrypted_fields_backup.json"
+if not backup_path.exists():
+    print("NO_BACKUP")
+    raise SystemExit(0)
+
+raw = json.loads(backup_path.read_text(encoding="utf-8"))
+# Compat ancien format (liste AppName seule)
+if isinstance(raw, list):
+    payload = {"app_names": raw, "settings": []}
+else:
+    payload = raw
+
+restored_apps = 0
+skipped_apps = 0
+restored_settings = 0
+skipped_settings = 0
+
+try:
+    from accounts.models import AppName
+    for row in payload.get("app_names") or []:
+        app_id = row.get("id")
+        if not app_id:
+            skipped_apps += 1
+            continue
+        updated = AppName.objects.filter(id=app_id).update(
+            _hash=row.get("hash"),
+            _cashierpass=row.get("cashierpass"),
+        )
+        if updated:
+            restored_apps += 1
+        else:
+            skipped_apps += 1
+except Exception as e:
+    print(f"WARN_APPNAME_RESTORE: {e}")
+
+try:
+    from mobcash_inte.models import Setting
+    for row in payload.get("settings") or []:
+        setting_id = row.get("id")
+        if not setting_id:
+            skipped_settings += 1
+            continue
+        fields = {
+            "_connect_pro_token": row.get("connect_pro_token"),
+            "_connect_pro_refresh": row.get("connect_pro_refresh"),
+        }
+        expired_raw = row.get("expired_connect_pro_token")
+        if expired_raw:
+            fields["expired_connect_pro_token"] = parse_datetime(expired_raw)
+        updated = Setting.objects.filter(id=setting_id).update(**fields)
+        if updated:
+            restored_settings += 1
+        else:
+            skipped_settings += 1
+except Exception as e:
+    print(f"WARN_SETTING_RESTORE: {e}")
+
+print(
+    f"RESTORE_OK apps={restored_apps}/{skipped_apps} "
+    f"settings={restored_settings}/{skipped_settings}"
+)
+PY
+        then
+            info "Restore champs chiffrés OK"
+            rm -f "$ENCRYPTED_FIELDS_BACKUP"
+            # Nettoyage ancien nom de fichier si présent
+            rm -f "$(pwd)/.deploy_appname_keys_backup.json"
+        else
+            warn "Restore a échoué — fichier conservé: $ENCRYPTED_FIELDS_BACKUP"
+        fi
+    else
+        warn "Pas de fichier backup chiffré à restaurer"
     fi
 else
     warn "Fichier manage.py non trouvé, saut des migrations"
@@ -246,6 +380,7 @@ info "  - Code mis à jour depuis Git"
 info "  - Environnement virtuel activé"
 info "  - Vérification Django effectuée"
 info "  - Migrations créées et appliquées"
+info "  - Clés chiffrées sauvegardées puis restaurées (AppName + Setting)"
 info "  - Gunicorn redémarré"
 info "  - Services Supervisor redémarrés"
 info "  - Vérifications Python effectuées"

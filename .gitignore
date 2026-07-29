@@ -104,6 +104,8 @@ celerybeat.pid
 
 # Environments
 .env
+.deploy_appname_keys_backup.json
+.deploy_encrypted_fields_backup.json
 
 .venv
 LearnTest/

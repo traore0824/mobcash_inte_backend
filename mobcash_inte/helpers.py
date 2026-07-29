@@ -1,10 +1,13 @@
+import html
 import logging
 import os
+import re
 import requests
 from accounts.models import AppName, TelegramUser, User
 from celery import shared_task
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+from django.utils.html import strip_tags
 
 from logger import LoggerService
 from mobcash_inte.whatsapp_service import send_whatsapp_to_user
@@ -22,6 +25,20 @@ import secrets
 import string
 
 load_dotenv()
+
+
+def html_to_plain_text(value: str) -> str:
+    """Convertit le HTML (ex. React Quill) en texte lisible pour SMS/WhatsApp/Telegram/push."""
+    if not value:
+        return ""
+    text = str(value)
+    text = re.sub(r"<\s*br\s*/?\s*>", "\n", text, flags=re.I)
+    text = re.sub(r"</\s*(p|div|li|tr|h[1-6])\s*>", "\n", text, flags=re.I)
+    text = strip_tags(text)
+    text = html.unescape(text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    return text.strip()
 
 
 def get_access_token():

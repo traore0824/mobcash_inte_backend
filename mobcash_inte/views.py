@@ -141,6 +141,64 @@ class UploadFileView(generics.ListCreateAPIView):
     queryset = UploadFile.objects.all()
 
 
+class ChatbotMessageView(decorators.APIView):
+    """Proxy in-app chatbot → My Customer /sdk/message/ (X-API-Key = openwa_token)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        from mobcash_inte.chatbot_service import send_chatbot_message
+
+        data = request.data if hasattr(request.data, "get") else {}
+        user = request.user
+        audio = request.FILES.get("audio") or request.FILES.get("file")
+        audio_bytes = None
+        audio_name = "message-vocal.ogg"
+        audio_content_type = "audio/ogg"
+        if audio is not None:
+            audio_content_type = str(getattr(audio, "content_type", "") or "").lower()
+            if not (
+                audio_content_type.startswith("audio/")
+                or audio_content_type == "application/ogg"
+            ):
+                return Response(
+                    {"detail": "Le fichier doit être un audio."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if getattr(audio, "size", 0) > 8 * 1024 * 1024:
+                return Response(
+                    {"detail": "Audio trop lourd (max 8 Mo)."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            audio_bytes = audio.read()
+            audio_name = str(getattr(audio, "name", "") or audio_name)
+        external_id = (
+            str(getattr(user, "id", "") or "")
+            or getattr(user, "email", None)
+            or getattr(user, "username", None)
+            or "anonymous"
+        )
+        phone = str(getattr(user, "phone", "") or "").strip()
+        indicative = str(getattr(user, "phone_indicative", "") or "").strip()
+        customer_name = (
+            str(getattr(user, "email", "") or "").strip()
+            or (f"{indicative}{phone}" if phone else "")
+        )
+        body, code = send_chatbot_message(
+            message=(data.get("message") or "").strip(),
+            customer_external_id=str(external_id),
+            customer_name=customer_name,
+            conversation_id=(data.get("conversation_id") or None),
+            page_key=(data.get("page_key") or "").strip(),
+            route=(data.get("route") or "").strip(),
+            screen_title=(data.get("screen_title") or "").strip(),
+            audio_bytes=audio_bytes,
+            audio_name=audio_name,
+            audio_content_type=audio_content_type,
+        )
+        return Response(body, status=code)
+
+
 class CreateNetworkView(generics.ListCreateAPIView):
     serializer_class = NetworkSerializer
 
@@ -2636,6 +2694,17 @@ class FinalizeDepositTransaction(decorators.APIView):
                 content=f"Vous avez effectué un dépôt de {transaction.amount} FCFA sur votre compte {transaction.app.name if transaction.app else 'plateforme'}",
             )
         return Response(TransactionDetailsSerializer(transaction).data)
+
+
+class PublicFinalizeDepositTransaction(FinalizeDepositTransaction):
+    """
+    Clone public de finalize-transaction pour l'agent MyCustomer.
+    Même logique de crédit compte de paris, sans auth admin.
+    """
+
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+
 
 class LastTransactionView(generics.RetrieveAPIView):
     """

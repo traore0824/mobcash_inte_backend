@@ -297,9 +297,39 @@ def send_otp_whatsapp(request):
 
 
 @api_view(["POST"])
+@permission_classes([permissions.AllowAny])
+def check_whatsapp_phone(request):
+    phone = request.data.get("user_whatsapp_phone") or request.data.get("phone")
+    if not phone:
+        return Response(
+            {"success": False, "message": "INVALID_PHONE"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not is_whatsapp_enabled():
+        return Response(
+            {"success": False, "message": "WHATSAPP_DISABLED"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    validation = validate_whatsapp_phone(phone)
+    if not validation.get("exists"):
+        return Response(
+            {"success": False, "message": "NUMBER_NOT_ON_WHATSAPP"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    normalized = normalize_whatsapp_phone(phone)
+    return Response(
+        {
+            "success": True,
+            "exists": True,
+            "user_whatsapp_phone": normalized,
+        }
+    )
+
+
+@api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
 def update_whatsapp_phone(request):
-    phone = request.data.get("user_whatsapp_phone")
+    phone = request.data.get("user_whatsapp_phone") or request.data.get("whatsapp")
     user = request.user
     if phone in (None, ""):
         user.user_whatsapp_phone = None
@@ -308,13 +338,13 @@ def update_whatsapp_phone(request):
         return Response({"success": True, "user_whatsapp_phone": None, "whatsapp_verified": False})
     if not is_whatsapp_enabled():
         return Response(
-            {"success": False, "details": "WhatsApp non activé"},
+            {"success": False, "message": "WHATSAPP_DISABLED"},
             status=status.HTTP_400_BAD_REQUEST,
         )
     validation = validate_whatsapp_phone(phone)
     if not validation.get("exists"):
         return Response(
-            {"success": False, "details": "Numéro WhatsApp invalide ou introuvable"},
+            {"success": False, "message": "NUMBER_NOT_ON_WHATSAPP"},
             status=status.HTTP_400_BAD_REQUEST,
         )
     normalized = normalize_whatsapp_phone(phone)

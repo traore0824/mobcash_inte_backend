@@ -149,7 +149,7 @@ class ReadSettingSerializer(serializers.ModelSerializer):
             "mobcash_api_key",
             "mobcash_api_secret",
             "openwa_token",
-            "use_telegram",
+            "telegram_bot_token",
             "telegram_bot_username",
         ]
 

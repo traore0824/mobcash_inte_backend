@@ -25,6 +25,10 @@ load_dotenv()
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv("SECRET_KEY")
 
+# Actions agent : confirm-withdrawal / retry-deposit (False = endpoints 403)
+ALLOW_USER_TRANSACTION_ACTIONS = os.getenv(
+    "ALLOW_USER_TRANSACTION_ACTIONS", "False"
+).strip().lower() in {"1", "true", "yes", "on"}
 
 FCM_DJANGO_SETTINGS = {
     "ONE_DEVICE_PER_USER": False,

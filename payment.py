@@ -71,6 +71,20 @@ def connect_base_url():
 CONNECT_PRO_BASE_URL = os.getenv("CONNECT_PRO_BASE_URL")
 
 
+def format_phone(numero, longueur_locale=10):
+    digits = re.sub(r"\D", "", str(numero))
+    if len(digits) < longueur_locale:
+        return numero
+    return digits[-longueur_locale:]
+
+
+def _connect_pro_api_base() -> str:
+    """Préfère CONNECT_PRO_BASE_URL (env), sinon Setting.connect_pro_base_url."""
+    base = (CONNECT_PRO_BASE_URL or "").strip() or (connect_base_url() or "")
+    return base.rstrip("/")
+
+
+
 def connect_pro_token():
     setting = Setting.objects.first()
     token = None
@@ -1677,3 +1691,210 @@ def connect_balance():
         return {"data": response.json(), "code": constant.CODE_SUCCESS}
     except Exception as e:
         return {"error": str(e), "code": constant.CODE_EXEPTION}
+
+
+
+def connect_pro_verify_transaction_by_user_sms(
+    *,
+    transaction_uid: str,
+    amount,
+    phone: str,
+    network_id: str | None = None,
+    tid: str = "",
+    ref: str = "",
+    operator_id: str = "",
+    operation_at: str | None = None,
+) -> dict:
+    """
+    POST /api/payments/user/verify-transaction-by-user-sms/
+
+    Confirme si un SMS/FCM correspondant existe côté Connect Pro.
+    Fenêtre match : operation_at (sinon created_at TX côté Connect) → now.
+    nearby_messages (si not_found/mismatch) = 3 derniers SMS, PAS une preuve.
+    Ne valide JAMAIS la transaction (validates_transaction reste false).
+    """
+    token = connect_pro_token()
+    if not token:
+        return {
+            "ok": False,
+            "sms_found": False,
+            "result": "technical_error",
+            "message": "Token Connect Pro indisponible.",
+            "validates_transaction": False,
+            "candidates": [],
+            "nearby_messages": [],
+        }
+
+    url = _connect_pro_api_base() + "/api/payments/user/verify-transaction-by-user-sms/"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "transaction_uid": str(transaction_uid).strip(),
+        "amount": str(amount).strip(),
+        "phone": str(phone or "").strip(),
+        "tid": str(tid or "").strip(),
+        "ref": str(ref or "").strip(),
+        "id": str(operator_id or "").strip(),
+    }
+    if network_id:
+        payload["network_id"] = str(network_id).strip()
+    if operation_at and str(operation_at).strip():
+        payload["operation_at"] = str(operation_at).strip()
+
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        try:
+            data = response.json()
+        except Exception:
+            data = {
+                "ok": False,
+                "sms_found": False,
+                "result": "technical_error",
+                "message": f"Réponse Connect Pro non JSON (HTTP {response.status_code}).",
+                "validates_transaction": False,
+                "candidates": [],
+                "nearby_messages": [],
+                "raw": (response.text or "")[:500],
+            }
+        if not isinstance(data, dict):
+            data = {
+                "ok": False,
+                "sms_found": False,
+                "result": "technical_error",
+                "message": "Réponse Connect Pro invalide.",
+                "validates_transaction": False,
+                "candidates": [],
+                "nearby_messages": [],
+            }
+        data["validates_transaction"] = False
+        data.setdefault("candidates", [])
+        data.setdefault("nearby_messages", [])
+        data.setdefault("http_status", response.status_code)
+        connect_pro_logger.info(
+            "[CONNECT_VERIFY_SMS] status=%s result=%s sms_found=%s uid=%s",
+            response.status_code,
+            data.get("result"),
+            data.get("sms_found"),
+            payload["transaction_uid"],
+        )
+        return data
+    except Exception as e:
+        connect_pro_logger.critical(f"[CONNECT_VERIFY_SMS] erreur: {e}")
+        return {
+            "ok": False,
+            "sms_found": False,
+            "result": "technical_error",
+            "message": f"Erreur appel Connect Pro: {e}",
+            "validates_transaction": False,
+            "candidates": [],
+            "nearby_messages": [],
+        }
+
+
+def connect_pro_confirm_withdrawal(
+    *,
+    transaction_uid: str,
+    amount=None,
+    note: str = "",
+) -> dict:
+    """POST /api/payments/user/transactions/<uid>/confirm-withdrawal/"""
+    token = connect_pro_token()
+    if not token:
+        return {
+            "ok": False,
+            "error": "Token Connect Pro indisponible.",
+            "code": "no_token",
+        }
+
+    uid = str(transaction_uid).strip()
+    url = (
+        _connect_pro_api_base()
+        + f"/api/payments/user/transactions/{uid}/confirm-withdrawal/"
+    )
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    payload = {}
+    if amount not in (None, ""):
+        payload["amount"] = str(amount).strip()
+    if note:
+        payload["note"] = str(note).strip()
+
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        try:
+            data = response.json()
+        except Exception:
+            data = {
+                "ok": False,
+                "error": f"Réponse Connect Pro non JSON (HTTP {response.status_code}).",
+                "raw": (response.text or "")[:500],
+            }
+        if not isinstance(data, dict):
+            data = {"ok": False, "error": "Réponse Connect Pro invalide."}
+        data.setdefault("ok", response.status_code < 400)
+        data["http_status"] = response.status_code
+        connect_pro_logger.info(
+            "[CONNECT_CONFIRM_WITHDRAWAL] status=%s uid=%s",
+            response.status_code,
+            uid,
+        )
+        return data
+    except Exception as e:
+        connect_pro_logger.critical(f"[CONNECT_CONFIRM_WITHDRAWAL] erreur: {e}")
+        return {"ok": False, "error": f"Erreur appel Connect Pro: {e}", "code": "request_error"}
+
+
+def connect_pro_retry_deposit(
+    *,
+    transaction_uid: str,
+    note: str = "",
+) -> dict:
+    """POST /api/payments/user/transactions/<uid>/retry-deposit/"""
+    token = connect_pro_token()
+    if not token:
+        return {
+            "ok": False,
+            "error": "Token Connect Pro indisponible.",
+            "code": "no_token",
+        }
+
+    uid = str(transaction_uid).strip()
+    url = (
+        _connect_pro_api_base()
+        + f"/api/payments/user/transactions/{uid}/retry-deposit/"
+    )
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    payload = {}
+    if note:
+        payload["note"] = str(note).strip()
+
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        try:
+            data = response.json()
+        except Exception:
+            data = {
+                "ok": False,
+                "error": f"Réponse Connect Pro non JSON (HTTP {response.status_code}).",
+                "raw": (response.text or "")[:500],
+            }
+        if not isinstance(data, dict):
+            data = {"ok": False, "error": "Réponse Connect Pro invalide."}
+        data.setdefault("ok", response.status_code < 400)
+        data["http_status"] = response.status_code
+        connect_pro_logger.info(
+            "[CONNECT_RETRY_DEPOSIT] status=%s uid=%s",
+            response.status_code,
+            uid,
+        )
+        return data
+    except Exception as e:
+        connect_pro_logger.critical(f"[CONNECT_RETRY_DEPOSIT] erreur: {e}")
+        return {"ok": False, "error": f"Erreur appel Connect Pro: {e}", "code": "request_error"}

@@ -1,6 +1,7 @@
 import uuid
 
 from django.db import models
+from django.db.models import Q
 
 from accounts.models import AppName, TelegramUser, User
 import constant
@@ -365,11 +366,33 @@ class Setting(models.Model):
     crypto_enable = models.BooleanField(default=False)
     deposit_enable = models.BooleanField(default=True)
     withdraw_enable = models.BooleanField(default=True)
-    use_whatsapp = models.BooleanField(default=False)
-    openwa_session_id = models.CharField(max_length=255, blank=True, null=True)
-    openwa_token = models.CharField(max_length=500, blank=True, null=True)
+    use_whatsapp = models.BooleanField(
+        default=False,
+        verbose_name="Activer WhatsApp",
+        help_text="Envoi / validation via l'API My Customer (ligne WhatsApp connectée requise).",
+    )
+    use_chatbot = models.BooleanField(
+        default=False,
+        verbose_name="Activer le chatbot",
+        help_text="Chat in-app via My Customer (même clé openwa_token / X-API-Key que WhatsApp).",
+    )
+    openwa_session_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        verbose_name="Session ID (obsolète)",
+        help_text="Plus utilisé avec My Customer — la ligne WhatsApp se gère dans le dashboard My Customer.",
+    )
+    openwa_token = models.CharField(
+        max_length=500,
+        blank=True,
+        null=True,
+        verbose_name="My Customer API Key",
+        help_text="Clé développeur (header X-API-Key) depuis le dashboard My Customer.",
+    )
     use_telegram = models.BooleanField(default=False)
     telegram_bot_username = models.CharField(max_length=150, blank=True, null=True)
+    telegram_bot_token = models.CharField(max_length=500, blank=True, null=True)
     use_sms = models.BooleanField(default=False)
 
     def __str__(self):
@@ -419,6 +442,10 @@ class Transaction(models.Model):
     withdriwal_code = models.CharField(max_length=50, blank=True, null=True)
     error_message = models.TextField(blank=True, null=True)
     message = models.TextField(default="Transaction en cours", blank=True, null=True)
+    bot_transaction = models.BooleanField(
+        default=False,
+        help_text="Corrigée via agent/bot (confirm-withdrawal / retry-deposit)",
+    )
     transaction_link = models.TextField(blank=True, null=True)
     net_payable_amout = models.PositiveIntegerField(blank=True, null=True)
     otp_code = models.CharField(max_length=20, blank=True, null=True)
@@ -531,6 +558,7 @@ class TransactionStatusHistory(models.Model):
         WEBHOOK_ERROR = "WEBHOOK_ERROR", "Erreur Webhook"
         API_ERROR     = "API_ERROR",     "Erreur API"
         USER          = "USER",          "Action Utilisateur"
+        AGENT_BOT     = "AGENT_BOT",     "Corrigé via agent/bot"
 
     transaction    = models.ForeignKey(Transaction, on_delete=models.CASCADE, related_name="status_history")
     old_status     = models.CharField(max_length=120)
@@ -894,3 +922,34 @@ class AuthorCouponRating(models.Model):
 
     def __str__(self):
         return str(self.id)
+
+
+class ChatbotHumanMessage(models.Model):
+    """
+    Réponse d'un conseiller (My Customer) reçue via le webhook
+    conversation.human_reply — servie au mobile via polling.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    conversation_id = models.CharField(max_length=64, db_index=True)
+    remote_message_id = models.CharField(max_length=64, blank=True, null=True)
+    customer_external_id = models.CharField(max_length=255, blank=True, default="")
+    content = models.TextField()
+    media_type = models.CharField(max_length=16, blank=True, default="text")
+    media_url = models.URLField(max_length=1000, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Chatbot Human Message"
+        verbose_name_plural = "Chatbot Human Messages"
+        ordering = ["created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["remote_message_id"],
+                condition=Q(remote_message_id__isnull=False),
+                name="uniq_chatbot_remote_message_id",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.conversation_id} · {self.content[:40]}"
