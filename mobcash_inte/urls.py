@@ -7,6 +7,7 @@ from .support_lookup import (
     PublicTransactionVerifySmsProofView,
     PublicTransactionConfirmWithdrawalView,
     PublicTransactionRetryDepositView,
+    PublicTransactionExpireView,
 )
 from rest_framework.routers import DefaultRouter
 from fcm_django.api.rest_framework import FCMDeviceAuthorizedViewSet
@@ -78,6 +79,11 @@ urlpatterns = [
         "public/transaction-lookup/retry-deposit",
         PublicTransactionRetryDepositView.as_view(),
         name="public-transaction-retry-deposit",
+    ),
+    path(
+        "public/expire-transaction",
+        PublicTransactionExpireView.as_view(),
+        name="public-expire-transaction",
     ),
     path("coupon", views.CreateCoupon.as_view()),
     path("coupon/<int:pk>", views.CouponDetailAPIView.as_view()),

@@ -251,10 +251,23 @@ def resolve_api_service(app: AppName):
     return None
 
 
-def generate_reference(prefix, rand_digits=3):
-    millis = int(time.time() * 1_000)
-    rnd = secrets.randbelow(10**rand_digits)
-    return f"{prefix}{millis:013d}{rnd:0{rand_digits}d}"
+def generate_reference(prefix=None, rand_digits=3):
+    """
+    Référence transaction : AAAAMMJJHHmm + 6 caractères alphanumériques.
+    prefix / rand_digits conservés pour compatibilité d'appel (non utilisés).
+    """
+    from django.utils import timezone
+
+    alphabet = string.ascii_letters + string.digits
+    for _ in range(20):
+        stamp = timezone.localtime().strftime("%Y%m%d%H%M")
+        suffix = "".join(secrets.choice(alphabet) for _ in range(6))
+        code = f"{stamp}{suffix}"
+        if not Transaction.objects.filter(reference=code).exists():
+            return code
+    stamp = timezone.localtime().strftime("%Y%m%d%H%M")
+    suffix = "".join(secrets.choice(alphabet) for _ in range(8))
+    return f"{stamp}{suffix}"
 
 
 def generate_ussd_code(transaction :Transaction):

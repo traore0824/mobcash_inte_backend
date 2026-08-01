@@ -415,6 +415,7 @@ TRANS_STATUS = [
     ("pending", "Pendind"),
     ("timeouf", "timeouf"),
     ("annuler", "Annuler"),
+    ("expired", "Expiré"),
 ]
 
 

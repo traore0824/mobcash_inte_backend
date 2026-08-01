@@ -36,6 +36,20 @@ CONNECT_PENDING = frozenset({"pending", "processing", "initiated", "created", "w
 
 # Dépôt support : statut Connect Pro en lecture seule (pas d'envoi d'argent).
 # Sert à distinguer « paiement MM OK / crédit Betpay en attente » vs capture à demander.
+HUMAN_HANDOFF_HINT = (
+    "\n\nSi cela ne fonctionne toujours pas, écrivez « je veux parler à une personne » "
+    "pour être mis en relation avec un conseiller."
+)
+
+
+def _with_human_handoff_hint(message: str) -> str:
+    text = (message or "").rstrip()
+    if "je veux parler" in text.lower():
+        return text
+    return f"{text}{HUMAN_HANDOFF_HINT}"
+
+
+
 SUPPORT_LOOKUP_CALL_CONNECT_FOR_DEPOSIT = True
 
 TYPE_ALIASES = {
@@ -263,6 +277,204 @@ def _extract_connect_sms_items(payload: dict | None) -> list[dict]:
     return items
 
 
+def _connect_sms_items_as_nearby(sms_items: list[dict]) -> list[dict]:
+    """Convertit les SMS statut Connect au format nearby (rapport agent)."""
+    nearby: list[dict] = []
+    for item in sms_items or []:
+        if not isinstance(item, dict):
+            continue
+        body = str(item.get("body") or "").strip()
+        if not body:
+            continue
+        nearby.append(
+            {
+                "body": body,
+                "amount": item.get("amount"),
+                "phone": item.get("phone"),
+                "timestamp": item.get("timestamp"),
+                "is_match": False,
+            }
+        )
+    return nearby[:3]
+
+
+def _phone_variants_for_sms(phone: Any) -> list[str]:
+    """Variantes locales / indicatif pour maximiser le match Connect nearby."""
+    digits = _digits(phone)
+    if not digits:
+        return []
+    variants: list[str] = []
+    for candidate in (
+        digits,
+        digits[-10:] if len(digits) >= 10 else digits,
+        digits[-9:] if len(digits) >= 9 else "",
+        f"225{digits[-10:]}" if len(digits) >= 10 else "",
+        f"225{digits}" if not digits.startswith("225") else "",
+    ):
+        c = _digits(candidate)
+        if c and c not in variants:
+            variants.append(c)
+    return variants
+
+
+def _sms_entries_from_verify(verify: dict | None) -> list[dict]:
+    """
+    Extrais SMS utiles du verify Connect : nearby_messages (prioritaire)
+    puis candidates (quand result=confirmed/possible → nearby souvent vide).
+    """
+    if not isinstance(verify, dict):
+        return []
+    nearby = _normalize_nearby_messages(verify.get("nearby_messages"))
+    if nearby:
+        return nearby
+    raw_candidates = verify.get("candidates")
+    if not isinstance(raw_candidates, list):
+        return []
+    items: list[dict] = []
+    for entry in raw_candidates[:3]:
+        if not isinstance(entry, dict):
+            continue
+        body = _nearby_body(entry)
+        if not body:
+            continue
+        items.append(
+            {
+                "body": body[:500],
+                "amount": entry.get("amount"),
+                "phone": entry.get("phone"),
+                "timestamp": entry.get("received_at") or entry.get("timestamp"),
+                "is_match": False,
+                "score": entry.get("score"),
+                "sms_type": entry.get("sms_type"),
+            }
+        )
+    return items
+
+
+def _connect_sms_type_for_transaction(transaction: Transaction) -> str:
+    """
+    Mapping inversé Transaction → Connect sms_type :
+    - retrait → deposit (Connect) (Connect / USSD path)
+    - dépôt → withdrawal (Connect)
+    """
+    if (getattr(transaction, "type_trans", None) or "").strip().lower() == "withdrawal":
+        return "deposit"
+    return "withdrawal"
+
+
+def _fetch_nearby_sms_for_agent(
+    transaction: Transaction,
+    connect_payload: dict | None,
+    *,
+    sms_type: str | None = None,
+) -> list[dict]:
+    """
+    3 derniers SMS du numéro pour le rapport agent — même source que
+    verify-transaction-by-user-sms (nearby_messages / candidates),
+    fallback SMS statut TX.
+    """
+    nearby, _ussd, _meta = _fetch_agent_sms_and_ussd(
+        transaction,
+        connect_payload,
+        sms_type=sms_type,
+    )
+    return nearby
+
+
+def _fetch_agent_sms_and_ussd(
+    transaction: Transaction,
+    connect_payload: dict | None = None,
+    *,
+    sms_type: str | None = None,
+) -> tuple[list[dict], list, dict]:
+    """
+    Un seul appel Connect verify-transaction-by-user-sms :
+    - nearby / candidates (SMS agent)
+    - ussd_path / has_ussd_path (si deposit Connect)
+
+    sms_type défaut = mapping inversé Betpay ↔ Connect.
+    """
+    meta: dict[str, Any] = {
+        "attempted": False,
+        "ok": None,
+        "has_ussd_path": False,
+        "sms_type": None,
+        "sms_type_filter": None,
+        "result": None,
+        "reason": None,
+        "connect": None,
+    }
+    nearby: list[dict] = []
+    ussd_path: list = []
+    connect_uid = (transaction.public_id or "").strip()
+    amount_norm = _normalize_amount_str(transaction.amount) or "0"
+    network_id = _resolve_connect_network_id(transaction)
+    operation_at = _to_iso_utc(getattr(transaction, "created_at", None))
+    resolved_sms_type = (sms_type or _connect_sms_type_for_transaction(transaction) or "").strip().lower()
+    meta["sms_type"] = resolved_sms_type or None
+    last_verify: dict | None = None
+
+    if connect_uid:
+        meta["attempted"] = True
+        for phone in _phone_variants_for_sms(transaction.phone_number):
+            network_attempts: list[str | None] = [network_id] if network_id else [None]
+            if network_id:
+                network_attempts.append(None)
+            for net in network_attempts:
+                try:
+                    verify = connect_pro_verify_transaction_by_user_sms(
+                        transaction_uid=connect_uid,
+                        amount=amount_norm,
+                        phone=phone,
+                        network_id=net,
+                        operation_at=operation_at,
+                        sms_type=resolved_sms_type or None,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "verify SMS+ussd failed phone=%s net=%s: %s",
+                        phone[-4:] if phone else "",
+                        net,
+                        exc,
+                    )
+                    continue
+                if not isinstance(verify, dict):
+                    continue
+                last_verify = verify
+                nearby = _sms_entries_from_verify(verify)
+                raw_ussd = verify.get("ussd_path")
+                ussd_path = raw_ussd if isinstance(raw_ussd, list) else []
+                meta["ok"] = bool(verify.get("ok"))
+                meta["has_ussd_path"] = bool(verify.get("has_ussd_path") or ussd_path)
+                meta["sms_type_filter"] = verify.get("sms_type_filter")
+                meta["result"] = verify.get("result")
+                meta["connect"] = {
+                    "result": verify.get("result"),
+                    "sms_found": verify.get("sms_found"),
+                    "has_ussd_path": meta["has_ussd_path"],
+                    "ussd_steps": len(ussd_path),
+                    "nearby_count": len(nearby),
+                    "sms_type_filter": meta["sms_type_filter"],
+                }
+                if nearby or ussd_path:
+                    return nearby, ussd_path, meta
+
+    if not nearby:
+        nearby = _normalize_nearby_messages(
+            _connect_sms_items_as_nearby(_extract_connect_sms_items(connect_payload))
+        )
+    if last_verify is None and not nearby and not ussd_path:
+        meta["reason"] = "verify_unavailable"
+    elif not nearby and not ussd_path:
+        meta["reason"] = (
+            (last_verify or {}).get("message")
+            or (last_verify or {}).get("result")
+            or "empty"
+        )
+    return nearby, ussd_path, meta
+
+
+
 def _connect_paid_evidence(payload: dict | None, transaction: Transaction) -> bool:
     """
     Paiement reçu côté Connect même si le statut n'est plus « success ».
@@ -369,6 +581,142 @@ def _deposit_connect_success_message(transaction: Transaction, *, phone_number: 
         "Le blocage est de notre côté, pas un problème de paiement de votre part.\n\n"
         f"Nous allons finaliser le crédit. Vous recevrez vos {amount} FCFA sur votre compte sous peu."
     )
+
+
+def _mobcash_success_flag(transaction: Transaction) -> bool | None:
+    """True/False si Success est présent dans mobcash_response, sinon None."""
+    data = _parse_jsonish(transaction.mobcash_response)
+    if not data:
+        return None
+    if "Success" not in data and "success" not in data:
+        return None
+    val = data.get("Success", data.get("success"))
+    if val is True or str(val).strip().lower() in {"true", "1", "yes"}:
+        return True
+    if val is False or str(val).strip().lower() in {"false", "0", "no"}:
+        return False
+    return None
+
+
+def _app_public_label(transaction: Transaction) -> str:
+    app = getattr(transaction, "app", None)
+    if not app:
+        return "votre application de jeu"
+    return (
+        (getattr(app, "public_name", None) or getattr(app, "name", None) or "")
+        .strip()
+        or "votre application de jeu"
+    )
+
+
+def _withdrawal_info_block(transaction: Transaction) -> str:
+    """Infos claires pour le client (réclamation retrait)."""
+    app_label = _app_public_label(transaction)
+    network = ""
+    if transaction.network:
+        network = (
+            (getattr(transaction.network, "public_name", None) or getattr(transaction.network, "name", None) or "")
+            .strip()
+        )
+    lines = [
+        "Voici les informations de votre retrait :",
+        f"• Application : {app_label}",
+        f"• Référence : {transaction.reference}",
+        f"• Montant : {transaction.amount or 0} FCFA",
+        f"• Téléphone : {(transaction.phone_number or '').strip() or 'N/A'}",
+    ]
+    if network:
+        lines.append(f"• Réseau : {network}")
+    player_id = (transaction.user_app_id or "").strip()
+    if player_id:
+        lines.append(f"• Identifiant joueur : {player_id}")
+    return "\n".join(lines)
+
+
+_DEPOSIT_SMS_HINTS = (
+    "reçu",
+    "recu",
+    "dépôt",
+    "depot",
+    "crédité",
+    "credite",
+    "vous avez reçu",
+    "vous avez recu",
+    "transaction réussie",
+    "transaction reussie",
+    "paiement reçu",
+    "paiement recu",
+)
+
+
+def _sms_suggests_mm_credit(
+    sms_items: list[dict],
+    transaction: Transaction,
+) -> bool:
+    """True si un SMS opérateur ressemble à un crédit MM sur le numéro."""
+    expected = _normalize_amount_str(transaction.amount)
+    for item in sms_items or []:
+        body = str(item.get("body") or "").lower()
+        if not body:
+            continue
+        hint_ok = any(h in body for h in _DEPOSIT_SMS_HINTS)
+        amount_ok = False
+        got = _normalize_amount_str(item.get("amount"))
+        if expected and got:
+            try:
+                amount_ok = float(got) == float(expected)
+            except ValueError:
+                amount_ok = False
+        if not amount_ok and expected and expected in re.sub(r"\D", "", body):
+            amount_ok = True
+        if hint_ok or amount_ok:
+            return True
+    return False
+
+
+def _request_withdrawal_mm_transfer(transaction: Transaction) -> dict:
+    """
+    Demande un transfert Connect (retry-deposit) pour un retrait.
+    Ne lève pas : retourne meta pour le payload agent.
+    """
+    from django.conf import settings as dj_settings
+
+    meta = {
+        "attempted": False,
+        "success": None,
+        "reason": None,
+        "connect_action": None,
+    }
+    if not getattr(dj_settings, "ALLOW_USER_TRANSACTION_ACTIONS", False):
+        meta["reason"] = "actions_disabled"
+        return meta
+    uid = (transaction.public_id or "").strip()
+    if not uid:
+        meta["reason"] = "missing_connect_uid"
+        return meta
+    meta["attempted"] = True
+    try:
+        result = connect_pro_retry_deposit(
+            transaction_uid=uid,
+            note="support_lookup:withdrawal_success_request_transfer",
+        )
+    except Exception as exc:
+        logger.warning("connect_pro_retry_deposit failed: %s", exc)
+        meta["success"] = False
+        meta["reason"] = str(exc)
+        return meta
+    meta["connect_action"] = result if isinstance(result, dict) else {"raw": result}
+    http_status = int((result or {}).get("http_status") or 200) if isinstance(result, dict) else 200
+    meta["success"] = bool(isinstance(result, dict) and result.get("ok")) and http_status < 400
+    if meta["success"] is False:
+        meta["reason"] = (
+            (result or {}).get("detail")
+            or (result or {}).get("error")
+            or (result or {}).get("message")
+            or "transfer_failed"
+        )
+    return meta
+
 
 
 def _connect_status_value(payload: dict | None) -> str | None:
@@ -593,7 +941,7 @@ def build_lookup_response(
             )
             return _base_payload(
                 transaction,
-                message=f"{intro} {detail}".strip(),
+                message=_with_human_handoff_hint(f"{intro} {detail}".strip()),
                 phase="done",
                 phone_match=True,
                 needs_escalation=False,
@@ -623,12 +971,14 @@ def build_lookup_response(
 
         # Paiement MM confirmé chez Connect (statut OK, ou preuve reçue :
         # confirmed_at / SMS opérateur, y compris transaction expirée)
-        # → problème côté crédit Betpay.
+        # → problème côté crédit plateforme.
         if connect_paid:
             return _base_payload(
                 transaction,
-                message=_deposit_connect_success_message(
-                    transaction, phone_number=phone_number
+                message=_with_human_handoff_hint(
+                    _deposit_connect_success_message(
+                        transaction, phone_number=phone_number
+                    )
                 ),
                 phase="done",
                 phone_match=True,
@@ -655,38 +1005,217 @@ def build_lookup_response(
             transfer_retry={"attempted": False, "success": None},
         ), status.HTTP_200_OK
 
+    # --- Retrait ---
+    intro = _intro(transaction, type_trans)
+    app_label = _app_public_label(transaction)
+    info = _withdrawal_info_block(transaction)
+
+    # Déjà accepté côté plateforme : message clair, pas d'échec trompeur.
+    if transaction.status == "accept":
+        detail = (
+            "Votre retrait a déjà été traité avec succès : l'argent a été envoyé "
+            f"vers votre numéro Mobile Money.\n\n{info}"
+        )
+        return _base_payload(
+            transaction,
+            message=_with_human_handoff_hint(f"{intro} {detail}".strip()),
+            phase="done",
+            phone_match=True,
+            needs_escalation=False,
+            connect={"checked": False, "ok": None, "status": None, "class": "skipped"},
+            transfer_retry={"attempted": False, "success": None},
+            mobcash_success=_mobcash_success_flag(transaction),
+        ), status.HTTP_200_OK
+
+    mobcash_ok = _mobcash_success_flag(transaction)
+
+    # Success == false : pas de virement reçu depuis l'app de paris.
+    if mobcash_ok is False:
+        detail = (
+            f"Nous n'avons pas reçu le virement depuis {app_label}. "
+            f"Merci de vérifier votre compte sur {app_label} pour vous assurer "
+            "que le retrait a bien été initié (demande de paiement ouverte / "
+            "en attente de validation).\n\n"
+            f"{info}"
+        )
+        return _base_payload(
+            transaction,
+            message=f"{intro} {detail}".strip(),
+            phase="done",
+            phone_match=True,
+            needs_escalation=True,
+            connect={"checked": False, "ok": None, "status": None, "class": "skipped"},
+            transfer_retry={"attempted": False, "success": None},
+            mobcash_success=False,
+        ), status.HTTP_200_OK
+
+    # Success == true : validé côté MobCash / app → Connect + SMS + demande transfert.
+    if mobcash_ok is True:
+        connect_payload = _connect_status_payload(transaction)
+        connect_class = _classify_connect(connect_payload)
+        connect_ok = connect_class == "ok"
+        connect_status = _connect_status_value(connect_payload)
+        connect_sms = _extract_connect_sms_items(connect_payload)
+        sms_credit = _sms_suggests_mm_credit(connect_sms, transaction)
+        connect_paid = connect_ok or _connect_paid_evidence(connect_payload, transaction)
+        connect_meta = {
+            "checked": connect_payload is not None,
+            "ok": connect_ok if connect_payload is not None else None,
+            "status": connect_status,
+            "class": connect_class if connect_payload is not None else "skipped",
+            "sms": connect_sms,
+            "sms_mm_credit": sms_credit,
+            "paid_evidence": connect_paid,
+            "confirmed_at": (
+                connect_payload.get("confirmed_at")
+                if isinstance(connect_payload, dict)
+                else None
+            ),
+        }
+
+        transfer_meta = {"attempted": False, "success": None, "reason": None}
+        needs_escalation = False
+
+        nearby: list[dict] = []
+        ussd_path: list = []
+        ussd_meta: dict[str, Any] = {
+            "attempted": False,
+            "ok": None,
+            "has_ussd_path": False,
+            "reason": None,
+        }
+        agent_message = None
+
+        if connect_ok or connect_paid:
+            detail = (
+                f"Bonne nouvelle : votre retrait a bien été validé sur {app_label}, "
+                "et l'envoi Mobile Money est confirmé.\n\n"
+                f"{info}"
+            )
+            user_message = _with_human_handoff_hint(f"{intro} {detail}".strip())
+        else:
+            # Connect pas success → message client simple ;
+            # agent : SMS nearby + ussd_path via un seul verify (sms_type=deposit).
+            transfer_meta = _request_withdrawal_mm_transfer(transaction)
+            needs_escalation = True
+            nearby, ussd_path, ussd_meta = _fetch_agent_sms_and_ussd(
+                transaction,
+                connect_payload,
+            )
+            phone_label = (transaction.phone_number or "").strip() or "son numéro Mobile Money"
+            player_id = (transaction.user_app_id or "").strip() or "non renseigné"
+            amount_label = f"{transaction.amount or 0} FCFA"
+            user_message = (
+                f"{intro} Bonne nouvelle : votre retrait a bien été validé sur "
+                f"{app_label}. Un agent va vous aider afin de vous faire votre "
+                f"virement.\n\n{info}"
+            ).strip()
+
+            # Rapport conseiller uniquement (jamais au client WhatsApp).
+            agent_lines = [
+                "À traiter — retrait non reçu sur Mobile Money",
+                "",
+                f"L'argent a quitté le compte {app_label} du joueur "
+                f"(identifiant {player_id}) : {amount_label} ont été débités.",
+                f"Le client n'a pas reçu cet argent sur son numéro {phone_label}.",
+                f"Référence : {transaction.reference}.",
+            ]
+            if nearby:
+                agent_lines.append(
+                    "Les SMS du numéro (fenêtre Connect) sont listés ci-dessous."
+                )
+            else:
+                agent_lines.append(
+                    "Aucun SMS n'a pu être récupéré pour ce numéro."
+                )
+            if ussd_path:
+                agent_lines.append(
+                    "Le chemin USSD de la transaction est disponible ci-dessous."
+                )
+            else:
+                agent_lines.append(
+                    "Aucun chemin USSD n'a pu être récupéré pour cette transaction."
+                )
+            if transfer_meta.get("attempted") and transfer_meta.get("success"):
+                agent_lines.append(
+                    "Un renvoi Mobile Money automatique a été demandé et accepté."
+                )
+            elif transfer_meta.get("attempted"):
+                agent_lines.append(
+                    "Le renvoi Mobile Money automatique n'a pas abouti : "
+                    "merci d'envoyer le montant manuellement au client."
+                )
+            else:
+                agent_lines.append(
+                    "Aucun renvoi automatique n'a pu être lancé : "
+                    "merci d'envoyer le montant manuellement au client."
+                )
+            agent_message = "\n".join(agent_lines).strip()
+            agent_nearby = _format_nearby_for_agent(nearby)
+            if agent_nearby:
+                agent_message = f"{agent_message}\n\n{agent_nearby}"
+            agent_ussd = _format_ussd_path_for_agent(ussd_path)
+            if agent_ussd:
+                agent_message = f"{agent_message}\n\n{agent_ussd}"
+
+        payload_extra: dict[str, Any] = {
+            "phase": "done",
+            "phone_match": True,
+            "needs_escalation": needs_escalation,
+            "connect": connect_meta,
+            "transfer_retry": {
+                "attempted": bool(transfer_meta.get("attempted")),
+                "success": transfer_meta.get("success"),
+                "reason": transfer_meta.get("reason"),
+            },
+            "mobcash_success": True,
+            "transfer_request": transfer_meta,
+        }
+        if agent_message is not None:
+            payload_extra["agent_message"] = agent_message
+            payload_extra["nearby_messages"] = nearby
+            payload_extra["ussd_path"] = ussd_path
+            payload_extra["has_ussd_path"] = bool(
+                ussd_path or ussd_meta.get("has_ussd_path")
+            )
+            payload_extra["ussd_path_meta"] = ussd_meta
+
+        return _base_payload(
+            transaction,
+            message=user_message,
+            **payload_extra,
+        ), status.HTTP_200_OK
+
+    # Pas de Success exploitable dans mobcash_response → comportement historique.
     connect_payload = _connect_status_payload(transaction)
     connect_class = _classify_connect(connect_payload)
     connect_ok = connect_class == "ok"
     connect_status = _connect_status_value(connect_payload)
-    intro = _intro(transaction, type_trans)
 
     transfer_retried = False
     transfer_ok = None
     needs_escalation = False
     detail = ""
 
-    if transaction.status == "accept":
-        detail = (
-            "Le retrait a bien été traité : l'argent a été envoyé vers votre numéro "
-            "Mobile Money."
-        )
-    elif transaction.status == "payment_init_success" and connect_class != "ok":
+    if transaction.status == "payment_init_success" and connect_class != "ok":
         detail = (
             "Le montant a déjà été débité de votre compte de jeu, "
             "mais l'envoi Mobile Money n'était pas confirmé côté Connect "
             f"(statut : {connect_status or connect_class}). "
-            "Aucune relance automatique n'est effectuée par cette vérification."
+            "Aucune relance automatique n'est effectuée par cette vérification.\n\n"
+            f"{info}"
         )
         needs_escalation = True
     elif transaction.status == "payment_init_success" and connect_ok:
         detail = (
-            "Le compte de jeu a été débité et l'envoi Mobile Money est confirmé côté opérateur."
+            "Le compte de jeu a été débité et l'envoi Mobile Money est confirmé "
+            f"côté opérateur.\n\n{info}"
         )
     else:
         detail = (
             "Le retrait est encore en cours de traitement. "
-            f"Statut actuel : {transaction.message or transaction.status}."
+            f"Statut actuel : {transaction.message or transaction.status}.\n\n"
+            f"{info}"
         )
 
     return _base_payload(
@@ -702,6 +1231,7 @@ def build_lookup_response(
             "class": connect_class,
         },
         transfer_retry={"attempted": transfer_retried, "success": transfer_ok},
+        mobcash_success=None,
     ), status.HTTP_200_OK
 
 
@@ -916,6 +1446,43 @@ def _format_nearby_for_agent(nearby: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _format_ussd_path_for_agent(ussd_path: list) -> str:
+    """Texte USSD pour le conseiller (jamais pour le client)."""
+    if not ussd_path:
+        return ""
+    lines = [
+        f"Chemin USSD Connect ({len(ussd_path)} étape(s)) :",
+        f"[[USSD_PATH count={len(ussd_path)}]]",
+    ]
+    for i, step in enumerate(ussd_path, 1):
+        lines.append(f"[[USSD i={i}]]")
+        if isinstance(step, dict):
+            # Affiche les clés utiles sans dump JSON brut illisible.
+            for key in (
+                "label",
+                "title",
+                "step",
+                "action",
+                "ussd",
+                "code",
+                "text",
+                "message",
+                "description",
+            ):
+                val = step.get(key)
+                if val not in (None, ""):
+                    lines.append(f"{key}: {str(val).strip()[:300]}")
+            # Si rien de connu, une ligne compacte.
+            if len(lines) and lines[-1] == f"[[USSD i={i}]]":
+                lines.append(str(step)[:400])
+        else:
+            lines.append(str(step).strip()[:400] or "(vide)")
+        lines.append("[[/USSD]]")
+    lines.append("[[/USSD_PATH]]")
+    return "\n".join(lines)
+
+
+
 def _normalize_nearby_messages(raw: Any) -> list[dict]:
     """Nearby = indicatif seulement (jamais une preuve / is_match false)."""
     if not isinstance(raw, list):
@@ -1026,10 +1593,10 @@ def build_verify_sms_proof_response(
     - transaction_uid = transaction.public_id
     - network_id = get_network_id("{name}-{country_code}") comme dépôt/retrait
     - amount / phone = ceux de la transaction (amount surchargeable via requête)
-    - operation_at (optionnel) → sinon created_at de la TX Blaffa
+    - operation_at (optionnel) → sinon created_at de la TX
     - Fenêtre Connect : operation_at → now ; nearby = 3 derniers SMS (pas une preuve)
     - tid / ref / id = extraits de la capture
-    - L'utilisateur envoie surtout la référence Blaffa.
+    - L'utilisateur envoie surtout la référence.
     """
     if not (reference or "").strip():
         return {
@@ -1153,7 +1720,7 @@ def build_verify_sms_proof_response(
             nearby_messages=[],
         ), status.HTTP_200_OK
 
-    # operation_at app → sinon created_at TX Blaffa (Connect : start → now)
+    # operation_at app → sinon created_at TX (Connect : start → now)
     resolved_operation_at = _to_iso_utc(operation_at) or _to_iso_utc(
         getattr(transaction, "created_at", None)
     )
@@ -1312,7 +1879,7 @@ class PublicTransactionVerifySmsProofView(APIView):
     (verify-transaction-by-user-sms). Ne valide jamais la TX.
 
     POST JSON (ou GET query) :
-      reference (obligatoire — référence Blaffa),
+      reference (obligatoire — référence),
       type?, amount? (sinon montant TX),
       operation_at? (sinon created_at TX),
       tid?, ref?, id? (extraits capture)
@@ -1369,7 +1936,7 @@ def _resolve_tx_for_connect_action(
     reference: str,
     expected_type: str | None = None,
 ) -> tuple[Transaction | None, dict | None, int]:
-    """Résout une TX Blaffa pour action Connect (uid = public_id)."""
+    """Résout une TX pour action Connect (uid = public_id)."""
     if not (reference or "").strip():
         return None, {
             "ok": False,
@@ -1383,7 +1950,7 @@ def _resolve_tx_for_connect_action(
             "ok": False,
             "result": "tx_not_found",
             "reference": reference.strip(),
-            "message": "Aucune transaction Blaffa avec cette référence.",
+            "message": "Aucune transaction avec cette référence.",
         }, status.HTTP_200_OK
 
     if expected_type and transaction.type_trans != expected_type:
@@ -1665,5 +2232,110 @@ class PublicTransactionRetryDepositView(APIView):
             reference=_first_nonempty(data.get("reference"), data.get("blaffa_reference")),
             amount=_first_nonempty(data.get("amount"), data.get("montant")),
             note=_first_nonempty(data.get("note"), data.get("commentaire")),
+        )
+        return Response(body, status=code)
+
+def build_expire_transaction_response(
+    *,
+    reference: str,
+    note: str = "",
+) -> tuple[dict, int]:
+    """
+    Endpoint public agent : marque une TX en expired.
+    Idempotent si déjà expired.
+    """
+    if not (reference or "").strip():
+        return {
+            "ok": False,
+            "result": "missing_params",
+            "message": "Merci d'indiquer la référence de la transaction.",
+        }, status.HTTP_400_BAD_REQUEST
+
+    transaction = (
+        Transaction.objects.select_related("app", "network")
+        .filter(reference=reference.strip())
+        .first()
+    )
+    if not transaction:
+        return {
+            "ok": False,
+            "result": "tx_not_found",
+            "reference": reference.strip(),
+            "message": "Aucune transaction avec cette référence.",
+        }, status.HTTP_200_OK
+
+    if transaction.status == "accept":
+        return _base_payload(
+            transaction,
+            message=(
+                "Cette transaction est déjà acceptée : "
+                "elle ne peut pas être passée en expired."
+            ),
+            ok=False,
+            result="already_accepted",
+            needs_escalation=True,
+        ), status.HTTP_200_OK
+
+    if transaction.status == "expired":
+        return _base_payload(
+            transaction,
+            message="Transaction déjà expirée.",
+            ok=True,
+            result="already_expired",
+            needs_escalation=False,
+        ), status.HTTP_200_OK
+
+    reason = (note or "").strip() or "Refusé depuis l'app agent support"
+    old_status = transaction.status
+    transaction.status = "expired"
+    transaction.error_message = reason[:1000]
+    transaction.save(update_fields=["status", "error_message"])
+    try:
+        TransactionStatusHistory.objects.create(
+            transaction=transaction,
+            old_status=old_status,
+            new_status="expired",
+            trigger_source=TransactionStatusHistory.Source.AGENT_BOT,
+            trigger_data={
+                "action": "expire",
+                "note": reason[:500],
+            },
+            message=reason[:500],
+        )
+    except Exception:
+        logger.exception("TransactionStatusHistory expire failed ref=%s", reference)
+
+    logger.info(
+        "TX expired by support ref=%s from=%s",
+        transaction.reference,
+        old_status,
+    )
+    return _base_payload(
+        transaction,
+        message="Transaction passée en expired.",
+        ok=True,
+        result="expired",
+        previous_status=old_status,
+        needs_escalation=False,
+    ), status.HTTP_200_OK
+
+
+class PublicTransactionExpireView(APIView):
+    """
+    POST : reference, note?
+    Passe la transaction en status=expired (refus agent).
+    """
+
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def post(self, request):
+        data = {}
+        if isinstance(getattr(request, "data", None), dict):
+            data.update(request.data)
+        data.update(request.query_params.dict())
+        body, code = build_expire_transaction_response(
+            reference=_first_nonempty(data.get("reference"), data.get("blaffa_reference")),
+            note=_first_nonempty(data.get("note"), data.get("commentaire"), data.get("reason")),
         )
         return Response(body, status=code)

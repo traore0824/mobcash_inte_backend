@@ -8,7 +8,7 @@ from mobcash_inte.models import Setting
 
 logger = logging.getLogger("mobcash_inte_backend.transactions")
 
-DEFAULT_TELEGRAM_WEBHOOK_URL = "https://api.fastxof.com/auth/telegram-webhook"
+DEFAULT_TELEGRAM_WEBHOOK_URL = "https://api.turaincash.com/auth/telegram-webhook"
 
 
 def normalize_telegram_username(value: str) -> str:
