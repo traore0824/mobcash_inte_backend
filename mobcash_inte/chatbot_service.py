@@ -41,6 +41,10 @@ def send_chatbot_message(
     message: str,
     customer_external_id: str,
     customer_name: str = "",
+    customer_first_name: str = "",
+    customer_last_name: str = "",
+    customer_email: str = "",
+    customer_phone: str = "",
     conversation_id: str | None = None,
     page_key: str = "",
     route: str = "",
@@ -55,13 +59,39 @@ def send_chatbot_message(
     if not setting.openwa_token:
         return {"detail": "Clé My Customer manquante.", "code": "missing_api_key"}, 503
 
+    first = (customer_first_name or "").strip()
+    last = (customer_last_name or "").strip()
+    email = (customer_email or "").strip()
+    phone = (customer_phone or "").strip()
+    # Nom d'affichage : prénom+nom ; ne jamais pousser l'email dans customer_name.
+    person = " ".join(p for p in (first, last) if p).strip()
+    raw_name = (customer_name or "").strip()
+    if person:
+        display_name = person
+    elif raw_name and "@" not in raw_name:
+        display_name = raw_name
+    else:
+        display_name = ""
+
     payload = {
         "message": (message or "").strip(),
         "customer_external_id": (customer_external_id or "anonymous").strip()
         or "anonymous",
     }
-    if customer_name.strip():
-        payload["customer_name"] = customer_name.strip()[:120]
+    if first:
+        payload["first_name"] = first[:80]
+        payload["customer_first_name"] = first[:80]
+    if last:
+        payload["last_name"] = last[:80]
+        payload["customer_last_name"] = last[:80]
+    if display_name:
+        payload["customer_name"] = display_name[:120]
+    if email:
+        payload["customer_email"] = email[:254]
+        payload["email"] = email[:254]
+    if phone:
+        payload["customer_phone"] = phone[:30]
+        payload["phone"] = phone[:30]
     if conversation_id:
         payload["conversation_id"] = conversation_id
     if page_key:

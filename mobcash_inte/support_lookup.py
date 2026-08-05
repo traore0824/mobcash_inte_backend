@@ -583,6 +583,205 @@ def _deposit_connect_success_message(transaction: Transaction, *, phone_number: 
     )
 
 
+
+def _connect_proof_lines_for_agent(
+    connect_payload: dict | None,
+    *,
+    connect_status: str | None = None,
+) -> str:
+    """Preuve Connect lisible pour le rapport agent (SMS / confirmed_at)."""
+    lines: list[str] = []
+    if isinstance(connect_payload, dict):
+        confirmed = str(connect_payload.get("confirmed_at") or "").strip()
+        if confirmed:
+            lines.append(f"confirmed_at: {confirmed}")
+        st = (connect_status or _connect_status_value(connect_payload) or "").strip()
+        if st:
+            lines.append(f"statut Connect: {st}")
+        sms_items = _extract_connect_sms_items(connect_payload)
+        for i, item in enumerate(sms_items, 1):
+            body = str(
+                item.get("body")
+                or item.get("original_body")
+                or item.get("text")
+                or ""
+            ).strip()
+            if body:
+                lines.append(f"SMS {i}: {body[:400]}")
+            amt = item.get("amount")
+            if amt not in (None, ""):
+                lines.append(f"  montant SMS: {amt}")
+    if not lines:
+        return "Preuve Connect disponible (paiement confirmé), détail SMS non disponible."
+    return "\n".join(lines)
+
+
+def _mark_deposit_accept_aligned(transaction: Transaction) -> bool:
+    """
+    Aligne le statut en accept quand Connect OK + crédit app déjà Success.
+    """
+    if transaction.status == "accept":
+        return False
+    old_status = transaction.status
+    try:
+        transaction.status = "accept"
+        transaction.message = (
+            "Crédité — aligné via support lookup (Connect OK + app Success)"
+        )
+        transaction.save(update_fields=["status", "message"])
+        TransactionStatusHistory.objects.create(
+            transaction=transaction,
+            old_status=old_status,
+            new_status="accept",
+            trigger_source=TransactionStatusHistory.Source.AGENT_BOT,
+            trigger_data={
+                "action": "align_accept_connect_and_mobcash_success",
+            },
+            message=transaction.message[:500],
+        )
+        logger.info(
+            "TX %s aligned to accept (Connect OK + mobcash Success)",
+            transaction.reference,
+        )
+        return True
+    except Exception:
+        logger.exception(
+            "Failed to align TX %s to accept",
+            getattr(transaction, "reference", None),
+        )
+        return False
+
+
+def _deposit_credit_pending_agent_message(
+    transaction: Transaction,
+    *,
+    phone_number: str,
+    connect_payload: dict | None,
+    connect_status: str | None,
+) -> str:
+    app_label = _app_public_label(transaction)
+    proof = _connect_proof_lines_for_agent(
+        connect_payload,
+        connect_status=connect_status,
+    )
+    payer = (
+        (transaction.phone_number or "").strip()
+        or (phone_number or "").strip()
+        or "N/A"
+    )
+    player = (transaction.user_app_id or "").strip() or "N/A"
+    amount = transaction.amount or 0
+    return (
+        f"À traiter — dépôt : paiement reçu, compte {app_label} non rechargé\n\n"
+        f"• Référence : {transaction.reference}\n"
+        f"• Montant : {amount} FCFA\n"
+        f"• ID joueur : {player}\n"
+        f"• Numéro payeur : {payer}\n"
+        "• **Connect a bien confirmé le paiement Mobile Money.**\n"
+        "• Preuve de succès :\n"
+        f"{proof}\n"
+        f"• **Nous avons bien reçu l'argent de l'utilisateur, mais son compte "
+        f"{app_label} n'a pas été rechargé.**"
+    )
+
+
+def _format_verify_matched_sms_lines(connect_result: dict | None) -> str:
+    """Corps SMS matchés (candidates) pour la preuve agent."""
+    if not isinstance(connect_result, dict):
+        return "  (détail SMS non disponible)"
+    lines: list[str] = []
+    raw = connect_result.get("candidates")
+    if isinstance(raw, list):
+        for entry in raw[:3]:
+            if not isinstance(entry, dict):
+                continue
+            body = (_nearby_body(entry) or "").strip()
+            if body:
+                lines.append(f"  {body[:400]}")
+    if not lines:
+        for entry in _sms_entries_from_verify(connect_result)[:3]:
+            body = (_nearby_body(entry) or "").strip()
+            if body:
+                lines.append(f"  {body[:400]}")
+    if not lines:
+        return "  (détail SMS non disponible)"
+    return "\n".join(lines)
+
+
+def _sms_proof_found_agent_message(
+    transaction: Transaction,
+    *,
+    connect_result: dict | None,
+) -> str:
+    """Rapport agent : preuve SMS trouvée → créditer le jeu."""
+    app_label = _app_public_label(transaction)
+    payer = (transaction.phone_number or "").strip() or "N/A"
+    player = (transaction.user_app_id or "").strip() or "N/A"
+    amount = transaction.amount or 0
+    proof = _format_verify_matched_sms_lines(connect_result)
+    return (
+        f"À traiter — dépôt : paiement reçu, compte {app_label} non rechargé\n\n"
+        f"• Référence : {transaction.reference}\n"
+        f"• Montant : {amount} FCFA\n"
+        f"• ID joueur : {player}\n"
+        f"• Numéro payeur : {payer}\n"
+        "• **Connect a bien confirmé le paiement Mobile Money.**\n"
+        "• Preuve de succès :\n"
+        f"{proof}\n"
+        f"• **Nous avons bien reçu l'argent de l'utilisateur, mais son compte "
+        f"{app_label} n'a pas été rechargé.**"
+    )
+
+
+def _sms_proof_not_found_agent_message(
+    transaction: Transaction,
+    *,
+    nearby: list[dict] | None,
+) -> str:
+    """Rapport agent : capture reçue, aucun SMS matché."""
+    app_label = _app_public_label(transaction)
+    payer = (transaction.phone_number or "").strip() or "N/A"
+    player = (transaction.user_app_id or "").strip() or "N/A"
+    amount = transaction.amount or 0
+    nearby_block = _format_nearby_for_agent(nearby or [])
+    if not nearby_block:
+        nearby_block = "Aucun SMS / notification récent pour ce numéro."
+    return (
+        "À traiter — dépôt : capture reçue, preuve non trouvée chez Connect\n\n"
+        f"• Référence : {transaction.reference}\n"
+        f"• Montant : {amount} FCFA\n"
+        f"• ID joueur : {player}\n"
+        f"• Numéro payeur : {payer}\n"
+        "• **Connect n'a trouvé aucun SMS / notification correspondant "
+        "à ce paiement.**\n"
+        f"{nearby_block}\n"
+        "• **Vérifier la capture manuellement avant de créditer le compte "
+        f"{app_label}.**"
+    )
+
+
+def _sms_verify_agent_message(
+    transaction: Transaction,
+    *,
+    result_key: str,
+    connect_result: dict | None,
+    nearby: list[dict] | None,
+    fallback: str,
+) -> str:
+    key = (result_key or "").strip().lower()
+    if key in {"confirmed", "possible", "ambiguous"}:
+        return _sms_proof_found_agent_message(
+            transaction,
+            connect_result=connect_result,
+        )
+    if key in {"not_found", "mismatch"}:
+        return _sms_proof_not_found_agent_message(
+            transaction,
+            nearby=nearby,
+        )
+    return fallback
+
+
 def _mobcash_success_flag(transaction: Transaction) -> bool | None:
     """True/False si Success est présent dans mobcash_response, sinon None."""
     data = _parse_jsonish(transaction.mobcash_response)
@@ -840,9 +1039,10 @@ def _handle_phone_mismatch(
     stored = (transaction.phone_number or "").strip() or "non renseigné"
     indicated = phone_number.strip()
     mismatch = (
-        f"Cependant, le numéro Mobile Money que vous avez indiqué ({indicated}) "
-        f"ne correspond pas à celui enregistré sur cette transaction ({stored})."
+        f"Cependant, le numéro Mobile Money que vous avez indiqué {indicated} "
+        f"ne correspond pas à celui enregistré sur cette transaction {stored}."
     )
+    app_label = _app_public_label(transaction)
 
     transfer_retried = False
     transfer_ok = None
@@ -850,56 +1050,38 @@ def _handle_phone_mismatch(
     phase = "done"
 
     if type_trans == "withdrawal":
-        if transaction.status == "accept":
-            if has_screenshot:
-                detail = (
-                    f"{mismatch} "
-                    "Ce retrait a déjà été payé sur le numéro enregistré sur la transaction. "
-                    "Nous avons bien reçu votre capture — un conseiller traitera le dossier "
-                    f"avec la référence {transaction.reference}, le numéro indiqué ({indicated}) "
-                    f"et le numéro sur la transaction ({stored})."
-                )
-                needs_escalation = True
-                phase = "done"
-            else:
-                detail = (
-                    f"{mismatch} "
-                    "Ce retrait a déjà été payé sur le numéro enregistré. "
-                    "Indiquez le numéro Mobile Money concerné, puis envoyez la capture "
-                    "d'écran pour qu'un conseiller vérifie avant tout nouvel envoi."
-                )
-                phase = "await_payer_details"
+        # Mauvais numéro : jamais de transfert auto (succès app ou non).
+        app_ok = (
+            _mobcash_success_flag(transaction) is True
+            or transaction.status == "accept"
+        )
+        if app_ok:
+            detail = (
+                f"{mismatch}\n\n"
+                "Ce retrait a déjà été payé sur le numéro enregistré sur la transaction.\n"
+                "Vous pouvez demander à parler à un humain."
+            )
         else:
             detail = (
-                f"{mismatch} "
-                "Aucun transfert n'est déclenché automatiquement. "
-                "Un conseiller doit vérifier le numéro concerné et l'état du retrait."
+                f"{mismatch}\n\n"
+                f"Sur {app_label}, nous n'avons pas non plus reçu votre transfert.\n"
+                f"Vérifiez sur votre compte {app_label}, puis relancez votre retrait."
             )
-            needs_escalation = True
+        needs_escalation = False
+        phase = "done"
     else:
-        # Dépôt : ne pas clôturer sans preuve — demander le vrai numéro + capture,
-        # puis créer un transfert conseiller avec ces détails (pas de crédit auto).
-        if has_screenshot:
-            detail = (
-                f"{mismatch} "
-                "Nous avons bien reçu votre capture. Un conseiller va vérifier le dossier "
-                f"avec la référence {transaction.reference}, le numéro indiqué ({indicated}), "
-                f"le numéro sur la transaction ({stored}) et la preuve de paiement."
-            )
-            needs_escalation = True
-            phase = "done"
-        else:
-            detail = (
-                f"{mismatch} "
-                "Le dépôt reste lié au numéro utilisé lors de l'opération. "
-                "Merci d'envoyer le numéro Mobile Money qui a réellement effectué "
-                "le transfert, puis la capture d'écran de l'opération."
-            )
-            phase = "await_payer_details"
+        # Dépôt : demander le vrai numéro payeur + capture — pas de transfert pour l'instant.
+        detail = (
+            f"{mismatch}\n\n"
+            "Merci d'envoyer le numéro Mobile Money qui a réellement effectué "
+            "le transfert, ainsi que la capture d'écran de l'opération."
+        )
+        phase = "await_payer_details"
+        needs_escalation = False
 
     return _base_payload(
         transaction,
-        message=f"{intro} {detail}".strip(),
+        message=f"{intro}\n\n{detail}".strip(),
         phase=phase,
         phone_match=False,
         phone_number_on_transaction=stored,
@@ -934,14 +1116,17 @@ def build_lookup_response(
     if type_trans == "deposit":
         intro = _intro(transaction, type_trans)
         if transaction.status == "accept":
-            detail = (
-                "Le paiement Mobile Money est bien passé et le crédit sur votre compte "
-                "de jeu a été effectué avec succès. Si le solde n'apparaît pas encore, "
-                "actualisez l'application ou reconnectez-vous."
+            app_label = _app_public_label(transaction)
+            amount = transaction.amount or 0
+            msg = (
+                f"Oui, nous avons bien reçu votre dépôt de {amount} FCFA.\n"
+                f"Votre compte {app_label} a bien été crédité.\n"
+                "Si le solde n'apparaît pas encore, actualisez l'application "
+                "ou reconnectez-vous."
             )
             return _base_payload(
                 transaction,
-                message=_with_human_handoff_hint(f"{intro} {detail}".strip()),
+                message=msg,
                 phase="done",
                 phone_match=True,
                 needs_escalation=False,
@@ -969,36 +1154,74 @@ def build_lookup_response(
             ),
         }
 
-        # Paiement MM confirmé chez Connect (statut OK, ou preuve reçue :
-        # confirmed_at / SMS opérateur, y compris transaction expirée)
-        # → problème côté crédit plateforme.
+        # Paiement MM confirmé chez Connect.
+        # - MobCash Success=true → aligner accept, message client, pas de transfert
+        # - sinon → transfert + rapport agent (crédit jeu non fait)
         if connect_paid:
+            app_label = _app_public_label(transaction)
+            amount = transaction.amount or 0
+            mobcash_ok = _mobcash_success_flag(transaction)
+            if mobcash_ok is True:
+                _mark_deposit_accept_aligned(transaction)
+                transaction.refresh_from_db()
+                msg = (
+                    f"Oui, nous avons bien reçu votre dépôt de {amount} FCFA.\n"
+                    f"Votre compte {app_label} a bien été crédité."
+                )
+                return _base_payload(
+                    transaction,
+                    message=msg,
+                    phase="done",
+                    phone_match=True,
+                    needs_escalation=False,
+                    connect=connect_meta,
+                    transfer_retry={"attempted": False, "success": None},
+                    mobcash_success=True,
+                ), status.HTTP_200_OK
+
+            payer_phone = (
+                (transaction.phone_number or "").strip()
+                or (phone_number or "").strip()
+                or "le numéro enregistré"
+            )
+            client_msg = (
+                f"Oui, nous avons bien reçu votre dépôt de {amount} FCFA.\n"
+                f"Votre paiement Mobile Money a bien été effectué depuis {payer_phone}.\n"
+                f"Le crédit sur votre compte {app_label} n'est pas encore finalisé.\n"
+                "Un conseiller s'en occupe ; vous serez crédité sous peu."
+            )
+            agent_msg = _deposit_credit_pending_agent_message(
+                transaction,
+                phone_number=phone_number,
+                connect_payload=connect_payload,
+                connect_status=connect_status,
+            )
             return _base_payload(
                 transaction,
-                message=_with_human_handoff_hint(
-                    _deposit_connect_success_message(
-                        transaction, phone_number=phone_number
-                    )
-                ),
+                message=client_msg,
                 phase="done",
                 phone_match=True,
                 needs_escalation=True,
                 connect=connect_meta,
                 transfer_retry={"attempted": False, "success": None},
+                mobcash_success=mobcash_ok,
+                agent_message=agent_msg,
             ), status.HTTP_200_OK
 
         payer_phone = (transaction.phone_number or "").strip() or "le numéro utilisé"
-        detail = (
-            "Votre dépôt n'a pas encore été approuvé. "
-            f"Merci de vérifier si c'est bien ce numéro ({payer_phone}) qui a effectué "
-            "la transaction, car le problème peut venir de là. "
-            "Si c'est bien ce numéro qui a payé, envoyez-nous la capture d'écran de votre paiement. "
-            "Sinon, envoyez-nous le numéro qui a réellement effectué le paiement, "
-            "accompagné de la capture d'écran."
-        )
+        message = (
+            f"{intro}\n\n"
+            "Nous n'avons pas encore pu confirmer votre paiement Mobile Money.\n"
+            "Merci d'envoyer la capture d'écran de votre transfert\n"
+            f"(depuis le numéro {payer_phone}).\n\n"
+            "Assurez-vous que c'est bien le numéro de la transaction qui a effectué "
+            "le dépôt : cela peut aussi être la raison du problème.\n"
+            "Si c'est un autre numéro qui a fait le transfert, envoyez-nous la capture "
+            "de paiement et le bon numéro."
+        ).strip()
         return _base_payload(
             transaction,
-            message=f"{intro} {detail}".strip(),
+            message=message,
             phase="await_screenshot",
             phone_match=True,
             connect=connect_meta,
@@ -1010,15 +1233,17 @@ def build_lookup_response(
     app_label = _app_public_label(transaction)
     info = _withdrawal_info_block(transaction)
 
-    # Déjà accepté côté plateforme : message clair, pas d'échec trompeur.
+    # Déjà accepté : message clair, pas d'échec trompeur.
     if transaction.status == "accept":
-        detail = (
+        message = (
+            f"{intro}\n\n"
             "Votre retrait a déjà été traité avec succès : l'argent a été envoyé "
-            f"vers votre numéro Mobile Money.\n\n{info}"
-        )
+            "vers votre numéro Mobile Money.\n\n"
+            f"{info}"
+        ).strip()
         return _base_payload(
             transaction,
-            message=_with_human_handoff_hint(f"{intro} {detail}".strip()),
+            message=message,
             phase="done",
             phone_match=True,
             needs_escalation=False,
@@ -1028,29 +1253,34 @@ def build_lookup_response(
         ), status.HTTP_200_OK
 
     mobcash_ok = _mobcash_success_flag(transaction)
+    # Retrait : Success=true et status=payment_init_success = même chose (débité jeu).
+    app_debited = mobcash_ok is True or (
+        mobcash_ok is not False
+        and (transaction.status or "").strip() == "payment_init_success"
+    )
 
-    # Success == false : pas de virement reçu depuis l'app de paris.
+    # Success == false : pas de virement depuis l'app → pas d'escalade.
     if mobcash_ok is False:
-        detail = (
-            f"Nous n'avons pas reçu le virement depuis {app_label}. "
-            f"Merci de vérifier votre compte sur {app_label} pour vous assurer "
-            "que le retrait a bien été initié (demande de paiement ouverte / "
-            "en attente de validation).\n\n"
+        message = (
+            f"{intro}\n\n"
+            f"Nous n'avons pas reçu de virement depuis {app_label}.\n"
+            f"Merci de vérifier sur {app_label} que le retrait a bien été lancé\n"
+            "(demande de paiement ouverte / en attente de validation).\n\n"
             f"{info}"
-        )
+        ).strip()
         return _base_payload(
             transaction,
-            message=f"{intro} {detail}".strip(),
+            message=message,
             phase="done",
             phone_match=True,
-            needs_escalation=True,
+            needs_escalation=False,
             connect={"checked": False, "ok": None, "status": None, "class": "skipped"},
             transfer_retry={"attempted": False, "success": None},
             mobcash_success=False,
         ), status.HTTP_200_OK
 
-    # Success == true : validé côté MobCash / app → Connect + SMS + demande transfert.
-    if mobcash_ok is True:
+    # Débité côté jeu (Success=true ou payment_init_success) → Connect + SMS.
+    if app_debited:
         connect_payload = _connect_status_payload(transaction)
         connect_class = _classify_connect(connect_payload)
         connect_ok = connect_class == "ok"
@@ -1087,76 +1317,62 @@ def build_lookup_response(
         agent_message = None
 
         if connect_ok or connect_paid:
-            detail = (
-                f"Bonne nouvelle : votre retrait a bien été validé sur {app_label}, "
-                "et l'envoi Mobile Money est confirmé.\n\n"
+            user_message = (
+                f"{intro}\n\n"
+                f"Bonne nouvelle : votre retrait a bien été validé sur {app_label}.\n"
+                "L'envoi Mobile Money est confirmé.\n\n"
                 f"{info}"
-            )
-            user_message = _with_human_handoff_hint(f"{intro} {detail}".strip())
+            ).strip()
         else:
-            # Connect pas success → message client simple ;
-            # agent : SMS nearby + ussd_path via un seul verify (sms_type=deposit).
+            # Connect pas success → escalade + rapport agent (SMS / USSD).
             transfer_meta = _request_withdrawal_mm_transfer(transaction)
             needs_escalation = True
             nearby, ussd_path, ussd_meta = _fetch_agent_sms_and_ussd(
                 transaction,
                 connect_payload,
             )
-            phone_label = (transaction.phone_number or "").strip() or "son numéro Mobile Money"
-            player_id = (transaction.user_app_id or "").strip() or "non renseigné"
-            amount_label = f"{transaction.amount or 0} FCFA"
+            phone_label = (
+                (transaction.phone_number or "").strip() or "N/A"
+            )
+            player_id = (transaction.user_app_id or "").strip() or "N/A"
+            amount = transaction.amount or 0
             user_message = (
-                f"{intro} Bonne nouvelle : votre retrait a bien été validé sur "
-                f"{app_label}. Un agent va vous aider afin de vous faire votre "
-                f"virement.\n\n{info}"
+                f"{intro}\n\n"
+                f"Bonne nouvelle : votre retrait a bien été validé sur {app_label}.\n"
+                "Un conseiller va vous aider pour le virement Mobile Money.\n\n"
+                f"{info}"
             ).strip()
 
-            # Rapport conseiller uniquement (jamais au client WhatsApp).
-            agent_lines = [
-                "À traiter — retrait non reçu sur Mobile Money",
-                "",
-                f"L'argent a quitté le compte {app_label} du joueur "
-                f"(identifiant {player_id}) : {amount_label} ont été débités.",
-                f"Le client n'a pas reçu cet argent sur son numéro {phone_label}.",
-                f"Référence : {transaction.reference}.",
-            ]
-            if nearby:
-                agent_lines.append(
-                    "Les SMS du numéro (fenêtre Connect) sont listés ci-dessous."
-                )
-            else:
-                agent_lines.append(
-                    "Aucun SMS n'a pu être récupéré pour ce numéro."
-                )
-            if ussd_path:
-                agent_lines.append(
-                    "Le chemin USSD de la transaction est disponible ci-dessous."
-                )
-            else:
-                agent_lines.append(
-                    "Aucun chemin USSD n'a pu être récupéré pour cette transaction."
-                )
             if transfer_meta.get("attempted") and transfer_meta.get("success"):
-                agent_lines.append(
-                    "Un renvoi Mobile Money automatique a été demandé et accepté."
-                )
+                renvoi_label = "demandé et accepté"
             elif transfer_meta.get("attempted"):
-                agent_lines.append(
-                    "Le renvoi Mobile Money automatique n'a pas abouti : "
-                    "merci d'envoyer le montant manuellement au client."
-                )
+                renvoi_label = "demandé mais échec"
             else:
-                agent_lines.append(
-                    "Aucun renvoi automatique n'a pu être lancé : "
-                    "merci d'envoyer le montant manuellement au client."
-                )
-            agent_message = "\n".join(agent_lines).strip()
+                renvoi_label = "non lancé"
+
             agent_nearby = _format_nearby_for_agent(nearby)
-            if agent_nearby:
-                agent_message = f"{agent_message}\n\n{agent_nearby}"
+            sms_block = agent_nearby or "Aucun SMS / notification récent pour ce numéro."
             agent_ussd = _format_ussd_path_for_agent(ussd_path)
-            if agent_ussd:
-                agent_message = f"{agent_message}\n\n{agent_ussd}"
+            ussd_block = agent_ussd or "Aucun chemin USSD pour cette transaction."
+
+            agent_message = (
+                "À traiter — retrait : compte jeu débité, Mobile Money non reçu\n\n"
+                f"• Référence : {transaction.reference}\n"
+                f"• Montant : {amount} FCFA\n"
+                f"• ID joueur : {player_id}\n"
+                f"• Numéro MM : {phone_label}\n"
+                f"• Application : {app_label}\n"
+                f"• **Nous avons bien reçu le virement depuis le compte "
+                f"{app_label} de l'utilisateur, mais l'envoi Mobile Money "
+                f"côté Connect n'a pas réussi.**\n"
+                f"• Renvoi auto : {renvoi_label}\n"
+                "• SMS du numéro (indicatif) :\n"
+                f"{sms_block}\n"
+                "• Chemin USSD :\n"
+                f"{ussd_block}\n"
+                "• **Envoyer le montant au client sur son Mobile Money "
+                "si le renvoi auto n'a pas abouti**"
+            )
 
         payload_extra: dict[str, Any] = {
             "phase": "done",
@@ -1168,7 +1384,7 @@ def build_lookup_response(
                 "success": transfer_meta.get("success"),
                 "reason": transfer_meta.get("reason"),
             },
-            "mobcash_success": True,
+            "mobcash_success": True if mobcash_ok is True else None,
             "transfer_request": transfer_meta,
         }
         if agent_message is not None:
@@ -1186,51 +1402,21 @@ def build_lookup_response(
             **payload_extra,
         ), status.HTTP_200_OK
 
-    # Pas de Success exploitable dans mobcash_response → comportement historique.
-    connect_payload = _connect_status_payload(transaction)
-    connect_class = _classify_connect(connect_payload)
-    connect_ok = connect_class == "ok"
-    connect_status = _connect_status_value(connect_payload)
-
-    transfer_retried = False
-    transfer_ok = None
-    needs_escalation = False
-    detail = ""
-
-    if transaction.status == "payment_init_success" and connect_class != "ok":
-        detail = (
-            "Le montant a déjà été débité de votre compte de jeu, "
-            "mais l'envoi Mobile Money n'était pas confirmé côté Connect "
-            f"(statut : {connect_status or connect_class}). "
-            "Aucune relance automatique n'est effectuée par cette vérification.\n\n"
-            f"{info}"
-        )
-        needs_escalation = True
-    elif transaction.status == "payment_init_success" and connect_ok:
-        detail = (
-            "Le compte de jeu a été débité et l'envoi Mobile Money est confirmé "
-            f"côté opérateur.\n\n{info}"
-        )
-    else:
-        detail = (
-            "Le retrait est encore en cours de traitement. "
-            f"Statut actuel : {transaction.message or transaction.status}.\n\n"
-            f"{info}"
-        )
-
+    # Ni Success=false, ni débit jeu détecté → encore en cours.
+    message = (
+        f"{intro}\n\n"
+        "Le retrait est encore en cours de traitement.\n"
+        f"Statut actuel : {transaction.message or transaction.status}.\n\n"
+        f"{info}"
+    ).strip()
     return _base_payload(
         transaction,
-        message=f"{intro} {detail}".strip(),
+        message=message,
         phase="done",
         phone_match=True,
-        needs_escalation=needs_escalation,
-        connect={
-            "checked": connect_payload is not None,
-            "ok": connect_ok,
-            "status": connect_status,
-            "class": connect_class,
-        },
-        transfer_retry={"attempted": transfer_retried, "success": transfer_ok},
+        needs_escalation=False,
+        connect={"checked": False, "ok": None, "status": None, "class": "skipped"},
+        transfer_retry={"attempted": False, "success": None},
         mobcash_success=None,
     ), status.HTTP_200_OK
 
@@ -1264,6 +1450,10 @@ def build_confirm_payment_response(
         ), status.HTTP_200_OK
 
     intro = _intro(transaction, type_trans)
+    capture_client = (
+        "Nous avons bien reçu votre capture. "
+        "Un conseiller va la vérifier et revenir vers vous."
+    )
 
     # Capture reçue = preuve que l'argent a quitté le compte.
     # Sans capture : un seul rappel (pas de question oui/non séparée).
@@ -1272,62 +1462,82 @@ def build_confirm_payment_response(
             return _base_payload(
                 transaction,
                 message=(
-                    f"{intro} D'accord. Tant que le débit Mobile Money n'est pas effectif, "
+                    f"{intro}\n\n"
+                    "D'accord. Tant que le débit Mobile Money n'est pas effectif, "
                     "nous ne pouvons pas forcer le crédit. Validez le paiement USSD / le lien, "
                     "puis revenez vers nous avec la référence si besoin."
-                ),
+                ).strip(),
                 phase="done",
                 phone_match=True,
                 needs_escalation=False,
             ), status.HTTP_200_OK
+        payer_phone = (transaction.phone_number or "").strip() or "le numéro utilisé"
         return _base_payload(
             transaction,
             message=(
-                f"{intro} Si l'argent a bien quitté votre compte Mobile Money, "
-                "envoyez-nous la capture d'écran de votre transfert."
-            ),
+                f"{intro}\n\n"
+                "Nous n'avons pas encore pu confirmer votre paiement Mobile Money.\n"
+                "Merci d'envoyer la capture d'écran de votre transfert\n"
+                f"(depuis le numéro {payer_phone})."
+            ).strip(),
             phase="await_screenshot",
             phone_match=True,
             money_sent=True if money_sent else None,
             needs_escalation=False,
         ), status.HTTP_200_OK
 
-    # Lecture seule : la preuve est signalée, sans crédit ni transfert automatique.
+    # Lecture seule : aligné sur verify-sms (client) + rapport agent simple.
+    player = (transaction.user_app_id or "").strip() or "N/A"
+    payer = (transaction.phone_number or "").strip() or "N/A"
+    amount = transaction.amount or 0
     if type_trans == "deposit":
-        detail = (
-            "Nous avons bien reçu votre capture. La vérification ne modifie pas la transaction "
-            "et ne déclenche aucun crédit automatique. Un conseiller vérifiera la preuve."
+        agent_message = (
+            "À traiter — dépôt : capture reçue, à vérifier\n\n"
+            f"• Référence : {transaction.reference}\n"
+            f"• Montant : {amount} FCFA\n"
+            f"• ID joueur : {player}\n"
+            f"• Numéro payeur : {payer}\n"
+            "• Capture : reçue\n"
+            "• **Vérifier la capture et traiter le dossier manuellement.**"
         )
         return _base_payload(
             transaction,
-            message=f"{intro} {detail}".strip(),
+            message=capture_client,
             phase="done",
             phone_match=True,
             money_sent=True,
             has_screenshot=True,
             needs_escalation=True,
+            agent_message=agent_message,
             transfer_retry={"attempted": False, "success": None, "reason": "read_only_lookup"},
         ), status.HTTP_200_OK
 
     # Retrait : lecture seule, aucune relance de payout.
     if transaction.status == "accept":
-        detail = (
-            "Votre capture est bien reçue. Ce retrait apparaît déjà comme payé. "
-            "Un conseiller vérifiera si un nouvel envoi est nécessaire."
+        client_extra = (
+            f"{capture_client}\n"
+            "Ce retrait apparaît déjà comme payé."
         )
     else:
-        detail = (
-            "Votre capture est bien reçue. La vérification ne modifie pas la transaction "
-            "et ne relance aucun transfert. Un conseiller vérifiera le dossier."
-        )
+        client_extra = capture_client
+    agent_message = (
+        "À traiter — retrait : capture reçue, à vérifier\n\n"
+        f"• Référence : {transaction.reference}\n"
+        f"• Montant : {amount} FCFA\n"
+        f"• ID joueur : {player}\n"
+        f"• Numéro MM : {payer}\n"
+        "• Capture : reçue\n"
+        "• **Vérifier la capture et traiter le dossier manuellement.**"
+    )
     return _base_payload(
         transaction,
-        message=f"{intro} Merci pour la capture. {detail}".strip(),
+        message=client_extra,
         phase="done",
         phone_match=True,
         money_sent=True,
         has_screenshot=True,
         needs_escalation=True,
+        agent_message=agent_message,
         transfer_retry={"attempted": False, "success": None, "reason": "read_only_lookup"},
     ), status.HTTP_200_OK
 
@@ -1510,49 +1720,18 @@ def _sms_proof_user_message(
     """
     key = (result or "").strip().lower()
     del nearby  # réservé au contexte agent, pas au message client
-    if key == "confirmed":
-        return (
-            "Nous avons trouvé une preuve SMS correspondant à votre opération. "
-            "Le blocage est de notre côté, pas un problème de paiement de votre part. "
-            "Nous allons finaliser le crédit. Vous recevrez votre argent sur votre compte sous peu.",
-            True,
-        )
-    if key == "possible":
-        return (
-            "Nous avons trouvé une correspondance partielle (SMS). "
-            "Un conseiller vérifiera manuellement avant de finaliser le crédit.",
-            True,
-        )
-    if key == "ambiguous":
-        return (
-            "Plusieurs preuves SMS/notification correspondent. "
-            "Un conseiller doit vérifier manuellement.",
-            True,
-        )
-    if key == "not_found":
-        return (
-            "Nous n'avons trouvé aucun SMS/notification correspondant à cette opération "
-            "(recherche depuis l'heure d'opération jusqu'à maintenant). "
-            "Un conseiller vérifiera votre capture.",
-            True,
-        )
-    if key == "mismatch":
-        # Éviter de remonter le debug Connect brut (ex. amount_ok=False, phone_ok=True).
-        raw = (connect_message or "").strip()
-        looks_like_debug = (
-            "amount_ok=" in raw.lower()
-            or "phone_ok=" in raw.lower()
-            or "derniers SMS" in raw
-            or "nearby" in raw.lower()
-        )
-        if raw and not looks_like_debug:
-            msg = raw
-        else:
-            msg = (
-                "Les informations de la capture ne correspondent pas à la transaction. "
-                "Merci de vérifier le montant / numéro, ou un conseiller prendra le relais."
-            )
-        return (msg, True)
+    capture_received = (
+        "Nous avons bien reçu votre capture. "
+        "Un conseiller va la vérifier et revenir vers vous."
+    )
+    if key in {
+        "confirmed",
+        "possible",
+        "ambiguous",
+        "not_found",
+        "mismatch",
+    }:
+        return (capture_received, True)
     if key == "tx_already_success":
         return (
             "Cette transaction est déjà marquée en succès côté opérateur. "
@@ -1762,10 +1941,17 @@ def build_verify_sms_proof_response(
     )
     intro = _intro(transaction, transaction.type_trans)
     agent_nearby = _format_nearby_for_agent(nearby)
-    agent_message = (
+    agent_fallback = (
         f"{intro} {user_message}".strip()
         + (f"\n\n{agent_nearby}" if agent_nearby else "")
     ).strip()
+    agent_message = _sms_verify_agent_message(
+        transaction,
+        result_key=result_key,
+        connect_result=connect_result,
+        nearby=nearby,
+        fallback=agent_fallback,
+    )
 
     # ok=true seulement si Connect confirme une preuve exploitable.
     # nearby_messages ne compte JAMAIS comme preuve.

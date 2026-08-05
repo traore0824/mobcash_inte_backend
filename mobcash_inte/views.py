@@ -179,16 +179,20 @@ class ChatbotMessageView(decorators.APIView):
             or getattr(user, "username", None)
             or "anonymous"
         )
+        # Identité inbox : prénom + nom prioritaires, email / tél en fallback côté MyCustomer.
+        first_name = str(getattr(user, "first_name", "") or "").strip()
+        last_name = str(getattr(user, "last_name", "") or "").strip()
+        email = str(getattr(user, "email", "") or "").strip()
         phone = str(getattr(user, "phone", "") or "").strip()
         indicative = str(getattr(user, "phone_indicative", "") or "").strip()
-        customer_name = (
-            str(getattr(user, "email", "") or "").strip()
-            or (f"{indicative}{phone}" if phone else "")
-        )
+        customer_phone = f"{indicative}{phone}" if phone else ""
         body, code = send_chatbot_message(
             message=(data.get("message") or "").strip(),
             customer_external_id=str(external_id),
-            customer_name=customer_name,
+            customer_first_name=first_name,
+            customer_last_name=last_name,
+            customer_email=email,
+            customer_phone=customer_phone,
             conversation_id=(data.get("conversation_id") or None),
             page_key=(data.get("page_key") or "").strip(),
             route=(data.get("route") or "").strip(),
