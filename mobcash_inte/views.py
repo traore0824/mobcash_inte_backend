@@ -252,6 +252,11 @@ class NotificationView(generics.ListCreateAPIView):
         return queryset
 
     def create(self, request, *args, **kwargs):
+        if not request.user.is_staff:
+            return Response(
+                {"detail": "Admin uniquement."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         serializer = SendNotificationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         title = serializer.validated_data.get("title")

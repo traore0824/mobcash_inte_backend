@@ -334,7 +334,7 @@ def update_whatsapp_phone(request):
     if phone in (None, ""):
         user.user_whatsapp_phone = None
         user.whatsapp_verified = False
-        user.save()
+        user.save(update_fields=["user_whatsapp_phone", "whatsapp_verified"])
         return Response({"success": True, "user_whatsapp_phone": None, "whatsapp_verified": False})
     if not is_whatsapp_enabled():
         return Response(
@@ -348,14 +348,20 @@ def update_whatsapp_phone(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
     normalized = normalize_whatsapp_phone(phone)
+    if not normalized:
+        return Response(
+            {"success": False, "message": "INVALID_PHONE"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     user.user_whatsapp_phone = normalized
     user.whatsapp_verified = True
-    user.save()
+    user.save(update_fields=["user_whatsapp_phone", "whatsapp_verified"])
+    user.refresh_from_db(fields=["user_whatsapp_phone", "whatsapp_verified"])
     return Response(
         {
             "success": True,
-            "user_whatsapp_phone": normalized,
-            "whatsapp_verified": True,
+            "user_whatsapp_phone": user.user_whatsapp_phone,
+            "whatsapp_verified": user.whatsapp_verified,
         }
     )
 

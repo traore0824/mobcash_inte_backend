@@ -274,7 +274,18 @@ def send_whatsapp_to_user(user, title: str, content: str) -> dict:
         return {"success": False, "error": "whatsapp_disabled"}
 
     phone = _get_user_whatsapp_phone(user)
+    # Fallback: téléphone profil si WhatsApp lié mais numéro WA vide
     if not phone:
+        phone = normalize_whatsapp_phone(getattr(user, "phone", None) or "")
+
+    if not phone:
+        # Incohérence fréquente: whatsapp_verified=True sans numéro en DB
+        if getattr(user, "whatsapp_verified", False):
+            try:
+                user.whatsapp_verified = False
+                user.save(update_fields=["whatsapp_verified"])
+            except Exception:
+                pass
         return {"success": False, "error": "no_whatsapp_phone"}
     if not getattr(user, "whatsapp_verified", False):
         return {"success": False, "error": "whatsapp_not_verified"}
