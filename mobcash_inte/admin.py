@@ -46,6 +46,7 @@ class NetworkAdmin(admin.ModelAdmin):
         "active_for_with",
         "customer_pay_fee",
         "manual_processing",
+        "has_screenshot_example",
         "created_at",
     )
     list_filter = (
@@ -81,6 +82,7 @@ class NetworkAdmin(admin.ModelAdmin):
                     "image",
                     "deposit_message",
                     "withdrawal_message",
+                    "screenshot_example",
                 )
             },
         ),
@@ -134,6 +136,11 @@ class NetworkAdmin(admin.ModelAdmin):
             },
         ),
     )
+
+
+    @admin.display(boolean=True, description="Exemple capture")
+    def has_screenshot_example(self, obj):
+        return bool(obj.screenshot_example)
 
 
 @admin.register(UserPhone)

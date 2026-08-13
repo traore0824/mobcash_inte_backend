@@ -289,6 +289,13 @@ class Network(models.Model):
     fee_slice_low_percent = models.DecimalField(decimal_places=2, max_digits=5, blank=True, null=True, help_text="% pour montant <= seuil")
     fee_slice_high_percent = models.DecimalField(decimal_places=2, max_digits=5, blank=True, null=True, help_text="% pour montant > seuil")
     fee_slice_fixed = models.PositiveIntegerField(default=0, help_text="Montant fixe ajouté sur la tranche haute")
+    # Exemple de capture montré au client (WhatsApp) quand on demande une preuve.
+    # URL publique (même pattern que `image`).
+    screenshot_example = models.TextField(
+        blank=True,
+        null=True,
+        help_text="URL de l'exemple de capture d'écran à envoyer au client lors d'une demande de preuve.",
+    )
 
 
 class Setting(models.Model):

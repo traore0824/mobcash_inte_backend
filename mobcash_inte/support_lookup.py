@@ -953,6 +953,52 @@ def _classify_connect(payload: dict | None) -> str:
     return "unknown"
 
 
+def _public_api_base() -> str:
+    """Base HTTPS pour exposer les médias (WhatsApp doit pouvoir télécharger l'URL)."""
+    import os
+
+    from django.conf import settings
+
+    for key in ("PUBLIC_API_BASE_URL", "BASE_URL"):
+        val = (getattr(settings, key, None) or os.getenv(key) or "").strip().rstrip("/")
+        if val.startswith("http"):
+            return val
+    for origin in getattr(settings, "CSRF_TRUSTED_ORIGINS", None) or []:
+        origin = (origin or "").strip().rstrip("/")
+        if origin.startswith("http"):
+            return origin
+    for host in getattr(settings, "ALLOWED_HOSTS", None) or []:
+        host = (host or "").strip()
+        if not host or host in {"*", "localhost", "127.0.0.1"} or ":" in host:
+            continue
+        if "." in host:
+            return f"https://{host}"
+    return ""
+
+
+def _screenshot_example_url(transaction: Transaction) -> str | None:
+    """URL publique de l'exemple de capture du réseau de la transaction, si renseigné."""
+    network = getattr(transaction, "network", None)
+    if not network:
+        return None
+    raw = (getattr(network, "screenshot_example", None) or "").strip()
+    if not raw:
+        return None
+    if hasattr(raw, "url"):
+        try:
+            raw = (raw.url or "").strip()
+        except ValueError:
+            return None
+    if not raw:
+        return None
+    if raw.startswith("http://") or raw.startswith("https://"):
+        return raw
+    base = _public_api_base()
+    if not base:
+        return None
+    return f"{base.rstrip('/')}/{raw.lstrip('/')}"
+
+
 def _intro(transaction: Transaction, type_trans: str) -> str:
     amount = transaction.amount or 0
     player_id = (transaction.user_app_id or "").strip() or "non renseigné"
@@ -968,7 +1014,7 @@ def _intro(transaction: Transaction, type_trans: str) -> str:
 
 
 def _base_payload(transaction: Transaction, *, message: str, **extra) -> dict:
-    return {
+    payload = {
         "found": True,
         "reference": transaction.reference,
         "type": transaction.type_trans,
@@ -986,6 +1032,18 @@ def _base_payload(transaction: Transaction, *, message: str, **extra) -> dict:
         "phone_number": transaction.phone_number,
         **extra,
     }
+    phase = str(payload.get("phase") or "").strip()
+    if phase in {"await_screenshot", "await_payer_details"}:
+        example_url = _screenshot_example_url(transaction)
+        if example_url:
+            payload["example_screenshot_url"] = example_url
+            msg = str(payload.get("message") or "")
+            if example_url not in msg:
+                payload["message"] = (
+                    f"{msg.rstrip()}\n\n"
+                    f"Exemple de capture attendue :\n{example_url}"
+                )
+    return payload
 
 
 def _resolve_transaction(reference: str, type_raw: str, phone_number: str):
