@@ -201,6 +201,31 @@ class ChatbotMessageView(decorators.APIView):
             audio_name=audio_name,
             audio_content_type=audio_content_type,
         )
+        if 200 <= int(code) < 300 and isinstance(body, dict):
+            reply = (body.get("message") or "").strip()
+            images = body.get("images") or []
+            has_images = isinstance(images, list) and len(images) > 0
+            if reply or has_images:
+                try:
+                    from mobcash_inte.chatbot_webhook import notify_user_chatbot_reply
+
+                    notify_user_chatbot_reply(
+                        user,
+                        content=reply,
+                        conversation_id=str(
+                            body.get("conversation_id")
+                            or data.get("conversation_id")
+                            or ""
+                        ),
+                        media_type="image" if has_images and not reply else "text",
+                    )
+                except Exception:
+                    import logging
+
+                    logging.getLogger(__name__).exception(
+                        "Chatbot push bot reply impossible user=%s",
+                        getattr(user, "id", None),
+                    )
         return Response(body, status=code)
 
 

@@ -19,10 +19,81 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from mobcash_inte.models import ChatbotHumanMessage
+from accounts.models import User
 
 logger = logging.getLogger("mobcash_inte_backend.transactions")
 
 EVENT_HUMAN_REPLY = "human_reply"
+
+
+def _resolve_chatbot_user(external_id: str):
+    eid = (external_id or "").strip()
+    if not eid or eid == "anonymous":
+        return None
+    try:
+        user = User.objects.filter(pk=eid).first()
+    except Exception:
+        user = None
+    if user:
+        return user
+    if "@" in eid:
+        user = User.objects.filter(email__iexact=eid).first()
+        if user:
+            return user
+    return User.objects.filter(username=eid).first()
+
+
+def notify_user_chatbot_reply(
+    user,
+    *,
+    content: str,
+    conversation_id: str = "",
+    media_type: str = "text",
+) -> None:
+    """Push FCM uniquement — ne crée aucun message / Notification."""
+    if user is None:
+        return
+    kind = (media_type or "text").strip().lower()
+    if kind == "audio":
+        body = "Nouveau message vocal"
+    elif kind == "image":
+        body = "Nouvelle image"
+    else:
+        body = (content or "").strip() or "Nouveau message"
+    if len(body) > 180:
+        body = body[:177].rstrip() + "…"
+
+    from mobcash_inte.helpers import send_push_noti
+
+    send_push_noti(
+        user=user,
+        title="Support",
+        body=body,
+        data={
+            "type": "chatbot",
+            "conversation_id": str(conversation_id or ""),
+            "media_type": kind,
+        },
+    )
+
+
+def _push_chatbot_message_to_user(
+    *,
+    external_id: str,
+    conversation_id: str,
+    content: str,
+    media_type: str,
+) -> None:
+    user = _resolve_chatbot_user(external_id)
+    if user is None:
+        logger.info("Chatbot push ignoré — user introuvable external_id=%s", external_id)
+        return
+    notify_user_chatbot_reply(
+        user,
+        content=content,
+        conversation_id=conversation_id,
+        media_type=media_type,
+    )
 
 
 class ChatbotWebhookView(APIView):
@@ -66,6 +137,18 @@ class ChatbotWebhookView(APIView):
             )
         except IntegrityError:
             return Response({"status": "duplicate"})
+
+        try:
+            _push_chatbot_message_to_user(
+                external_id=(customer.get("external_id") or "").strip(),
+                conversation_id=conversation_id,
+                content=content,
+                media_type=media_type,
+            )
+        except Exception:
+            logger.exception(
+                "Chatbot push impossible — conversation=%s", conversation_id
+            )
 
         logger.info("Chatbot human_reply stocké — conversation=%s", conversation_id)
         return Response({"status": "ok"})
