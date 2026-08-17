@@ -114,10 +114,17 @@ else
     warn "Fichier manage.py non trouvé, saut de la vérification Django"
 fi
 
-# Étape 3.5: Appliquer les migrations (pas de makemigrations en prod)
+# Étape 3.5: Générer puis appliquer les migrations
 # Pas de backup/restore des clés chiffrées — trop risqué (peut écraser les clés).
-info "Étape 3.5: Application des migrations..."
+info "Étape 3.5: Génération puis application des migrations..."
 if [ -f "manage.py" ]; then
+    if python3 manage.py makemigrations --noinput; then
+        info "Génération des migrations réussie"
+    else
+        error "Erreur lors de la génération des migrations"
+        exit 1
+    fi
+
     if python3 manage.py migrate --noinput; then
         info "Migrations appliquées avec succès"
     else
@@ -238,7 +245,7 @@ info "Résumé:"
 info "  - Code mis à jour depuis Git"
 info "  - Environnement virtuel activé"
 info "  - Vérification Django effectuée"
-info "  - Migrations appliquées (migrate only, pas de makemigrations)"
+info "  - Migrations générées puis appliquées (makemigrations + migrate)"
 info "  - Aucun backup/restore des clés chiffrées"
 info "  - Gunicorn redémarré"
 info "  - Services Supervisor redémarrés"

@@ -254,6 +254,7 @@ class SettingAdmin(admin.ModelAdmin):
         "registration_enabled",
         "use_whatsapp",
         "use_chatbot",
+        "open_whatsapp_for_support",
         "use_telegram",
         "use_sms",
     )
@@ -272,6 +273,7 @@ class SettingAdmin(admin.ModelAdmin):
         "auto_approve_withdrawal",
         "use_whatsapp",
         "use_chatbot",
+        "open_whatsapp_for_support",
         "use_telegram",
         "use_sms",
     )
@@ -333,6 +335,7 @@ class SettingAdmin(admin.ModelAdmin):
                 "fields": (
                     "use_whatsapp",
                     "use_chatbot",
+                    "open_whatsapp_for_support",
                     "openwa_token",
                     "openwa_session_id",
                     "whatsapp_phone",

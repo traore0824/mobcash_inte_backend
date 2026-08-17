@@ -388,6 +388,11 @@ class Setting(models.Model):
         verbose_name="Activer le chatbot",
         help_text="Chat in-app via My Customer (même clé openwa_token / X-API-Key que WhatsApp).",
     )
+    open_whatsapp_for_support = models.BooleanField(
+        default=False,
+        verbose_name="Ouvrir WhatsApp pour le support",
+        help_text="Si activé, le bouton/support contact ouvre WhatsApp au lieu du chatbot.",
+    )
     openwa_session_id = models.CharField(
         max_length=255,
         blank=True,

@@ -170,6 +170,7 @@ class SettingMobileSerializer(serializers.ModelSerializer):
             "dowload_apk_link",
             "use_whatsapp",
             "use_chatbot",
+            "open_whatsapp_for_support",
             "use_telegram",
             "use_sms",
             "moov_marchand_phone",
