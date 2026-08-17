@@ -2701,7 +2701,7 @@ class FinalizeDepositTransaction(decorators.APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def post(self, request, *args, **kwargs):
-        reference = self.request.data.get("reference")
+        reference = (self.request.data.get("reference") or "").strip()
         transaction = (
             Transaction.objects.filter(reference=reference)
             .exclude(status="accept")
@@ -2709,6 +2709,16 @@ class FinalizeDepositTransaction(decorators.APIView):
         )
         if not transaction:
             return Response(status=status.HTTP_404_NOT_FOUND)
+
+        old_reference = (transaction.reference or "").strip() or reference
+        new_reference = generate_reference()
+        transaction.reference = new_reference
+        transaction.save(update_fields=["reference"])
+        connect_pro_logger.info(
+            "[FINALIZE] Référence régénérée old_ref=%s new_ref=%s",
+            old_reference,
+            new_reference,
+        )
 
         servculAPI = resolve_api_service(transaction.app)
         if servculAPI:

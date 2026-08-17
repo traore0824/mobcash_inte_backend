@@ -81,8 +81,23 @@ def save_user_location(request):
     # City name
 
 
+def is_registration_enabled() -> bool:
+    setting = Setting.objects.first()
+    if not setting:
+        return True
+    return bool(setting.registration_enabled)
+
+
 @api_view(["POST"])
 def registration(request):
+    if not is_registration_enabled():
+        return Response(
+            {
+                "success": False,
+                "details": "Les inscriptions sont actuellement désactivées.",
+            },
+            status=status.HTTP_403_FORBIDDEN,
+        )
     serializer = UserRegistrationSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     user = serializer.save()
@@ -939,6 +954,14 @@ def google_auth(request):
                 status=status.HTTP_400_BAD_REQUEST,
             )
     else:
+        if not is_registration_enabled():
+            return Response(
+                {
+                    "success": False,
+                    "details": "Ce compte n'existe pas. Les inscriptions sont désactivées.",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
         # Nouveau compte via Google — création automatique
         from .serializers import generate_referral_code
 

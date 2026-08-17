@@ -373,6 +373,11 @@ class Setting(models.Model):
     crypto_enable = models.BooleanField(default=False)
     deposit_enable = models.BooleanField(default=True)
     withdraw_enable = models.BooleanField(default=True)
+    registration_enabled = models.BooleanField(
+        default=True,
+        verbose_name="Inscription activée",
+        help_text="Si désactivé, les nouvelles inscriptions (formulaire et Google) sont refusées.",
+    )
     use_whatsapp = models.BooleanField(
         default=False,
         verbose_name="Activer WhatsApp",

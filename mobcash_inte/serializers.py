@@ -162,6 +162,7 @@ class SettingMobileSerializer(serializers.ModelSerializer):
             "crypto_enable",
             "deposit_enable",
             "withdraw_enable",
+            "registration_enabled",
             "coupon_enable",
             "referral_bonus",
             "whatsapp_phone",
