@@ -80,10 +80,27 @@ class AppNameAdminForm(forms.ModelForm):
         widget=forms.PasswordInput(render_value=True),
         help_text="Token dealer External API (dat_...). Requis si le nom de l'app est BetMomo.",
     )
+    betmomo_email = forms.CharField(
+        required=False,
+        label="Email dealer BetMomo",
+        help_text="Email compte dealer — utilisé pour le solde (login).",
+    )
+    betmomo_password = forms.CharField(
+        required=False,
+        label="Mot de passe dealer BetMomo",
+        widget=forms.PasswordInput(render_value=True),
+        help_text="Mot de passe compte dealer — utilisé pour le solde.",
+    )
 
     class Meta:
         model = AppName
-        exclude = ["_hash", "_cashierpass", "_betmomo_token"]
+        exclude = [
+            "_hash",
+            "_cashierpass",
+            "_betmomo_token",
+            "_betmomo_email",
+            "_betmomo_password",
+        ]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -91,12 +108,16 @@ class AppNameAdminForm(forms.ModelForm):
             self.fields["hash"].initial = self.instance.hash
             self.fields["cashierpass"].initial = self.instance.cashierpass
             self.fields["betmomo_token"].initial = self.instance.betmomo_token
+            self.fields["betmomo_email"].initial = self.instance.betmomo_email
+            self.fields["betmomo_password"].initial = self.instance.betmomo_password
 
     def save(self, commit=True):
         instance = super().save(commit=False)
         instance.hash = self.cleaned_data.get("hash") or ""
         instance.cashierpass = self.cleaned_data.get("cashierpass") or ""
         instance.betmomo_token = self.cleaned_data.get("betmomo_token") or ""
+        instance.betmomo_email = self.cleaned_data.get("betmomo_email") or ""
+        instance.betmomo_password = self.cleaned_data.get("betmomo_password") or ""
         if commit:
             instance.save()
         return instance
@@ -130,8 +151,8 @@ class AppNameAdmin(admin.ModelAdmin):
         (
             "BetMomo",
             {
-                "fields": ("betmomo_token",),
-                "description": "Si le nom de l'app est BetMomo et qu'un token est renseigné, les dépôts/retraits appellent l'API BetMomo directement.",
+                "fields": ("betmomo_token", "betmomo_email", "betmomo_password"),
+                "description": "Si le nom de l'app est BetMomo et qu'un token est renseigné, les dépôts/retraits appellent l'API BetMomo directement. Email/mot de passe servent au solde dealer.",
             },
         ),
         (

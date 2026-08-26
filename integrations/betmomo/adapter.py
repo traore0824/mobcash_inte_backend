@@ -20,8 +20,18 @@ logger = logging.getLogger("mobcash_inte_backend.transactions")
 class BetMomoApiAdapter:
     provider = "betmomo"
 
-    def __init__(self, token: str):
-        self._service = BetMomoService(token=token)
+    def __init__(
+        self,
+        token: str,
+        *,
+        email: str | None = None,
+        password: str | None = None,
+    ):
+        self._service = BetMomoService(
+            token=token,
+            email=email or None,
+            password=password or None,
+        )
 
     def recharge_account(self, userid, amount: float) -> dict[str, Any]:
         try:

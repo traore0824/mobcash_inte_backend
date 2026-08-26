@@ -27,6 +27,18 @@ class AppName(models.Model):
         db_column="betmomo_token",
         help_text="Token app dealer BetMomo (dat_...), chiffré.",
     )
+    _betmomo_email = models.TextField(
+        blank=True,
+        null=True,
+        db_column="betmomo_email",
+        help_text="Email dealer BetMomo (chiffré) — login pour le solde.",
+    )
+    _betmomo_password = models.TextField(
+        blank=True,
+        null=True,
+        db_column="betmomo_password",
+        help_text="Mot de passe dealer BetMomo (chiffré) — login pour le solde.",
+    )
 
     @property
     def hash(self):
@@ -52,6 +64,22 @@ class AppName(models.Model):
     def betmomo_token(self, value):
         self._betmomo_token = encrypt(value)
 
+    @property
+    def betmomo_email(self):
+        return decrypt(self._betmomo_email)
+
+    @betmomo_email.setter
+    def betmomo_email(self, value):
+        self._betmomo_email = encrypt(value)
+
+    @property
+    def betmomo_password(self):
+        return decrypt(self._betmomo_password)
+
+    @betmomo_password.setter
+    def betmomo_password(self, value):
+        self._betmomo_password = encrypt(value)
+
     def get_betmomo_token(self) -> str:
         token = (self.betmomo_token or "").strip()
         if token:
@@ -59,6 +87,12 @@ class AppName(models.Model):
         if self.is_betmomo_app:
             return (self.hash or "").strip()
         return ""
+
+    def get_betmomo_email(self) -> str:
+        return (self.betmomo_email or "").strip()
+
+    def get_betmomo_password(self) -> str:
+        return (self.betmomo_password or "").strip()
 
     @staticmethod
     def _normalize_app_name(name: str) -> str:

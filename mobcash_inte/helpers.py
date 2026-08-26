@@ -331,7 +331,11 @@ def resolve_api_service(app: AppName):
     if uses_betmomo(app):
         from integrations.betmomo.adapter import BetMomoApiAdapter
 
-        return BetMomoApiAdapter(token=get_betmomo_token(app))
+        return BetMomoApiAdapter(
+            token=get_betmomo_token(app),
+            email=app.get_betmomo_email() or None,
+            password=app.get_betmomo_password() or None,
+        )
     if app.hash and app.name.lower() == "1win":
         from one_win_service import OneWinService
         return OneWinService(api_key=app.hash)

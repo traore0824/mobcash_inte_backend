@@ -74,46 +74,94 @@ class SendNotificationSerializer(serializers.Serializer):
 
 
 class ReadAppNameSerializer(serializers.ModelSerializer):
+    uses_betmomo = serializers.SerializerMethodField()
+    has_betmomo_token = serializers.SerializerMethodField()
+
     class Meta:
         model = AppName
         exclude = [
             "_hash",
             "cashdeskid",
             "_cashierpass",
+            "_betmomo_token",
+            "_betmomo_email",
+            "_betmomo_password",
         ]
+
+    def get_uses_betmomo(self, obj):
+        return bool(getattr(obj, "uses_betmomo", False))
+
+    def get_has_betmomo_token(self, obj):
+        return bool(obj.get_betmomo_token())
 
 
 class CreateAppNameSerializer(serializers.ModelSerializer):
     hash = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     cashierpass = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    betmomo_token = serializers.CharField(
+        required=False, allow_null=True, allow_blank=True, write_only=True
+    )
+    betmomo_email = serializers.CharField(
+        required=False, allow_null=True, allow_blank=True, write_only=True
+    )
+    betmomo_password = serializers.CharField(
+        required=False, allow_null=True, allow_blank=True, write_only=True
+    )
+    uses_betmomo = serializers.SerializerMethodField(read_only=True)
+    has_betmomo_token = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = AppName
-        exclude = ["_hash", "_cashierpass"]
+        exclude = [
+            "_hash",
+            "_cashierpass",
+            "_betmomo_token",
+            "_betmomo_email",
+            "_betmomo_password",
+        ]
 
-    def create(self, validated_data):
+    def get_uses_betmomo(self, obj):
+        return bool(getattr(obj, "uses_betmomo", False))
+
+    def get_has_betmomo_token(self, obj):
+        return bool(obj.get_betmomo_token())
+
+    def _apply_secrets(self, instance, validated_data):
         hash_value = validated_data.pop("hash", None)
         cashierpass_value = validated_data.pop("cashierpass", None)
-        instance = AppName(**validated_data)
+        betmomo_token = validated_data.pop("betmomo_token", None)
+        betmomo_email = validated_data.pop("betmomo_email", None)
+        betmomo_password = validated_data.pop("betmomo_password", None)
+
         if hash_value is not None:
             instance.hash = hash_value
         if cashierpass_value is not None:
             instance.cashierpass = cashierpass_value
+        # Vide = ne pas écraser (garder la valeur actuelle)
+        if betmomo_token is not None and str(betmomo_token).strip():
+            instance.betmomo_token = str(betmomo_token).strip()
+        if betmomo_email is not None and str(betmomo_email).strip():
+            instance.betmomo_email = str(betmomo_email).strip()
+        if betmomo_password is not None and str(betmomo_password).strip():
+            instance.betmomo_password = str(betmomo_password).strip()
+        return validated_data
+
+    def create(self, validated_data):
+        validated_data = dict(validated_data)
+        instance = AppName()
+        validated_data = self._apply_secrets(instance, validated_data)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
         instance.save()
         return instance
 
     def update(self, instance, validated_data):
-        hash_value = validated_data.pop("hash", None)
-        cashierpass_value = validated_data.pop("cashierpass", None)
+        validated_data = dict(validated_data)
+        validated_data = self._apply_secrets(instance, validated_data)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
-        if hash_value is not None:
-            instance.hash = hash_value
-        if cashierpass_value is not None:
-            instance.cashierpass = cashierpass_value
         instance.save()
         return instance
-
 
 class UpdateSettingSerializer(serializers.ModelSerializer):
     connect_pro_token = serializers.CharField(required=False, allow_null=True, allow_blank=True)
