@@ -123,9 +123,14 @@ def finalize_betmomo_transaction(txn) -> str:
 
     if not txn or not uses_betmomo(txn.app):
         return "skipped"
-    if txn.status != "init_payment":
+    # pending = retrait BetMomo réussi côté API mais planté avant init_payment
+    # (ex: montant négatif sur PositiveIntegerField)
+    if txn.status not in ("init_payment", "pending"):
         return "skipped"
     if not txn.betmomo_operation_ref:
+        return "skipped"
+    # Déjà validé côté betting + payout déjà lancé
+    if txn.type_trans == "withdrawal" and txn.validated_at and txn.public_id:
         return "skipped"
 
     token = get_betmomo_token(txn.app)
@@ -145,8 +150,17 @@ def finalize_betmomo_transaction(txn) -> str:
         )
         return "error"
 
+    # Si l'API status ne répond pas mais la réponse initiale était déjà success
     if not op_status or op_status == "pending":
-        return "pending"
+        raw = str(txn.mobcash_response or "")
+        if '"Success": True' in raw or "'Success': True" in raw:
+            if '"Pending": False' in raw or "'Pending': False" in raw:
+                op_status = "success"
+                details = details or {"status": "success", "reference": txn.betmomo_operation_ref}
+            else:
+                return "pending"
+        else:
+            return "pending"
 
     if op_status == "failed":
         txn.change_status(
@@ -171,6 +185,19 @@ def finalize_betmomo_transaction(txn) -> str:
         return "pending"
 
     if txn.type_trans == "withdrawal":
+        # Si déjà validé mais payout Connect jamais lancé → relancer le paiement
+        if txn.validated_at and not txn.public_id:
+            try:
+                from payment import connect_pro_withd_process
+
+                txn.amount = abs(float(txn.amount or 0))
+                txn.save(update_fields=["amount"])
+                connect_pro_withd_process(txn, disbursements=True)
+            except Exception:
+                logger.exception(
+                    "[BETMOMO] [FINALIZE] retry payout txn=%s", txn.id
+                )
+            return "success"
         if txn.validated_at:
             return "skipped"
         amount = BetMomoService.withdrawal_amount_from_details(details, {})
@@ -197,6 +224,9 @@ def finalize_betmomo_transaction(txn) -> str:
         except Exception:
             logger.exception("[BETMOMO] [FINALIZE] paiement retrait txn=%s", txn.id)
         return "success"
+
+    if txn.status == "accept":
+        return "skipped"
 
     txn.validated_at = dj_tz.now()
     txn.change_status(
@@ -301,12 +331,12 @@ def poll_betmomo_pending_transactions():
     threshold = dj_tz.now() - timedelta(hours=6)
     transactions = (
         Transaction.objects.filter(
-            status="init_payment",
+            status__in=["init_payment", "pending"],
             betmomo_operation_ref__isnull=False,
             created_at__gte=threshold,
         )
         .exclude(betmomo_operation_ref="")
-        .select_related("app", "user")
+        .select_related("app", "user", "network")
     )
 
     processed = 0
