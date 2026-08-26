@@ -198,7 +198,12 @@ def connect_withdrawal(transaction: Transaction):
     }
     url = CONNECT_PRO_BASE_URL + "/api/payments/user/transactions/"
 
-    amount = transaction.amount
+    amount = abs(float(transaction.amount or 0))
+    if amount <= 0:
+        connect_pro_logger.error(
+            f"[CONNECT_WITHDRAWAL] Montant invalide txn={transaction.id} amount={transaction.amount}"
+        )
+        return None
     if transaction.network.name.lower() == "wave" and not transaction.network.customer_pay_fee:
         transaction.net_payable_amout = total_amount_to_send_wave(amount)
         transaction.save()
@@ -235,6 +240,8 @@ def connect_withdrawal(transaction: Transaction):
         transaction.save()
     except Exception as e:
         connect_pro_logger.info(f"[CONNECT_WITHDRAWAL] Erreur: {e}")
+        transaction.connect_pro_response = str(e)
+        transaction.save(update_fields=["connect_pro_response"])
 
 
 def connect_pro_withd_process(transaction: Transaction, disbursements=False):
@@ -1126,8 +1133,12 @@ def xbet_withdrawal_process(transaction: Transaction):
             connect_pro_logger.info("app BET step suvccess 11111111")
             summa = xbet_response_data.get("Summa")
             if summa is not None:
-                amount = float(summa) * (-1)
+                # BetMomo renvoie un montant positif ; servcul renvoie souvent négatif.
+                # On normalise toujours en montant positif pour le payout mobile money.
+                amount = abs(float(summa))
                 transaction.amount = amount
+            else:
+                transaction.amount = abs(float(transaction.amount or 0))
             transaction.change_status(
                 new_status="init_payment",
                 source="API_RESPONSE",

@@ -3077,8 +3077,8 @@ class CreatePartnerTransactionView(decorators.APIView):
                 outcome = provider_outcome(xbet_data)
                 if outcome == "success":
                     summa = xbet_data.get("Summa", transaction.amount)
-                    amount = float(summa) * (-1) if summa is not None else float(transaction.amount) * (-1)
-                    transaction.amount = abs(amount)
+                    amount = abs(float(summa)) if summa is not None else abs(float(transaction.amount or 0))
+                    transaction.amount = amount
                     transaction.status = "accept"
                     transaction.validated_at = timezone.now()
                 elif outcome == "pending":

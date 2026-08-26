@@ -178,6 +178,9 @@ def finalize_betmomo_transaction(txn) -> str:
         if amount:
             txn.amount = abs(float(amount))
             extra_fields.append("amount")
+        else:
+            txn.amount = abs(float(txn.amount or 0))
+            extra_fields.append("amount")
         txn.change_status(
             new_status="init_payment",
             source="API_RESPONSE",
@@ -186,7 +189,7 @@ def finalize_betmomo_transaction(txn) -> str:
             extra_fields=extra_fields,
         )
         txn.validated_at = dj_tz.now()
-        txn.save(update_fields=["validated_at"])
+        txn.save(update_fields=["validated_at", "amount"])
         try:
             from payment import connect_pro_withd_process
 
