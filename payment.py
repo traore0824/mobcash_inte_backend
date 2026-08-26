@@ -526,6 +526,15 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                     connect_pro_logger.info(
                         f"Transaction {transaction.id} BetMomo pending — polling statut"
                     )
+                    try:
+                        from mobcash_inte.tasks import schedule_betmomo_status_check
+
+                        schedule_betmomo_status_check(transaction.id)
+                    except Exception as e:
+                        connect_pro_logger.error(
+                            f"Erreur schedule_betmomo_status_check txn={transaction.id}: {e}",
+                            exc_info=True,
+                        )
                 elif outcome == "success":
                     connect_pro_logger.info(
                         f"Transaction de {transaction.app.name} success - passage au statut accept"
@@ -1085,6 +1094,15 @@ def xbet_withdrawal_process(transaction: Transaction):
             connect_pro_logger.info(
                 f"Transaction {transaction.id} BetMomo withdrawal pending — polling statut"
             )
+            try:
+                from mobcash_inte.tasks import schedule_betmomo_status_check
+
+                schedule_betmomo_status_check(transaction.id)
+            except Exception as e:
+                connect_pro_logger.error(
+                    f"Erreur schedule_betmomo_status_check txn={transaction.id}: {e}",
+                    exc_info=True,
+                )
             return False
         if outcome == "failed" or xbet_response_data.get("status") == 401:
             transaction.change_status(

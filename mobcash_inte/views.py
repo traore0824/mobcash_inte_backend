@@ -753,6 +753,15 @@ class RewardTransactionViews(generics.CreateAPIView):
                         data=xbet_response_data,
                         message="Reward BetMomo en attente de confirmation",
                     )
+                    try:
+                        from mobcash_inte.tasks import schedule_betmomo_status_check
+
+                        schedule_betmomo_status_check(transaction.id)
+                    except Exception as e:
+                        connect_pro_logger.error(
+                            f"Erreur schedule_betmomo_status_check reward txn={transaction.id}: {e}",
+                            exc_info=True,
+                        )
                 elif outcome == "success":
                     payment_logger.info(
                         f"Transaction reward de {transaction.app.name} success"
@@ -2739,6 +2748,15 @@ class FinalizeDepositTransaction(decorators.APIView):
                 data=xbet_response_data,
                 message="Dépôt BetMomo en attente de confirmation",
             )
+            try:
+                from mobcash_inte.tasks import schedule_betmomo_status_check
+
+                schedule_betmomo_status_check(transaction.id)
+            except Exception as e:
+                connect_pro_logger.error(
+                    f"Erreur schedule_betmomo_status_check finalize txn={transaction.id}: {e}",
+                    exc_info=True,
+                )
         elif outcome == "success":
             transaction.change_status(
                 new_status="accept",
