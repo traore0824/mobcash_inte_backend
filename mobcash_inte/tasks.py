@@ -2,6 +2,7 @@ from celery import shared_task
 from django.utils import timezone
 from dateutil.relativedelta import relativedelta
 from django.db.models import Sum
+import logging
 
 
 @shared_task
@@ -107,3 +108,131 @@ def grant_daily_user_credits():
             created_count += 1
     
     return created_count
+
+
+@shared_task
+def poll_betmomo_pending_transactions():
+    """
+    Vérifie le statut des opérations BetMomo encore en init_payment.
+    Planifié toutes les 30 secondes.
+    """
+    from datetime import timedelta
+    from django.utils import timezone as dj_tz
+
+    from integrations.betmomo.service import BetMomoService
+    from mobcash_inte.helpers import get_betmomo_token, uses_betmomo
+    from mobcash_inte.models import Transaction
+
+    logger = logging.getLogger("mobcash_inte_backend.transactions")
+    threshold = dj_tz.now() - timedelta(hours=6)
+    transactions = (
+        Transaction.objects.filter(
+            status="init_payment",
+            betmomo_operation_ref__isnull=False,
+            created_at__gte=threshold,
+        )
+        .exclude(betmomo_operation_ref="")
+        .select_related("app", "user")
+    )
+
+    processed = 0
+    for txn in transactions:
+        if not uses_betmomo(txn.app):
+            continue
+        token = get_betmomo_token(txn.app)
+        if not token:
+            continue
+        op_type = "WITHDRAWAL" if txn.type_trans == "withdrawal" else "DEPOSIT"
+        try:
+            service = BetMomoService(token=token)
+            details = service.get_transaction_details(
+                txn.betmomo_operation_ref, op_type
+            )
+            op_status = (details or {}).get("status") or ""
+        except Exception as exc:
+            logger.warning(
+                "[BETMOMO] [POLL] Erreur statut txn=%s: %s",
+                txn.id,
+                exc,
+            )
+            continue
+
+        if not op_status or op_status == "pending":
+            continue
+
+        processed += 1
+        if op_status == "failed":
+            txn.change_status(
+                new_status="error",
+                source="API_RESPONSE",
+                data=details,
+                message="Opération BetMomo échouée",
+            )
+            try:
+                from payment import process_transaction_notifications_and_bonus
+
+                process_transaction_notifications_and_bonus.delay(
+                    transaction_id=txn.id,
+                    is_error=True,
+                    error_message="Opération BetMomo échouée",
+                )
+            except Exception:
+                logger.exception("[BETMOMO] [POLL] notification erreur txn=%s", txn.id)
+            continue
+
+        if op_status != "success":
+            continue
+
+        if txn.type_trans == "withdrawal":
+            if txn.validated_at:
+                continue
+            amount = BetMomoService.withdrawal_amount_from_details(details, {})
+            extra_fields = []
+            if amount:
+                txn.amount = abs(float(amount))
+                extra_fields.append("amount")
+            txn.change_status(
+                new_status="init_payment",
+                source="API_RESPONSE",
+                data=details,
+                message="Retrait BetMomo confirmé, paiement en cours",
+                extra_fields=extra_fields,
+            )
+            txn.validated_at = dj_tz.now()
+            txn.save(update_fields=["validated_at"])
+            try:
+                from payment import connect_pro_withd_process
+
+                connect_pro_withd_process(txn, disbursements=True)
+            except Exception:
+                logger.exception(
+                    "[BETMOMO] [POLL] paiement retrait txn=%s", txn.id
+                )
+            continue
+
+        txn.validated_at = dj_tz.now()
+        txn.change_status(
+            new_status="accept",
+            source="API_RESPONSE",
+            data=details,
+            message="Dépôt BetMomo confirmé",
+            extra_fields=["validated_at"],
+        )
+        if txn.type_trans == "reward":
+            from mobcash_inte.models import Bonus
+
+            Bonus.objects.filter(
+                user=txn.user, bonus_with=False, bonus_delete=False
+            ).update(bonus_with=True)
+        try:
+            from payment import (
+                check_solde,
+                process_transaction_notifications_and_bonus,
+            )
+
+            process_transaction_notifications_and_bonus.delay(transaction_id=txn.id)
+            check_solde.delay(transaction_id=txn.id)
+        except Exception:
+            logger.exception("[BETMOMO] [POLL] post-success txn=%s", txn.id)
+
+    return processed

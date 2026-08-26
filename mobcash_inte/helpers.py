@@ -236,13 +236,102 @@ def calculate_fee(network, amount: int) -> int:
     return 0
 
 
+def is_betmomo_app(app: AppName) -> bool:
+    return bool(app and getattr(app, "is_betmomo_app", False))
+
+
+def get_betmomo_token(app: AppName) -> str:
+    if not app:
+        return ""
+    getter = getattr(app, "get_betmomo_token", None)
+    if callable(getter):
+        return getter() or ""
+    return ""
+
+
+def uses_betmomo(app: AppName) -> bool:
+    """Plateforme BetMomo + token dealer configuré."""
+    return bool(app and getattr(app, "uses_betmomo", False))
+
+
+def provider_outcome(response) -> str:
+    """success | pending | failed — à partir d'une réponse API normalisée."""
+    if not isinstance(response, dict):
+        return "failed"
+    if response.get("Failed"):
+        return "failed"
+    if str(response.get("Success")).lower() == "true":
+        return "success"
+    if response.get("Pending"):
+        return "pending"
+    if str(response.get("Success")).lower() == "false":
+        return "failed"
+    return "failed"
+
+
+def execute_platform_deposit(transaction, amount=None):
+    """
+    Dépôt via BetMomo, 1win, servcul ou MobCashExternalService.
+    Retourne le dict normalisé (Success / Pending / Failed / OperationId).
+    """
+    amount = float(amount if amount is not None else transaction.amount)
+    service = resolve_api_service(transaction.app)
+    if service is None:
+        from mobcash_external_service import MobCashExternalService
+
+        return MobCashExternalService().create_deposit(transaction=transaction)
+
+    from integrations.betmomo.adapter import BetMomoApiAdapter
+
+    if isinstance(service, BetMomoApiAdapter):
+        return service.create_deposit(transaction, amount=amount)
+
+    response = service.recharge_account(
+        amount=amount, userid=transaction.user_app_id
+    )
+    if isinstance(response, dict) and "data" in response and "code" in response:
+        return response.get("data")
+    return response
+
+
+def execute_platform_withdrawal(transaction):
+    """
+    Retrait via BetMomo, 1win, servcul ou MobCashExternalService.
+    Retourne le dict normalisé (Success / Pending / Failed / OperationId).
+    """
+    service = resolve_api_service(transaction.app)
+    if service is None:
+        from mobcash_external_service import MobCashExternalService
+
+        return MobCashExternalService().create_withdrawal(transaction=transaction)
+
+    from integrations.betmomo.adapter import BetMomoApiAdapter
+
+    if isinstance(service, BetMomoApiAdapter):
+        return service.create_withdrawal(transaction)
+
+    response = service.withdraw_from_account(
+        userid=transaction.user_app_id, code=transaction.withdriwal_code
+    )
+    if isinstance(response, dict) and "data" in response and "code" in response:
+        return response.get("data")
+    return response
+
+
 def resolve_api_service(app: AppName):
     """
     Retourne le bon service API selon l'app :
+    - BetMomo + token            → BetMomoApiAdapter
     - app.hash + name == "1win"  → OneWinService (api_key = hash)
     - app.hash + autre nom       → BetApp (servcul)
     - pas de hash                → None  (→ MobCashExternalService à utiliser côté appelant)
     """
+    if not app:
+        return None
+    if uses_betmomo(app):
+        from integrations.betmomo.adapter import BetMomoApiAdapter
+
+        return BetMomoApiAdapter(token=get_betmomo_token(app))
     if app.hash and app.name.lower() == "1win":
         from one_win_service import OneWinService
         return OneWinService(api_key=app.hash)

@@ -74,21 +74,29 @@ class UserAdmin(BaseUserAdmin):
 class AppNameAdminForm(forms.ModelForm):
     hash = forms.CharField(required=False, label="Hash")
     cashierpass = forms.CharField(required=False, label="Cashier pass")
+    betmomo_token = forms.CharField(
+        required=False,
+        label="Token BetMomo",
+        widget=forms.PasswordInput(render_value=True),
+        help_text="Token dealer External API (dat_...). Requis si le nom de l'app est BetMomo.",
+    )
 
     class Meta:
         model = AppName
-        exclude = ["_hash", "_cashierpass"]
+        exclude = ["_hash", "_cashierpass", "_betmomo_token"]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if self.instance and self.instance.pk:
             self.fields["hash"].initial = self.instance.hash
             self.fields["cashierpass"].initial = self.instance.cashierpass
+            self.fields["betmomo_token"].initial = self.instance.betmomo_token
 
     def save(self, commit=True):
         instance = super().save(commit=False)
         instance.hash = self.cleaned_data.get("hash") or ""
         instance.cashierpass = self.cleaned_data.get("cashierpass") or ""
+        instance.betmomo_token = self.cleaned_data.get("betmomo_token") or ""
         if commit:
             instance.save()
         return instance
@@ -100,6 +108,7 @@ class AppNameAdmin(admin.ModelAdmin):
     list_display = (
         "name",
         "enable",
+        "uses_betmomo",
         "city",
         "active_for_deposit",
         "active_for_with",
@@ -109,11 +118,22 @@ class AppNameAdmin(admin.ModelAdmin):
     search_fields = ("name", "city", "street")
     ordering = ("order",)
     readonly_fields = ("id",)
+
+    @admin.display(boolean=True, description="BetMomo")
+    def uses_betmomo(self, obj):
+        return obj.uses_betmomo
     fieldsets = (
         ("Identifiant", {"fields": ("id",)}),
         ("Informations principales", {"fields": ("name", "image", "enable", "order")}),
         ("Localisation", {"fields": ("city", "street")}),
         ("Paramètres de caisse", {"fields": ("cashdeskid", "cashierpass", "hash")}),
+        (
+            "BetMomo",
+            {
+                "fields": ("betmomo_token",),
+                "description": "Si le nom de l'app est BetMomo et qu'un token est renseigné, les dépôts/retraits appellent l'API BetMomo directement.",
+            },
+        ),
         (
             "Liens utiles",
             {

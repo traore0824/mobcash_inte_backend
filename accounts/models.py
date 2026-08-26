@@ -21,6 +21,12 @@ class AppName(models.Model):
     _hash = models.TextField(blank=True, null=True, db_column='hash')
     cashdeskid = models.CharField(blank=True, null=True, max_length=120)
     _cashierpass = models.TextField(blank=True, null=True, db_column='cashierpass')
+    _betmomo_token = models.TextField(
+        blank=True,
+        null=True,
+        db_column="betmomo_token",
+        help_text="Token app dealer BetMomo (dat_...), chiffré.",
+    )
 
     @property
     def hash(self):
@@ -37,6 +43,36 @@ class AppName(models.Model):
     @cashierpass.setter
     def cashierpass(self, value):
         self._cashierpass = encrypt(value)
+
+    @property
+    def betmomo_token(self):
+        return decrypt(self._betmomo_token)
+
+    @betmomo_token.setter
+    def betmomo_token(self, value):
+        self._betmomo_token = encrypt(value)
+
+    def get_betmomo_token(self) -> str:
+        token = (self.betmomo_token or "").strip()
+        if token:
+            return token
+        if self.is_betmomo_app:
+            return (self.hash or "").strip()
+        return ""
+
+    @staticmethod
+    def _normalize_app_name(name: str) -> str:
+        return "".join(ch for ch in (name or "").lower() if ch.isalnum())
+
+    @property
+    def is_betmomo_app(self) -> bool:
+        return self._normalize_app_name(self.name) in {"betmomo", "betpay", "bewallet"}
+
+    @property
+    def uses_betmomo(self) -> bool:
+        """True si l'app est BetMomo et qu'un token dealer est configuré."""
+        return self.is_betmomo_app and bool(self.get_betmomo_token())
+
     deposit_tuto_link = models.URLField(blank=True, null=True)
     withdrawal_tuto_link = models.URLField(blank=True, null=True)
     why_withdrawal_fail = models.URLField(blank=True, null=True)

@@ -21,7 +21,10 @@ from mobcash_inte.helpers import (
     calculate_fee,
     generate_reference,
     init_mobcash,
-    resolve_api_service,
+    execute_platform_deposit,
+    execute_platform_withdrawal,
+    provider_outcome,
+    uses_betmomo,
     send_admin_notification,
     send_notification,
     user_has_recent_accepted_deposit,
@@ -732,30 +735,25 @@ class RewardTransactionViews(generics.CreateAPIView):
                 )
 
                 app = transaction.app
-                servculAPI = init_mobcash(app_name=app)
                 amount = transaction.amount
 
-                # Appeler l'API selon le type d'app
-                servculAPI = resolve_api_service(transaction.app)
-                if servculAPI:
-                    response = servculAPI.recharge_account(
-                        amount=float(amount), userid=transaction.user_app_id
-                    )
-                    connect_pro_logger.info(
-                        f"Reponse de l'api de {transaction.app.name}: {response}"
-                    )
-                    xbet_response_data = response.get("data") if "data" in response and "code" in response else response
-                else:
-                    response = MobCashExternalService().create_deposit(
-                        transaction=transaction
-                    )
-                    connect_pro_logger.info(
-                        f"Reponse de l'api de {transaction.app.name}: {response}"
-                    )
-                    xbet_response_data = response
+                xbet_response_data = execute_platform_deposit(
+                    transaction, amount=amount
+                )
+                connect_pro_logger.info(
+                    f"Reponse de l'api de {transaction.app.name}: {xbet_response_data}"
+                )
 
+                outcome = provider_outcome(xbet_response_data)
                 # 7. Si succès : marquer tous les bonus comme utilisés et mettre status="accept"
-                if xbet_response_data.get("Success") == True:
+                if outcome == "pending":
+                    transaction.change_status(
+                        new_status="init_payment",
+                        source="API_RESPONSE",
+                        data=xbet_response_data,
+                        message="Reward BetMomo en attente de confirmation",
+                    )
+                elif outcome == "success":
                     payment_logger.info(
                         f"Transaction reward de {transaction.app.name} success"
                     )
@@ -1561,13 +1559,19 @@ class SearchUserBet(decorators.APIView):
             return Response(
                 {"details": "App not found"}, status=status.HTTP_404_NOT_FOUND
             )
-        if app.hash:
+        if uses_betmomo(app):
+            response = {"UserId": userid, "Name": None}
+        elif app.hash:
             init_app = init_mobcash(app_name=app)
             response = init_app.search_user(userid=userid)
             if response.get("code") != constant.CODE_EXEPTION:
                 response = response.get("data")
             else:
                 response = {}
+        else:
+            response = MobCashExternalService().verify_player(
+                player_user_id=userid, code=app.name
+            )
         return Response(response)
 
     def post(self, request, *args, **kwargs):
@@ -1578,7 +1582,9 @@ class SearchUserBet(decorators.APIView):
         app_name = app.name
         userid = serializer.validated_data["userid"]
 
-        if app.hash and app.name.lower() == "1win":
+        if uses_betmomo(app):
+            response = {"UserId": userid, "Name": None}
+        elif app.hash and app.name.lower() == "1win":
             # 1win n'a pas d'endpoint de recherche utilisateur
             response = {"UserId": userid, "Name": None, "CurrencyId": 27}
         elif app.hash:
@@ -2720,30 +2726,27 @@ class FinalizeDepositTransaction(decorators.APIView):
             new_reference,
         )
 
-        servculAPI = resolve_api_service(transaction.app)
-        if servculAPI:
-            response = servculAPI.recharge_account(
-                amount=float(transaction.amount), userid=transaction.user_app_id
-            )
-            connect_pro_logger.info(
-                f"Reponse de l'api de {transaction.app.name}: {response}"
-            )
-            xbet_response_data = response.get("data") if "data" in response and "code" in response else response
-        else:
-            response = MobCashExternalService().create_deposit(transaction=transaction)
-            connect_pro_logger.info(
-                f"Reponse de l'api de {transaction.app.name}: {response}"
-            )
-            xbet_response_data = response
+        xbet_response_data = execute_platform_deposit(transaction)
+        connect_pro_logger.info(
+            f"Reponse de l'api de {transaction.app.name}: {xbet_response_data}"
+        )
 
-        if xbet_response_data.get("Success") == True:
+        outcome = provider_outcome(xbet_response_data)
+        if outcome == "pending":
+            transaction.change_status(
+                new_status="init_payment",
+                source="API_RESPONSE",
+                data=xbet_response_data,
+                message="Dépôt BetMomo en attente de confirmation",
+            )
+        elif outcome == "success":
             transaction.change_status(
                 new_status="accept",
                 source="API_RESPONSE",
                 data=xbet_response_data,
                 message="Dépôt finalisé par admin via API betting",
             )
-            transaction.mobcash_response = str(response)
+            transaction.mobcash_response = str(xbet_response_data)
             transaction.save(update_fields=["mobcash_response"])
 
             check_solde.delay(transaction_id=transaction.id)
@@ -3026,19 +3029,14 @@ class CreatePartnerTransactionView(decorators.APIView):
 
         if transaction.type_trans == "deposit":
             try:
-                servculAPI = resolve_api_service(app)
-                if servculAPI:
-                    response = servculAPI.recharge_account(
-                        amount=float(transaction.amount), userid=transaction.user_app_id
-                    )
-                    xbet_data = response.get("data") if "data" in response and "code" in response else response
-                else:
-                    response = MobCashExternalService().create_deposit(transaction=transaction)
-                    xbet_data = response
-
-                if xbet_data.get("Success") == True or str(xbet_data.get("Success", "")).lower() == "true":
+                xbet_data = execute_platform_deposit(transaction)
+                outcome = provider_outcome(xbet_data)
+                if outcome == "success":
                     transaction.status = "accept"
                     transaction.validated_at = timezone.now()
+                elif outcome == "pending":
+                    transaction.status = "pending"
+                    transaction.bet_response = str(xbet_data.get("Message", "pending"))
                 else:
                     transaction.status = "failed"
                     transaction.bet_response = str(xbet_data.get("Message", ""))
@@ -3057,21 +3055,17 @@ class CreatePartnerTransactionView(decorators.APIView):
                 return Response(PartnerTransactionSerializer(transaction).data, status=status.HTTP_201_CREATED)
 
             try:
-                servculAPI = resolve_api_service(app)
-                if servculAPI:
-                    response = servculAPI.withdraw_from_account(
-                        userid=transaction.user_app_id, code=transaction.withdriwal_code
-                    )
-                    xbet_data = response.get("data") if "data" in response and "code" in response else response
-                else:
-                    response = MobCashExternalService().create_withdrawal(transaction=transaction)
-                    xbet_data = response
-
-                if str(xbet_data.get("Success", "")).lower() == "true":
-                    amount = float(xbet_data.get("Summa", transaction.amount)) * (-1)
+                xbet_data = execute_platform_withdrawal(transaction)
+                outcome = provider_outcome(xbet_data)
+                if outcome == "success":
+                    summa = xbet_data.get("Summa", transaction.amount)
+                    amount = float(summa) * (-1) if summa is not None else float(transaction.amount) * (-1)
                     transaction.amount = abs(amount)
                     transaction.status = "accept"
                     transaction.validated_at = timezone.now()
+                elif outcome == "pending":
+                    transaction.status = "pending"
+                    transaction.bet_response = str(xbet_data.get("Message", "pending"))
                 else:
                     transaction.status = "failed"
                     transaction.bet_response = str(xbet_data.get("Message", ""))

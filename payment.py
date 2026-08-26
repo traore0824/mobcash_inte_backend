@@ -10,8 +10,10 @@ from mobcash_external_service import MobCashExternalService
 load_dotenv()
 from mobcash_balance import get_balance
 from mobcash_inte.helpers import (
-    init_mobcash,
-    resolve_api_service,
+    execute_platform_deposit,
+    execute_platform_withdrawal,
+    provider_outcome,
+    uses_betmomo,
     calculate_fee,
     send_admin_notification,
     send_notification,
@@ -507,23 +509,24 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                     transaction.net_payable_amout = amount
                     transaction.save()
 
-                servculAPI = resolve_api_service(transaction.app)
-                if servculAPI:
-                    response = servculAPI.recharge_account(
-                        amount=float(amount), userid=transaction.user_app_id
+                xbet_response_data = execute_platform_deposit(
+                    transaction, amount=amount
+                )
+                connect_pro_logger.info(
+                    f"Reponse de l'api de {transaction.app.name}: {xbet_response_data}"
+                )
+                outcome = provider_outcome(xbet_response_data)
+                if outcome == "pending":
+                    transaction.change_status(
+                        new_status="init_payment",
+                        source="API_RESPONSE",
+                        data=xbet_response_data,
+                        message="Dépôt BetMomo en attente de confirmation",
                     )
                     connect_pro_logger.info(
-                        f"Reponse de l'api de {transaction.app.name}: {response}"
+                        f"Transaction {transaction.id} BetMomo pending — polling statut"
                     )
-                    # BetApp retourne {"code": 0, "data": {...}}, OneWinService/MobCash retournent directement le dict
-                    xbet_response_data = response.get("data") if "data" in response and "code" in response else response
-                else:
-                    response = MobCashExternalService().create_deposit(transaction=transaction)
-                    connect_pro_logger.info( 
-                        f"Reponse de l'api de {transaction.app.name}: {response}"
-                    )
-                    xbet_response_data = response
-                if xbet_response_data.get("Success") == True or str(xbet_response_data.get("Success")).lower() == "true":
+                elif outcome == "success":
                     connect_pro_logger.info(
                         f"Transaction de {transaction.app.name} success - passage au statut accept"
                     )
@@ -939,7 +942,16 @@ def check_solde(transaction_id):
                 cashier_pass = transaction.app.cashierpass
 
                 # Vérification que les credentials existent
-                if cashdesk_id and hash_key and cashier_pass:
+                if uses_betmomo(transaction.app):
+                    connect_pro_logger.info(
+                        f"[CHECK_SOLDE] App {transaction.app.name} BetMomo — calcul local du solde"
+                    )
+                    if transaction.type_trans == "deposit":
+                        caisse.solde = float(caisse.solde) - float(transaction.amount)
+                    elif transaction.type_trans == "withdrawal":
+                        caisse.solde = float(caisse.solde) + float(transaction.amount)
+                    caisse.save()
+                elif cashdesk_id and hash_key and cashier_pass:
                     # Conversion de cashdesk_id en int si nécessaire
                     try:
                         cashdesk_id_int = int(cashdesk_id)
@@ -1058,23 +1070,23 @@ def xbet_withdrawal_process(transaction: Transaction):
     app_name = transaction.app
 
     if transaction.type_trans == "withdrawal":
-        servculAPI = resolve_api_service(transaction.app)
-        if servculAPI:
-            response = servculAPI.withdraw_from_account(
-                userid=transaction.user_app_id, code=transaction.withdriwal_code
+        xbet_response_data = execute_platform_withdrawal(transaction)
+        connect_pro_logger.info(
+            f"La reponse de retrait de {transaction.app.name if transaction.app else 'app'}: {xbet_response_data}"
+        )
+        outcome = provider_outcome(xbet_response_data)
+        if outcome == "pending":
+            transaction.change_status(
+                new_status="init_payment",
+                source="API_RESPONSE",
+                data=xbet_response_data,
+                message="Retrait BetMomo en attente de confirmation",
             )
-            xbet_response_data = response.get("data") if "data" in response and "code" in response else response
-        else:
-            response = MobCashExternalService().create_withdrawal(transaction=transaction)
             connect_pro_logger.info(
-                        f"Reponse de l'api de {transaction.app.name}: {response}"
-                    )
-            xbet_response_data = response
-        connect_pro_logger.info(f"La reponse de retrait de mobcash{response}")
-        if (
-            str(xbet_response_data.get("Success")).lower() == "false"
-            or xbet_response_data.get("status") == 401
-        ):
+                f"Transaction {transaction.id} BetMomo withdrawal pending — polling statut"
+            )
+            return False
+        if outcome == "failed" or xbet_response_data.get("status") == 401:
             transaction.change_status(
                 new_status="error",
                 source="API_ERROR",
@@ -1092,10 +1104,12 @@ def xbet_withdrawal_process(transaction: Transaction):
             
             send_notification(user=transaction.user, content=error_message, title="Erreur de transaction")
             connect_pro_logger.info("L'appelle a l'API betting a échoué (échec traitement)")
-        elif str(xbet_response_data.get("Success")).lower() == "true":
+        elif outcome == "success":
             connect_pro_logger.info("app BET step suvccess 11111111")
-            amount = float(xbet_response_data.get("Summa")) * (-1)
-            transaction.amount = amount
+            summa = xbet_response_data.get("Summa")
+            if summa is not None:
+                amount = float(summa) * (-1)
+                transaction.amount = amount
             transaction.change_status(
                 new_status="init_payment",
                 source="API_RESPONSE",

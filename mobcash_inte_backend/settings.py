@@ -572,6 +572,20 @@ LOGGING = {
 
 BASE_URL = os.getenv("BASE_URL")
 
+# BeWallet / BetMomo — External API (topup, payout, status) + dealer stats
+BEWALLET_API_BASE_URL = os.getenv(
+    "BEWALLET_API_BASE_URL",
+    "https://api.merchant.be-wallet.app/api/v1",
+)
+BEWALLET_EXTERNAL_API_BASE_URL = os.getenv(
+    "BEWALLET_EXTERNAL_API_BASE_URL",
+    BEWALLET_API_BASE_URL,
+)
+BEWALLET_DEALER_API_BASE_URL = os.getenv(
+    "BEWALLET_DEALER_API_BASE_URL",
+    BEWALLET_API_BASE_URL,
+)
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
@@ -605,6 +619,10 @@ CELERY_TIMEZONE = "UTC"
 CELERY_BEAT_SCHEDULE = {
     "check-pending-feexpay-transactions": {
         "task": "payment.check_pending_feexpay_transactions",
+        "schedule": 30.0,
+    },
+    "poll-betmomo-pending-transactions": {
+        "task": "mobcash_inte.tasks.poll_betmomo_pending_transactions",
         "schedule": 30.0,
     },
     "cancel-old-pending-transactions": {
