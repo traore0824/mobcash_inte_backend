@@ -6,10 +6,6 @@ import logging
 import time
 
 logger = logging.getLogger("mobcash_inte_backend.transactions")
-
-
-
-
 @shared_task
 def grant_coupon_publishing_permissions():
     """
