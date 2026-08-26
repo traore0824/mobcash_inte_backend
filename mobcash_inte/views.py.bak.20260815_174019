@@ -1,0 +1,4142 @@
+import logging
+import os
+from django.forms import ValidationError
+from django.shortcuts import render
+from datetime import timedelta
+from django.conf import settings
+from django.conf.urls import handler404
+import requests
+from rest_framework.permissions import BasePermission
+from rest_framework import generics, permissions, status, decorators, viewsets
+from rest_framework.views import APIView
+from accounts.helpers import CustomPagination
+from accounts.models import Advertisement, AppName, TelegramUser, User
+from rest_framework.filters import SearchFilter
+import constant
+from django.db import transaction as db_transaction
+from dateutil.relativedelta import relativedelta
+from mobcash_balance import get_balance
+from mobcash_external_service import MobCashExternalService
+from mobcash_inte.helpers import (
+    calculate_fee,
+    generate_reference,
+    init_mobcash,
+    resolve_api_service,
+    send_admin_notification,
+    send_notification,
+    user_has_recent_accepted_deposit,
+)
+from mobcash_inte.whatsapp_service import send_whatsapp_to_user
+from mobcash_inte.telegram_service import send_telegram_to_user
+from mobcash_inte.sms_service import send_sms_to_user
+from mobcash_inte.mobcash_service import CashAPIService
+from mobcash_inte.models import (
+    TYPE_TRANS,
+    AuthorComment,
+    AuthorCouponRating,
+    Bonus,
+    Caisse,
+    Coupon,
+    CouponPayout,
+    CouponRatingV2,
+    CouponV2,
+    CouponWallet,
+    CouponWithdrawal,
+    Cryptocurrency,
+    CryptoNetwork,
+    Deposit,
+    IDLink,
+    Network,
+    Notification,
+    RechargeMobcashBalance,
+    Reward,
+    Setting,
+    Transaction,
+    TransactionStatusHistory,
+    UploadFile,
+    UserPhone,
+    WebhookLog,
+)
+from django_filters.rest_framework import DjangoFilterBackend
+from mobcash_inte.permissions import IsAuthenticated
+from mobcash_inte.serializers import (
+    AdvertisementSerializer,
+    AuthorCommentSerializer,
+    AuthorCommentCreateSerializer,
+    AuthorCouponRatingSerializer,
+    AuthorRatingCreateSerializer,
+    BonusSerializer,
+    BonusTransactionSerializer,
+    CreateBonusSerializer,
+    BotDepositTransactionSerializer,
+    BotWithdrawalTransactionSerializer,
+    BuyCryptoV2Serializer,
+    CaisseSerializer,
+    ChangeTransactionStatusSerializer,
+    CouponPayoutSerializer,
+    CouponRatingV2Serializer,
+    CouponV2Serializer,
+    CouponV2CreateSerializer,
+    CouponWalletSerializer,
+    CouponWithdrawalSerializer,
+    CryptoBuyTransactionSerializer,
+    CryptocurrencySerializer,
+    CryptocurrencySerializerV2,
+    CryptoNetworkSerializer,
+    ProcessTransactionSerializer,
+    SaleCryptoV2Serializer,
+    UpdateTransactionStatusSerializer,
+    ValidateVersionSerializer,
+    CouponSerializer,
+    CreateAppNameSerializer,
+    CreateSettingSerializer,
+    DepositSerializer,
+    DepositTransactionSerializer,
+    DisbursmentTransactionSerializer,
+    IDLinkSerializer,
+    NetworkSerializer,
+    NotificationSerializer,
+    PartnerTransactionSerializer,
+    ReadAppNameSerializer,
+    ReadSettingSerializer,
+    SettingMobileSerializer,
+    RechargeMobcashBalanceSerializer,
+    RewardTransactionSerializer,
+    SearchUserBetSerializer,
+    SendNotificationSerializer,
+    TransactionDetailsSerializer,
+    UploadFileSerializer,
+    UserPhoneSerializer,
+    WithdrawalTransactionSerializer,
+)
+from django.db import transaction
+from django.db.models import F
+from rest_framework.response import Response
+from django.utils import timezone
+from payment import (
+    connect_balance,
+    connect_pro_status,
+    connect_pro_webhook,
+    disbursment_process,
+    feexpay_check_status,
+    payment_fonction,
+    webhook_transaction_failled,
+    webhook_transaction_success,
+    feexpay_webhook,
+    connect_pro_withd_process,
+    feexpay_withdrawall_process,
+    check_solde,
+    process_transaction_notifications_and_bonus,
+)
+from django.db.models import Sum, Count, Q, Avg
+from django.db.models.functions import TruncDate, TruncWeek, TruncMonth, TruncYear
+
+
+connect_pro_logger = logging.getLogger("mobcash_inte_backend.transactions")
+payment_logger = logging.getLogger("Payment transaction process")
+
+
+class UploadFileView(generics.ListCreateAPIView):
+    serializer_class = UploadFileSerializer
+    pagination_class = CustomPagination
+    queryset = UploadFile.objects.all()
+
+
+class ChatbotMessageView(decorators.APIView):
+    """Proxy in-app chatbot → My Customer /sdk/message/ (X-API-Key = openwa_token)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        from mobcash_inte.chatbot_service import send_chatbot_message
+
+        data = request.data if hasattr(request.data, "get") else {}
+        user = request.user
+        audio = request.FILES.get("audio") or request.FILES.get("file")
+        audio_bytes = None
+        audio_name = "message-vocal.ogg"
+        audio_content_type = "audio/ogg"
+        if audio is not None:
+            audio_content_type = str(getattr(audio, "content_type", "") or "").lower()
+            if not (
+                audio_content_type.startswith("audio/")
+                or audio_content_type == "application/ogg"
+            ):
+                return Response(
+                    {"detail": "Le fichier doit être un audio."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if getattr(audio, "size", 0) > 8 * 1024 * 1024:
+                return Response(
+                    {"detail": "Audio trop lourd (max 8 Mo)."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            audio_bytes = audio.read()
+            audio_name = str(getattr(audio, "name", "") or audio_name)
+        external_id = (
+            str(getattr(user, "id", "") or "")
+            or getattr(user, "email", None)
+            or getattr(user, "username", None)
+            or "anonymous"
+        )
+        # Identité inbox : prénom + nom prioritaires, email / tél en fallback côté MyCustomer.
+        first_name = str(getattr(user, "first_name", "") or "").strip()
+        last_name = str(getattr(user, "last_name", "") or "").strip()
+        email = str(getattr(user, "email", "") or "").strip()
+        phone = str(getattr(user, "phone", "") or "").strip()
+        indicative = str(getattr(user, "phone_indicative", "") or "").strip()
+        customer_phone = f"{indicative}{phone}" if phone else ""
+        body, code = send_chatbot_message(
+            message=(data.get("message") or "").strip(),
+            customer_external_id=str(external_id),
+            customer_first_name=first_name,
+            customer_last_name=last_name,
+            customer_email=email,
+            customer_phone=customer_phone,
+            conversation_id=(data.get("conversation_id") or None),
+            page_key=(data.get("page_key") or "").strip(),
+            route=(data.get("route") or "").strip(),
+            screen_title=(data.get("screen_title") or "").strip(),
+            audio_bytes=audio_bytes,
+            audio_name=audio_name,
+            audio_content_type=audio_content_type,
+        )
+        return Response(body, status=code)
+
+
+class CreateNetworkView(generics.ListCreateAPIView):
+    serializer_class = NetworkSerializer
+
+    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            self.permission_classes = [permissions.IsAdminUser]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        filter_type = self.request.GET.get("type", "deposit")
+        queryset = Network.objects.all()
+        if self.request.user.is_staff:
+            return queryset
+        if filter_type == "deposit":
+            queryset = queryset.filter(active_for_deposit=True)
+        elif filter_type == "withdrawal":
+            queryset = queryset.filter(active_for_with=True)
+
+        return queryset
+
+
+class DetailsNetworkView(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = NetworkSerializer
+    queryset = Network.objects.all()
+    permission_classes = [permissions.IsAdminUser]
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            self.permission_classes = [permissions.IsAuthenticated]
+        return super().get_permissions()
+
+
+class NotificationView(generics.ListCreateAPIView):
+    serializer_class = NotificationSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = CustomPagination
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["user"]
+
+    def get_queryset(self):
+        queryset = Notification.objects.all()
+        if not self.request.user.is_staff:
+            queryset = queryset.filter(user=self.request.user, is_read=False)
+        return queryset
+
+    def create(self, request, *args, **kwargs):
+        if not request.user.is_staff:
+            return Response(
+                {"detail": "Admin uniquement."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        serializer = SendNotificationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        title = serializer.validated_data.get("title")
+        content = serializer.validated_data.get("content")
+        channel = serializer.validated_data.get("channel", "push")
+        user_id = self.request.GET.get("user_id")
+        if user_id:
+            try:
+                user = User.objects.filter(id=user_id).first()
+            except:
+                user = TelegramUser.objects.filter(id=user_id).first()
+            if not user:
+                return Response(status=status.HTTP_404_NOT_FOUND)
+
+            if channel in ("push", "all"):
+                send_notification(user=user, title=title, content=content)
+            elif channel == "whatsapp":
+                if isinstance(user, User):
+                    result = send_whatsapp_to_user(user=user, title=title, content=content)
+                    if not result.get("success"):
+                        return Response(
+                            {"success": False, "details": result.get("error")},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                else:
+                    return Response(
+                        {"success": False, "details": "WhatsApp non disponible pour cet utilisateur"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            elif channel == "telegram":
+                if isinstance(user, User):
+                    result = send_telegram_to_user(user=user, title=title, content=content)
+                    if not result.get("success"):
+                        return Response(
+                            {"success": False, "details": result.get("error")},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                else:
+                    return Response(
+                        {"success": False, "details": "Telegram non disponible pour cet utilisateur"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            elif channel == "sms":
+                if isinstance(user, User):
+                    result = send_sms_to_user(user=user, title=title, content=content)
+                    if not result.get("success"):
+                        return Response(
+                            {"success": False, "details": result.get("error")},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                else:
+                    return Response(
+                        {"success": False, "details": "SMS non disponible pour cet utilisateur"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+        else:
+            if channel in ("push", "all"):
+                send_admin_notification.delay(title=title, content=content)
+            elif channel == "whatsapp":
+                for user in User.objects.filter(is_staff=False):
+                    send_whatsapp_to_user(user=user, title=title, content=content)
+            elif channel == "telegram":
+                for user in User.objects.filter(is_staff=False):
+                    send_telegram_to_user(user=user, title=title, content=content)
+            elif channel == "sms":
+                for user in User.objects.filter(is_staff=False):
+                    send_sms_to_user(user=user, title=title, content=content)
+        return Response(status=status.HTTP_200_OK)
+
+
+class ListDeposit(generics.ListAPIView):
+    serializer_class = DepositSerializer
+    permission_classes = [permissions.IsAdminUser]
+    queryset = Deposit.objects.all()
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["bet_app"]
+    pagination_class = CustomPagination
+
+
+class ListCaisse(generics.ListAPIView):
+    serializer_class = CaisseSerializer
+    permission_classes = [permissions.IsAdminUser]
+    queryset = Caisse.objects.all()
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["bet_app"]
+    # pagination_class = CustomPagination
+
+
+class ListDeposit(generics.ListAPIView):
+    serializer_class = DepositSerializer
+    permission_classes = [permissions.IsAdminUser]
+    queryset = Deposit.objects.all()
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["bet_app"]
+    pagination_class = CustomPagination
+
+
+class CreateDeposit(generics.CreateAPIView):
+
+    serializer_class = DepositSerializer
+    permission_classes = [permissions.IsAdminUser]
+    queryset = Deposit.objects.all()
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["bet_app"]
+
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        serializer = DepositSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        obj = serializer.save()
+        caisse, created = Caisse.objects.select_for_update().get_or_create(
+            bet_app=obj.bet_app
+        )
+
+        caisse.solde += obj.amount
+        caisse.save()
+
+        return Response(DepositSerializer(obj).data, status=status.HTTP_201_CREATED)
+
+
+class CreateAppName(generics.ListCreateAPIView):
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["name"]
+
+    def get_queryset(self):
+        if self.request.user.is_staff:
+            queryset = AppName.objects.all().order_by("order")
+        else:
+            queryset = AppName.objects.filter(enable=True).order_by("order")
+        type = self.request.GET.get("type")
+        if type == "deposit":
+            queryset = queryset.filter(active_for_deposit=True)
+        elif type == "withdrawal":
+            queryset = queryset.filter(active_for_with=True)
+        return queryset
+
+    serializer_class = ReadAppNameSerializer
+    permission_classes = [permissions.IsAdminUser]
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            self.permission_classes = [permissions.AllowAny]
+        return super().get_permissions()
+
+    def get_serializer_class(self):
+        if self.request.method in ["POST", "PUT", "DELETE"]:
+            return CreateAppNameSerializer
+        return ReadAppNameSerializer
+
+
+class BetAppName(generics.ListAPIView):
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["name"]
+
+    def get_queryset(self):
+        queryset = AppName.objects.filter(enable=True).order_by("order")
+        return queryset
+
+    serializer_class = ReadAppNameSerializer
+    permission_classes = [permissions.AllowAny]
+
+
+class DetailAppName(generics.RetrieveUpdateDestroyAPIView):
+    queryset = AppName.objects.all().order_by("order")
+    serializer_class = ReadAppNameSerializer
+    permission_classes = [permissions.IsAdminUser]
+
+    def get_serializer_class(self):
+        if self.request.method in ["PUT", "DELETE", "PATCH"]:
+            return CreateAppNameSerializer
+        return ReadAppNameSerializer
+
+
+class SettingViews(decorators.APIView):
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            self.permission_classes = [permissions.AllowAny]
+        return super().get_permissions()
+
+    def put(self, request, *args, **kwargs):
+        setting = Setting.objects.first()
+        serializer = CreateSettingSerializer(
+            data=request.data, instance=setting, partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        setting.refresh_from_db()
+        return Response(ReadSettingSerializer(setting).data)
+
+    def get(self, request, *args, **kwargs):
+        setting = Setting.objects.first()
+        return Response(ReadSettingSerializer(setting).data)
+
+
+class SettingMobileView(decorators.APIView):
+    """Settings allégés pour mobile et site (v2) — même pattern que Betpay."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        setting = Setting.objects.first()
+        if not setting:
+            return Response({})
+        response = Response(SettingMobileSerializer(setting).data)
+        response["Cache-Control"] = "public, max-age=300"
+        return response
+
+
+class ValidateVersionView(decorators.APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        serializer = ValidateVersionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user_version = serializer.validated_data.get("version")
+        setting = Setting.objects.first()
+
+        if not setting:
+            return Response(
+                {"error": "Configuration non disponible"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        min_version = setting.min_version
+        last_version = setting.last_version
+        download_link = setting.dowload_apk_link
+
+        # Si les versions ne sont pas configurées, on considère que tout est OK
+        if min_version is None and last_version is None:
+            return Response(
+                {
+                    "valid": True,
+                    "update_required": False,
+                    "update_available": False,
+                    "current_version": user_version,
+                    "min_version": None,
+                    "last_version": None,
+                    "download_link": download_link,
+                }
+            )
+
+        # Déterminer si la mise à jour est obligatoire
+        update_required = False
+        if min_version is not None and user_version < min_version:
+            update_required = True
+
+        # Déterminer si une mise à jour est disponible (optionnelle)
+        update_available = False
+        if last_version is not None and user_version < last_version:
+            update_available = True
+
+        # La version est valide si elle est >= min_version
+        valid = True
+        if min_version is not None and user_version < min_version:
+            valid = False
+
+        return Response(
+            {
+                "valid": valid,
+                "update_required": update_required,
+                "update_available": update_available,
+                "current_version": user_version,
+                "min_version": min_version,
+                "last_version": last_version,
+                "download_link": download_link,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class GetBonus(generics.ListAPIView):
+    pagination_class = CustomPagination
+    serializer_class = BonusSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["user"]
+
+    def get_queryset(self):
+        queryset = Bonus.objects.all()
+        if not self.request.user.is_staff:
+            queryset = queryset.filter(
+                user=self.request.user, bonus_with=False, bonus_delete=False
+            )
+        return queryset
+
+
+class CreateBonusView(generics.CreateAPIView):
+    serializer_class = CreateBonusSerializer
+    permission_classes = [permissions.IsAdminUser]
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        bonus = serializer.save()
+
+        # Mettre à jour le Reward de l'utilisateur
+        try:
+            reward, _ = Reward.objects.get_or_create(user=bonus.user)
+            from decimal import Decimal
+
+            reward.amount = Decimal(str(reward.amount)) + Decimal(str(bonus.amount))
+            reward.save()
+            connect_pro_logger.info(
+                f"Reward mis à jour pour utilisateur {bonus.user.id}: +{bonus.amount} FCFA (nouveau solde: {reward.amount})"
+            )
+        except Exception as e:
+            connect_pro_logger.error(
+                f"Erreur mise à jour Reward pour bonus {bonus.id}: {str(e)}",
+                exc_info=True,
+            )
+
+        return Response(
+            BonusSerializer(bonus).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CreateDepositTransactionViews(generics.CreateAPIView):
+    serializer_class = DepositTransactionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Transaction.objects.filter(user=self.request.user)
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        transaction = serializer.save(
+            reference=generate_reference(prefix="depot-"),
+            user=self.request.user,
+            type_trans="deposit",
+        )
+        transaction.api = transaction.network.deposit_api
+        TransactionStatusHistory.objects.create(transaction=transaction, old_status=transaction.status, new_status=transaction.status, trigger_source=TransactionStatusHistory.Source.SYSTEM, message="Statut initial enregistré")
+        transaction.save()
+        if transaction.network.payment_by_ussd_code:
+            from .helpers import generate_ussd_code
+            generate_ussd_code(transaction)
+            
+        payment_fonction(reference=transaction.reference)
+        transaction.refresh_from_db()
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CreateBonusDepositTransactionViews(generics.CreateAPIView):
+    serializer_class = BonusTransactionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Transaction.objects.filter(user=self.request.user)
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.serializer_class(
+            data=request.data, context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+        transaction = serializer.save(
+            reference=generate_reference(prefix="depot-"),
+            user=self.request.user,
+            type_trans="reward",
+        )
+        # transaction.api = transaction.network.deposit_api
+        TransactionStatusHistory.objects.create(transaction=transaction, old_status=transaction.status, new_status=transaction.status, trigger_source=TransactionStatusHistory.Source.SYSTEM, message="Statut initial enregistré")
+        transaction.save()
+        webhook_transaction_success(
+            transaction=transaction, setting=Setting.objects.first()
+        )
+        transaction.refresh_from_db()
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    # def get_serializer_context(self):
+    #     context = super().get_serializer_context()
+    #     # Ajoute les infos utiles au serializer
+    #     context["request"] = self.request
+    #     # context["telegram_user"] = getattr(self.request, "telegram_user", None)
+    #     return context
+
+
+class RewardTransactionViews(generics.CreateAPIView):
+    serializer_class = RewardTransactionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Transaction.objects.filter(user=self.request.user)
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        # ✅ SÉCURITÉ : Transaction atomique avec verrouillage
+        with db_transaction.atomic():
+            # 1. Verrouiller et récupérer tous les bonus disponibles
+            bonus_queryset = Bonus.objects.select_for_update().filter(
+                user=request.user, bonus_with=False, bonus_delete=False
+            )
+            bonus_amount = bonus_queryset.aggregate(total=Sum("amount"))["total"] or 0
+
+            # 2. Vérifier qu'il y a au moins un bonus disponible
+            if bonus_amount <= 0:
+                return Response(
+                    {"details": "Vous n'avez aucun bonus disponible à utiliser."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # 3. Créer la transaction avec le montant total des bonus
+            transaction = serializer.save(
+                reference=generate_reference(prefix="depot-"),
+                user=request.user,
+                type_trans="reward",
+                amount=int(bonus_amount),  # Utiliser tout le solde disponible
+            )
+            TransactionStatusHistory.objects.create(transaction=transaction, old_status=transaction.status, new_status=transaction.status, trigger_source=TransactionStatusHistory.Source.SYSTEM, message="Statut initial enregistré")
+
+            # 4. Verrouiller la transaction pour éviter traitement simultané
+            transaction = Transaction.objects.select_for_update().get(
+                id=transaction.id
+            )
+
+            # 5. Vérifier que la transaction n'est pas déjà traitée
+            if transaction.status != "pending":
+                return Response(
+                    {"error": "Transaction déjà traitée"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # 6. Appeler directement l'API (comme dans webhook_transaction_success)
+            setting = Setting.objects.first()
+            if not setting:
+                return Response(
+                    {"error": "Configuration système non trouvée"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+
+            try:
+                transaction.change_status(
+                    new_status="init_payment",
+                    source="WEBHOOK",
+                    message="Paiement reçu (reward), appel API betting en cours",
+                )
+
+                app = transaction.app
+                servculAPI = init_mobcash(app_name=app)
+                amount = transaction.amount
+
+                # Appeler l'API selon le type d'app
+                servculAPI = resolve_api_service(transaction.app)
+                if servculAPI:
+                    response = servculAPI.recharge_account(
+                        amount=float(amount), userid=transaction.user_app_id
+                    )
+                    connect_pro_logger.info(
+                        f"Reponse de l'api de {transaction.app.name}: {response}"
+                    )
+                    xbet_response_data = response.get("data") if "data" in response and "code" in response else response
+                else:
+                    response = MobCashExternalService().create_deposit(
+                        transaction=transaction
+                    )
+                    connect_pro_logger.info(
+                        f"Reponse de l'api de {transaction.app.name}: {response}"
+                    )
+                    xbet_response_data = response
+
+                # 7. Si succès : marquer tous les bonus comme utilisés et mettre status="accept"
+                if xbet_response_data.get("Success") == True:
+                    payment_logger.info(
+                        f"Transaction reward de {transaction.app.name} success"
+                    )
+                    transaction.validated_at = timezone.now()
+                    transaction.change_status(
+                        new_status="accept",
+                        source="API_RESPONSE",
+                        data=xbet_response_data,
+                        message="Reward confirmé par l'API betting",
+                        extra_fields=["validated_at"],
+                    )
+
+                    # Marquer TOUS les bonus comme utilisés
+                    bonus_queryset.update(bonus_with=True)
+
+                    # Appel de la tâche Celery pour les notifications
+                    try:
+                        process_transaction_notifications_and_bonus.delay(
+                            transaction_id=transaction.id
+                        )
+                    except Exception as e:
+                        connect_pro_logger.error(
+                            f"Erreur process_transaction_notifications_and_bonus.delay pour transaction {transaction.id}: {str(e)}",
+                            exc_info=True,
+                        )
+
+                    # Appeler check_solde pour les reward
+                    try:
+                        check_solde.delay(transaction_id=transaction.id)
+                    except Exception as e:
+                        connect_pro_logger.error(
+                            f"Erreur check_solde.delay pour transaction {transaction.id}: {str(e)}",
+                            exc_info=True,
+                        )
+                else:
+                    # 8. Si échec : mettre status="error" (bonus restent disponibles)
+                    transaction.change_status(
+                        new_status="error",
+                        source="API_ERROR",
+                        data=xbet_response_data,
+                        message=f"Échec de l'API : {xbet_response_data}",
+                        extra_fields=["error_message"],
+                    )
+
+                    # Envoyer une notification d'erreur à l'utilisateur
+                    try:
+                        app_name = (
+                            transaction.app.name.upper()
+                            if transaction.app
+                            else "l'application"
+                        )
+                        error_message = (
+                            f"Une erreur est survenue lors de l'utilisation de vos rewards de {transaction.amount} FCFA sur "
+                            f"{app_name}. "
+                            f"Référence de la transaction : {transaction.reference}"
+                        )
+                        process_transaction_notifications_and_bonus.delay(
+                            transaction_id=transaction.id,
+                            is_error=True,
+                            error_message=error_message,
+                        )
+                    except Exception as e:
+                        connect_pro_logger.error(
+                            f"Erreur envoi notification échec reward transaction {transaction.id}: {str(e)}",
+                            exc_info=True,
+                        )
+
+                    return Response(
+                        {
+                            "error": "Échec du traitement de la transaction",
+                            "details": xbet_response_data,
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            except Exception as e:
+                connect_pro_logger.error(
+                    f"Erreur lors du traitement de la transaction reward {transaction.id}: {str(e)}",
+                    exc_info=True,
+                )
+                transaction.change_status(
+                    new_status="error",
+                    source="EXCEPTION",
+                    data=str(e),
+                    message=f"Exception non gérée : {str(e)}",
+                )
+
+                return Response(
+                    {"error": "Erreur lors du traitement", "details": str(e)},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+
+        transaction.refresh_from_db()
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class GetRewardView(decorators.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        """
+        Récupère le solde Reward de l'utilisateur authentifié.
+        Retourne le solde Reward total et la somme des bonus disponibles.
+        """
+        user = request.user
+
+        # Récupérer le Reward de l'utilisateur
+        reward, _ = Reward.objects.get_or_create(user=user)
+        reward_amount = float(reward.amount) if reward.amount else 0.0
+
+        # Calculer la somme des bonus disponibles
+        bonus_queryset = Bonus.objects.filter(
+            user=user, bonus_with=False, bonus_delete=False
+        )
+        bonus_total = bonus_queryset.aggregate(total=Sum("amount"))["total"] or 0
+        bonus_total = float(bonus_total) if bonus_total else 0.0
+
+        return Response(
+            {
+                "reward_amount": reward_amount,
+                "available_bonus_total": bonus_total,
+                "total_available": reward_amount + bonus_total,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class ConnectProWebhook(decorators.APIView):
+    def post(self, request, *args, **kwargs):
+        try:
+            connect_pro_logger.info(
+                f"[RECEPTION] Connect pro webhook reçu le {timezone.now()} avec le body: {request.data}"
+            )
+
+            data = request.data
+            uid = data.get("uid")
+
+            if not uid:
+                connect_pro_logger.warning("Webhook reçu sans UID")
+                return Response(
+                    {"error": "UID manquant dans les données"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # ✅ TOUT DANS UNE SEULE TRANSACTION ATOMIQUE
+            with transaction.atomic():
+                connect_pro_logger.info(f"[STEP 1] Entrée transaction pour {uid}")
+
+                # Vérifier si déjà traité (avec lock pour éviter race condition)
+                existing_log = (
+                    WebhookLog.objects.select_for_update()
+                    .filter(reference=uid, processed=True)
+                    .first()
+                )
+
+                if existing_log:
+                    connect_pro_logger.info(
+                        f"[DUPLICATION] Webhook {uid} déjà traité le {existing_log.processed_at}"
+                    )
+                    return Response(
+                        {"message": "Webhook déjà traité"}, status=status.HTTP_200_OK
+                    )
+
+                connect_pro_logger.info(f"[STEP 2] Création WebhookLog pour {uid}")
+
+                # Créer ou récupérer le WebhookLog (avec lock)
+                (
+                    webhook_log,
+                    created,
+                ) = WebhookLog.objects.select_for_update().get_or_create(
+                    reference=uid,
+                    defaults={
+                        "api": "CONNECT PRO",
+                        "webhook_data": data,
+                        "header": str(request.headers),
+                        "processed": False,
+                    },
+                )
+
+                connect_pro_logger.info(
+                    f"[STEP 3] WebhookLog created={created}, processed={webhook_log.processed}"
+                )
+
+                # Si déjà en cours de traitement par une autre requête
+                if not created and webhook_log.processed:
+                    connect_pro_logger.info(
+                        f"[RACE-CONDITION] Webhook {uid} déjà traité"
+                    )
+                    return Response(
+                        {"message": "Webhook déjà traité"}, status=status.HTTP_200_OK
+                    )
+
+                # Si déjà créé mais pas encore traité (retry)
+                if not created and not webhook_log.processed:
+                    connect_pro_logger.warning(
+                        f"[RETRY] Webhook {uid} en retry (erreur: {webhook_log.error_message})"
+                    )
+
+                # ✅ TRAITEMENT DANS LA TRANSACTION
+                connect_pro_logger.info(
+                    f"[STEP 4] AVANT appel connect_pro_webhook pour {uid}"
+                )
+
+                try:
+                    connect_pro_webhook(data=data)
+
+                    connect_pro_logger.info(
+                        f"[STEP 5] APRÈS appel connect_pro_webhook pour {uid}"
+                    )
+
+                    # ✅ MARQUER COMME TRAITÉ (dans la même transaction)
+                    webhook_log.processed = True
+                    webhook_log.processed_at = timezone.now()
+                    webhook_log.error_message = None  # Clear previous errors
+                    webhook_log.save(
+                        update_fields=["processed", "processed_at", "error_message"]
+                    )
+
+                    connect_pro_logger.info(
+                        f"[SUCCESS] Webhook {uid} traité avec succès"
+                    )
+
+                    return Response(
+                        {"message": "Webhook traité avec succès"},
+                        status=status.HTTP_200_OK,
+                    )
+
+                except Exception as e:
+                    # ✅ ENREGISTRER L'ERREUR mais NE PAS marquer comme processed
+                    webhook_log.error_message = str(e)
+                    webhook_log.save(update_fields=["error_message"])
+
+                    connect_pro_logger.error(
+                        f"[ERROR] Erreur traitement {uid}: {str(e)}",
+                        exc_info=True,
+                    )
+
+                    # La transaction sera automatiquement rollback
+                    return Response(
+                        {"error": "Erreur lors du traitement"},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    )
+
+        except Exception as e:
+            connect_pro_logger.error(
+                f"[CRITICAL] Erreur inattendue: {str(e)}",
+                exc_info=True,
+            )
+            return Response(
+                {"error": "Erreur interne du serveur"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class FeexpayWebhook(decorators.APIView):
+    def post(self, request, *args, **kwargs):
+        try:
+            connect_pro_logger.info(
+                f"Feexpay webhook reçu le {timezone.now()} avec le body: {request.data}"
+            )
+
+            data = request.data
+            reference = (
+                data.get("externalId") or data.get("reference") or data.get("uid")
+            )
+
+            if not reference:
+                connect_pro_logger.warning("Webhook reçu sans référence")
+                return Response(
+                    {"error": "Référence manquante dans les données"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # ✅ TRANSACTION ATOMIQUE avec LOCK
+            with transaction.atomic():
+                # Vérifier si déjà traité (avec lock pour éviter race condition)
+                existing_log = (
+                    WebhookLog.objects.select_for_update()
+                    .filter(reference=reference, processed=True)
+                    .first()
+                )
+
+                if existing_log:
+                    connect_pro_logger.info(
+                        f"[DUPLICATION] Webhook {reference} déjà traité le {existing_log.processed_at}"
+                    )
+                    return Response(
+                        {"message": "Webhook déjà traité"}, status=status.HTTP_200_OK
+                    )
+
+                # Créer ou récupérer le WebhookLog (avec lock)
+                (
+                    webhook_log,
+                    created,
+                ) = WebhookLog.objects.select_for_update().get_or_create(
+                    reference=reference,
+                    defaults={
+                        "api": "FEEXPAY",
+                        "webhook_data": data,
+                        "header": str(request.headers),
+                        "processed": False,
+                    },
+                )
+
+                # Si déjà en cours de traitement par une autre requête
+                if not created and webhook_log.processed:
+                    connect_pro_logger.info(
+                        f"[RACE-CONDITION] Webhook {reference} déjà traité"
+                    )
+                    return Response(
+                        {"message": "Webhook déjà traité"}, status=status.HTTP_200_OK
+                    )
+
+                # Si déjà créé mais pas encore traité (rare, mais possible)
+                if not created and not webhook_log.processed:
+                    connect_pro_logger.warning(
+                        f"[RETRY] Webhook {reference} en retry (erreur précédente: {webhook_log.error_message})"
+                    )
+
+            # ⚠️ SORTIE DE LA TRANSACTION - Le traitement peut être long
+            connect_pro_logger.info(
+                f"[NEW] WebhookLog créé pour référence {reference}, début du traitement..."
+            )
+
+            # ✅ TRAITEMENT (hors transaction pour ne pas bloquer la DB trop longtemps)
+            try:
+                feexpay_webhook(data=data)
+
+                # ✅ MARQUER COMME TRAITÉ (dans une nouvelle transaction)
+                with transaction.atomic():
+                    webhook_log.processed = True
+                    webhook_log.processed_at = timezone.now()
+                    webhook_log.error_message = None  # Clear previous errors
+                    webhook_log.save(
+                        update_fields=["processed", "processed_at", "error_message"]
+                    )
+
+                connect_pro_logger.info(
+                    f"[SUCCESS] Webhook {reference} traité avec succès"
+                )
+
+                return Response(
+                    {"message": "Webhook traité avec succès"}, status=status.HTTP_200_OK
+                )
+
+            except Exception as e:
+                # ✅ ENREGISTRER L'ERREUR mais NE PAS marquer comme processed
+                with transaction.atomic():
+                    webhook_log.error_message = str(e)
+                    webhook_log.save(update_fields=["error_message"])
+
+                connect_pro_logger.error(
+                    f"[ERROR] Erreur lors du traitement de {reference}: {str(e)}",
+                    exc_info=True,
+                )
+
+                return Response(
+                    {"error": "Erreur lors du traitement"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+
+        except Exception as e:
+            connect_pro_logger.error(
+                f"[CRITICAL] Erreur inattendue dans FeexpayWebhook: {str(e)}",
+                exc_info=True,
+            )
+            return Response(
+                {"error": "Erreur interne du serveur"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class DisbursmentTransactionView(decorators.APIView):
+    def post(self, request, *args, **kwargs):
+        serializer = DisbursmentTransactionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reference = serializer.validated_data.get("reference")
+        transaction = Transaction.objects.filter(reference=reference).first()
+        if not transaction:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        transaction.old_status = transaction.status
+        transaction.old_public_id = transaction.public_id
+        transaction.save()
+        disbursment_process(transaction=transaction)
+        transaction.refresh_from_db()
+        return Response(
+            TransactionDetailsSerializer(transaction).data, status=status.HTTP_200_OK
+        )
+
+
+class UserPhoneViewSet(viewsets.ModelViewSet):
+    serializer_class = UserPhoneSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter]
+    filterset_fields = ["user", "telegram_user", "network"]
+    search_fields = ["phone"]
+
+    def get_queryset(self):
+        if self.request.user.is_authenticated and self.request.user.is_staff:
+            return UserPhone.objects.all()
+        if self.request.user.is_authenticated:
+            return UserPhone.objects.filter(user=self.request.user)
+        return UserPhone.objects.filter(telegram_user=self.request.telegram_user)
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        # Ajoute les infos utiles au serializer
+        context["user"] = (
+            self.request.user if self.request.user.is_authenticated else None
+        )
+        context["telegram_user"] = getattr(self.request, "telegram_user", None)
+        return context
+
+    def perform_create(self, serializer):
+        if self.request.user.is_authenticated:
+            serializer.save(user=self.request.user)
+        else:
+            serializer.save(telegram_user=self.request.telegram_user)
+
+
+class ChangeTransactionStatus(decorators.APIView):
+    # permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, *args, **kwargs):
+        serializer = ChangeTransactionStatusSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reference = serializer.validated_data.get("reference")
+        transaction = Transaction.objects.filter(reference=reference).first()
+        setting = Setting.objects.first()
+        destination_status = serializer.validated_data.get("status")
+        if not transaction:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        if not destination_status:
+            if transaction.status == "pending":
+                with db_transaction.atomic():
+                    if transaction.network.name == "wave":
+                        data = connect_pro_status(
+                            reference=transaction.public_id, is_wave=True
+                        )
+                    else:
+                        data = connect_pro_status(
+                            reference=transaction.public_id,
+                            is_momo_pay=(
+                                False
+                                if (
+                                    not transaction.network.payment_by_link
+                                    or transaction.type_trans == "withdrawal"
+                                )
+                                else True
+                            ),
+                        )
+                    if (
+                        data.get("status") == "failed"
+                        or data.get("status") == "cancelled"
+                    ) or data.get("status") == "timeout":
+                        connect_pro_logger.info("Transaction is fail")
+                        webhook_transaction_failled(transaction=transaction)
+                    elif (
+                        data.get("status") == "success"
+                        or data.get("status") == "confirmed"
+                    ):
+                        connect_pro_logger.info("Transaction is success")
+                        webhook_transaction_success(
+                            transaction=transaction, setting=setting
+                        )
+            elif transaction.status == "init_payment":
+                if transaction.type_trans == "withdrawal":
+                    transaction.change_status(
+                        new_status="accept",
+                        source="ADMIN",
+                        message=f"Retrait forcé en accept par admin (id={request.user.id})",
+                    )
+                else:
+                    webhook_transaction_success(
+                        transaction=transaction, setting=setting
+                    )
+
+            transaction = Transaction.objects.filter(reference=reference).first()
+            return Response({"status": transaction.status}, status=status.HTTP_200_OK)
+        else:
+            new_status = serializer.validated_data.get("status")
+            transaction.change_status(
+                new_status=new_status,
+                source="ADMIN",
+                message=f"Statut modifié manuellement par admin (id={request.user.id})",
+            )
+            transaction.fixed_by_admin = True
+            transaction.save(update_fields=["fixed_by_admin"])
+            return Response({"status": transaction.status}, status=status.HTTP_200_OK)
+
+
+class TransactionStatus(decorators.APIView):
+    def get(self, request, *args, **kwargs):
+        reference = self.request.GET.get("reference")
+        transaction = Transaction.objects.filter(reference=reference).first()
+        if not transaction:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        if transaction.api == "connect":
+            if transaction.network.name == "wave":
+                data = connect_pro_status(reference=transaction.public_id, is_wave=True)
+            else:
+                data = connect_pro_status(
+                    reference=transaction.public_id,
+                    is_momo_pay=(
+                        False
+                        if (
+                            not transaction.network.payment_by_link
+                            or transaction.type_trans == "withdrawal"
+                        )
+                        else True
+                    ),
+                )
+            return Response(data, status=status.HTTP_200_OK)
+        elif transaction.api == "feexpay":
+            data = feexpay_check_status(public_id=transaction.public_id)
+            return Response(data, status=status.HTTP_200_OK)
+        return Response(status=status.HTTP_200_OK)
+
+
+class BotWithdrawalTransactionViews(generics.CreateAPIView):
+
+    serializer_class = BotWithdrawalTransactionSerializer
+    permission_classes = [IsAuthenticated]
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        transaction = serializer.save(
+            reference=generate_reference(prefix="retrait-"),
+            type_trans="withdrawal",
+            telegram_user=request.telegram_user,
+        )
+        transaction.api = transaction.network.withdrawal_api
+        TransactionStatusHistory.objects.create(transaction=transaction, old_status=transaction.status, new_status=transaction.status, trigger_source=TransactionStatusHistory.Source.SYSTEM, message="Statut initial enregistré")
+        transaction.save()
+        payment_fonction(reference=transaction.reference)
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class BotDepositTransactionViews(generics.CreateAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = BotDepositTransactionSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        transaction = serializer.save(
+            reference=generate_reference(prefix="depot-"),
+            type_trans="deposit",
+            telegram_user=request.telegram_user,
+            source="bot",
+        )
+        transaction.api = transaction.network.deposit_api
+        TransactionStatusHistory.objects.create(transaction=transaction, old_status=transaction.status, new_status=transaction.status, trigger_source=TransactionStatusHistory.Source.SYSTEM, message="Statut initial enregistré")
+        transaction.save()
+        if transaction.network.payment_by_ussd_code:
+            from .helpers import generate_ussd_code
+            generate_ussd_code(transaction)
+            
+        from django.db import transaction as db_transaction
+        db_transaction.on_commit(lambda: payment_fonction.delay(reference=transaction.reference))
+        transaction.refresh_from_db()
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class WithdrawalTransactionViews(generics.CreateAPIView):
+    serializer_class = WithdrawalTransactionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        transaction = serializer.save(
+            reference=generate_reference(prefix="retrait-"),
+            type_trans="withdrawal",
+            user=request.user,
+        )
+        transaction.api = transaction.network.withdrawal_api
+        TransactionStatusHistory.objects.create(transaction=transaction, old_status=transaction.status, new_status=transaction.status, trigger_source=TransactionStatusHistory.Source.SYSTEM, message="Statut initial enregistré")
+        transaction.save()
+        payment_fonction(reference=transaction.reference)
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class DepositTransactionViews(generics.CreateAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = DepositTransactionSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        transaction = serializer.save(
+            reference=generate_reference(prefix="depot-"),
+            type_trans="deposit",
+            telegram_user=request.telegram_user,
+            source="bot",
+        )
+        payment_fonction(reference=transaction.reference)
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class IDLinkViews(viewsets.ModelViewSet):
+    serializer_class = IDLinkSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter]
+    filterset_fields = [
+        "app_name",
+    ]
+    search_fields = ["user_app_id"]
+
+    def get_queryset(self):
+        if self.request.user.is_authenticated and self.request.user.is_staff:
+            return IDLink.objects.all()
+        if self.request.user.is_authenticated:
+            return IDLink.objects.filter(user=self.request.user)
+        return IDLink.objects.filter(telegram_user=self.request.telegram_user)
+
+    def perform_create(self, serializer):
+        if self.request.user.is_authenticated:
+            serializer.save(user=self.request.user)
+        else:
+            serializer.save(telegram_user=self.request.telegram_user)
+
+
+class ReadAllNotificaation(decorators.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        result = None
+        notifications = Notification.objects.filter(is_read=False)
+        if notifications.exists():
+            result = notifications.update(is_read=True)
+        return Response({"result": result})
+
+
+class ReadNotificationView(decorators.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        """
+        Marque toutes les notifications de l'utilisateur connecté comme lues.
+        """
+        if not request.user.is_authenticated:
+            return Response(
+                {"error": "User not authenticated"}, status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        notifications = Notification.objects.filter(user=request.user, is_read=False)
+
+        if notifications.exists():
+            updated_count = notifications.update(is_read=True)
+            return Response(
+                {
+                    "message": f"{updated_count} notification(s) marquée(s) comme lue(s)",
+                    "updated_count": updated_count,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        return Response(
+            {"message": "Aucune notification non lue trouvée", "updated_count": 0},
+            status=status.HTTP_200_OK,
+        )
+
+
+class HistoryTransactionViews(generics.ListAPIView):
+    serializer_class = TransactionDetailsSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = CustomPagination
+    filter_backends = [DjangoFilterBackend, SearchFilter]
+    filterset_fields = [
+        "user",
+        "telegram_user",
+        "type_trans",
+        "status",
+        "app",
+        "source",
+        "network",
+    ]
+    search_fields = [
+        "reference",
+        "phone_number",
+        "user_app_id",
+        "public_id",
+        "user__email",
+    ]
+
+    def get_queryset(self):
+        if self.request.user.is_authenticated and self.request.user.is_staff:
+            return Transaction.objects.all()
+        if self.request.user.is_authenticated:
+            return Transaction.objects.filter(user=self.request.user)
+        return Transaction.objects.filter(telegram_user=self.request.telegram_user)
+
+
+class TransactionDetailView(decorators.APIView):
+    """
+    Récupère les détails complets d'une transaction par ID ou référence.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        transaction_id = request.GET.get("id")
+        reference = request.GET.get("reference")
+
+        if not transaction_id and not reference:
+            return Response(
+                {"error": "Le paramètre 'id' ou 'reference' est requis"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Construire la requête
+        query = {}
+        if transaction_id:
+            query["id"] = transaction_id
+        if reference:
+            query["reference"] = reference
+
+        # Récupérer la transaction
+        transaction = Transaction.objects.filter(**query).first()
+
+        if not transaction:
+            return Response(
+                {"error": "Transaction non trouvée"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Vérifier les permissions (utilisateur non-admin ne peut voir que ses transactions)
+        if not request.user.is_staff:
+            if request.user.is_authenticated:
+                if transaction.user != request.user:
+                    return Response(
+                        {"error": "Vous n'avez pas accès à cette transaction"},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+            else:
+                # Pour les utilisateurs Telegram
+                if (
+                    hasattr(request, "telegram_user")
+                    and transaction.telegram_user != request.telegram_user
+                ):
+                    return Response(
+                        {"error": "Vous n'avez pas accès à cette transaction"},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+        return Response(
+            TransactionDetailsSerializer(transaction).data, status=status.HTTP_200_OK
+        )
+
+
+def custom_404(request, exception):
+    return render(request, "404.html", status=404)
+
+
+handler404 = custom_404
+
+
+class SearchUserBet(decorators.APIView):
+
+    def get(self, request, *args, **kwargs):
+        app_id = self.request.GET.get("app_id")
+        app_name = self.request.GET.get("app_name")
+        userid = self.request.GET.get("userid")
+
+        if not app_id:
+            return Response(
+                {"details": "app_id est obligatoire"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ✔️ Vérifier que app_id OU app_name est obligatoire
+        if not userid and not app_name:
+            return Response(
+                {"details": "userid ou app_name est obligatoire"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # --------------------------
+        # Recherche de l'app
+        # --------------------------
+        if app_id:
+            app = AppName.objects.filter(id=app_id).first()
+        else:
+            app = AppName.objects.filter(name=app_name).first()
+
+        if not app:
+            return Response(
+                {"details": "App not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+        if app.hash:
+            init_app = init_mobcash(app_name=app)
+            response = init_app.search_user(userid=userid)
+            if response.get("code") != constant.CODE_EXEPTION:
+                response = response.get("data")
+            else:
+                response = {}
+        return Response(response)
+
+    def post(self, request, *args, **kwargs):
+        serializer = SearchUserBetSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        app = serializer.validated_data["app"]
+        app_name = app.name
+        userid = serializer.validated_data["userid"]
+
+        if app.hash and app.name.lower() == "1win":
+            # 1win n'a pas d'endpoint de recherche utilisateur
+            response = {"UserId": userid, "Name": None, "CurrencyId": 27}
+        elif app.hash:
+            init_app = init_mobcash(app_name=app)
+            response = init_app.search_user(userid=userid)
+            if response.get("code") != constant.CODE_EXEPTION:
+                response = response.get("data")
+            else:
+                response = {}
+        else:
+            response = MobCashExternalService().verify_player(
+                player_user_id=userid, code=app.name
+            )
+
+        return Response(response)
+
+
+class CreateCoupon(generics.ListCreateAPIView):
+    serializer_class = CouponSerializer
+    permission_classes = [permissions.IsAdminUser]
+    pagination_class = CustomPagination
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            self.permission_classes = [permissions.IsAuthenticated]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        """Afficher uniquement les coupons de moins de 24 heures"""
+        setting = Setting.objects.first()
+        if self.request.user.is_staff:
+            return Coupon.objects.all()
+        else:
+            last_24h = timezone.now() - relativedelta(hours=24)
+            if (
+                setting
+                and setting.requires_recent_deposit_to_view_coupon
+                and not user_has_recent_accepted_deposit(self.request.user)
+            ):
+                return Coupon.objects.none()
+            if not setting.requires_deposit_to_view_coupon:
+                return Coupon.objects.filter(created_at__gte=last_24h)
+            else:
+                total_deposit = Transaction.objects.filter(
+                    user=self.request.user, type_trans="deposit", status="accept"
+                ).aggregate(total=Sum("amount"))["total"] or 0
+                if total_deposit >= setting.minimun_deposit_before_view_coupon:
+                    return Coupon.objects.filter(created_at__gte=last_24h)
+
+        return Coupon.objects.none()
+
+
+class CouponDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    API pour récupérer, modifier ou supprimer un coupon spécifique.
+    """
+
+    queryset = Coupon.objects.all()
+    serializer_class = CouponSerializer
+    permission_classes = [
+        permissions.IsAdminUser
+    ]  # seuls les admins peuvent modifier/supprimer
+
+    def get_permissions(self):
+        # Permet aux utilisateurs connectés de consulter un coupon (GET)
+        if self.request.method == "GET":
+            self.permission_classes = [permissions.IsAuthenticated]
+        return super().get_permissions()
+
+
+class CreateAdvertisementViews(generics.ListCreateAPIView):
+    pagination_class = CustomPagination
+    serializer_class = AdvertisementSerializer
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [permissions.IsAuthenticated()]
+        return [permissions.IsAdminUser()]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_staff:
+            return Advertisement.objects.all().order_by("-created_at")
+        return Advertisement.objects.filter(enable=True).order_by("-created_at")
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        instance = serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class DetailsAdvertisementViews(generics.RetrieveUpdateDestroyAPIView):
+    pagination_class = CustomPagination
+    permission_classes = [permissions.IsAdminUser]
+    serializer_class = AdvertisementSerializer
+
+    def get_queryset(self):
+        if self.request.user.is_staff:
+            objs = Advertisement.objects.all()
+        else:
+            objs = Advertisement.objects.filter(enable=True)
+        return objs
+
+
+class StatisticsView(decorators.APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def get(self, request, *args, **kwargs):
+        """
+        Retourne les statistiques importantes :
+        - Volume des transactions
+        - Croissance utilisateurs
+        - Système de parrainage
+        """
+        # Paramètres de période (optionnels)
+        start_date = request.GET.get("start_date")
+        end_date = request.GET.get("end_date")
+
+        # Filtre de base pour les dates
+        date_filter = Q()
+        if start_date:
+            date_filter &= Q(created_at__gte=start_date)
+        if end_date:
+            date_filter &= Q(created_at__lte=end_date)
+
+        # ========== VOLUME DES TRANSACTIONS ==========
+        transactions = Transaction.objects.filter(date_filter)
+
+        # Total des dépôts
+        deposits = transactions.filter(type_trans="deposit", status="accept")
+        total_deposits_amount = deposits.aggregate(total=Sum("amount"))["total"] or 0
+        total_deposits_count = deposits.count()
+
+        # Total des retraits
+        withdrawals = transactions.filter(type_trans="withdrawal", status="accept")
+        total_withdrawals_amount = (
+            withdrawals.aggregate(total=Sum("amount"))["total"] or 0
+        )
+        total_withdrawals_count = withdrawals.count()
+
+        # Volume net
+        connect_pro_logger.info("[STATISTICS] Début calcul net_volume")
+
+        apps = AppName.objects.all()
+        connect_pro_logger.info("[STATISTICS] Nombre d'apps: %s", apps.count())
+
+        has_app_with_hash = apps.filter(_hash__isnull=False).exclude(_hash="").exists()
+        connect_pro_logger.info("[STATISTICS] has_app_with_hash=%s", has_app_with_hash)
+
+        net_volume = 0
+        if has_app_with_hash:
+            # Au moins une app a un hash → somme des soldes via Caisse
+            caisses = Caisse.objects.select_related("bet_app").all()
+            net_volume = sum(float(caisse.solde) for caisse in caisses)
+            connect_pro_logger.info(
+                "[STATISTICS] [SOURCE=CAISSE] net_volume=%s", net_volume
+            )
+        elif apps.exists():
+            # Des apps existent mais aucune n'a de hash → get_wallet_balance
+            connect_pro_logger.info(
+                "[STATISTICS] [SOURCE=GET_WALLET_BALANCE] Appel get_wallet_balance()"
+            )
+            try:
+                net_volume = MobCashExternalService().get_wallet_balance()
+            except Exception as e:
+                connect_pro_logger.error(
+                    "[STATISTICS] [GET_WALLET_BALANCE] Erreur: %s", e, exc_info=True
+                )
+                net_volume = None
+            if net_volume is not None:
+                connect_pro_logger.info(
+                    "[STATISTICS] [GET_WALLET_BALANCE_RESULT] Valeur retournée: %s",
+                    net_volume,
+                )
+            else:
+                connect_pro_logger.warning(
+                    "[STATISTICS] [GET_WALLET_BALANCE_RESULT] get_wallet_balance() a retourné None"
+                )
+                net_volume = 0.0
+        else:
+            connect_pro_logger.warning("[STATISTICS] Aucune app trouvée, net_volume=0")
+            net_volume = 0.0
+
+        connect_pro_logger.info("[STATISTICS] net_volume final=%s", net_volume)
+
+        # Évolution par période
+        evolution_daily = (
+            transactions.filter(
+                type_trans__in=["deposit", "withdrawal"], status="accept"
+            )
+            .annotate(date=TruncDate("created_at"))
+            .values("date", "type_trans")
+            .annotate(total_amount=Sum("amount"), count=Count("id"))
+            .order_by("date")
+        )
+
+        evolution_weekly = (
+            transactions.filter(
+                type_trans__in=["deposit", "withdrawal"], status="accept"
+            )
+            .annotate(week=TruncWeek("created_at"))
+            .values("week", "type_trans")
+            .annotate(total_amount=Sum("amount"), count=Count("id"))
+            .order_by("week")
+        )
+
+        evolution_monthly = (
+            transactions.filter(
+                type_trans__in=["deposit", "withdrawal"], status="accept"
+            )
+            .annotate(month=TruncMonth("created_at"))
+            .values("month", "type_trans")
+            .annotate(total_amount=Sum("amount"), count=Count("id"))
+            .order_by("month")
+        )
+
+        evolution_yearly = (
+            transactions.filter(
+                type_trans__in=["deposit", "withdrawal"], status="accept"
+            )
+            .annotate(year=TruncYear("created_at"))
+            .values("year", "type_trans")
+            .annotate(total_amount=Sum("amount"), count=Count("id"))
+            .order_by("year")
+        )
+
+        # ========== CROISSANCE UTILISATEURS ==========
+        users_date_filter = Q()
+        if start_date:
+            users_date_filter &= Q(date_joined__gte=start_date)
+        if end_date:
+            users_date_filter &= Q(date_joined__lte=end_date)
+
+        all_users = User.objects.filter(users_date_filter, is_delete=False)
+
+        # Nouveaux utilisateurs par période
+        new_users_daily = (
+            all_users.annotate(date=TruncDate("date_joined"))
+            .values("date")
+            .annotate(count=Count("id"))
+            .order_by("date")
+        )
+
+        new_users_weekly = (
+            all_users.annotate(week=TruncWeek("date_joined"))
+            .values("week")
+            .annotate(count=Count("id"))
+            .order_by("week")
+        )
+
+        new_users_monthly = (
+            all_users.annotate(month=TruncMonth("date_joined"))
+            .values("month")
+            .annotate(count=Count("id"))
+            .order_by("month")
+        )
+
+        # Utilisateurs actifs (qui ont fait au moins une transaction)
+        # Compte les User normaux avec transactions
+        user_transactions_filter = Q(transaction__isnull=False)
+        if start_date:
+            user_transactions_filter &= Q(transaction__created_at__gte=start_date)
+        if end_date:
+            user_transactions_filter &= Q(transaction__created_at__lte=end_date)
+
+        active_users = User.objects.filter(user_transactions_filter).distinct().count()
+
+        # Compte les TelegramUser avec transactions
+        telegram_transactions_filter = Q(transaction__isnull=False)
+        if start_date:
+            telegram_transactions_filter &= Q(transaction__created_at__gte=start_date)
+        if end_date:
+            telegram_transactions_filter &= Q(transaction__created_at__lte=end_date)
+
+        active_telegram_users = (
+            TelegramUser.objects.filter(telegram_transactions_filter).distinct().count()
+        )
+
+        active_users_count = active_users + active_telegram_users
+
+        # Utilisateurs par source
+        users_by_source = []
+        for source in ["mobile", "web", "bot"]:
+            source_transactions = transactions.filter(source=source)
+            unique_users = (
+                source_transactions.exclude(user__isnull=True)
+                .values("user")
+                .distinct()
+                .count()
+            )
+            unique_telegram_users = (
+                source_transactions.exclude(telegram_user__isnull=True)
+                .values("telegram_user")
+                .distinct()
+                .count()
+            )
+            users_by_source.append(
+                {"source": source, "count": unique_users + unique_telegram_users}
+            )
+
+        # Utilisateurs bloqués vs actifs
+        blocked_users = User.objects.filter(is_block=True, is_delete=False).count()
+        active_status_users = User.objects.filter(
+            is_active=True, is_block=False, is_delete=False
+        ).count()
+        inactive_status_users = User.objects.filter(
+            is_active=False, is_delete=False
+        ).count()
+
+        # ========== SYSTÈME DE PARRAINAGE ==========
+        # Nombre de parrainages effectués (utilisateurs avec referrer_code)
+        parrainages_count = User.objects.filter(
+            referrer_code__isnull=False, referrer_code__gt="", is_delete=False
+        ).count()
+
+        if start_date or end_date:
+            parrainages_count = User.objects.filter(
+                referrer_code__isnull=False,
+                referrer_code__gt="",
+                is_delete=False,
+                date_joined__gte=start_date if start_date else timezone.datetime.min,
+                date_joined__lte=end_date if end_date else timezone.now(),
+            ).count()
+
+        # Montant total des bonus de parrainage distribués
+        referral_bonuses = Bonus.objects.filter(reason_bonus__icontains="parrainage")
+        if start_date:
+            referral_bonuses = referral_bonuses.filter(created_at__gte=start_date)
+        if end_date:
+            referral_bonuses = referral_bonuses.filter(created_at__lte=end_date)
+
+        total_referral_bonus = (
+            referral_bonuses.aggregate(total=Sum("amount"))["total"] or 0
+        )
+
+        # Top utilisateurs par nombre de filleuls
+        top_referrers_list = []
+        for user in User.objects.filter(
+            referral_code__isnull=False, referral_code__gt=""
+        ):
+            filleuls = User.objects.filter(
+                referrer_code=user.referral_code, is_delete=False
+            ).count()
+            if filleuls > 0:
+                top_referrers_list.append(
+                    {
+                        "id": str(user.id),
+                        "username": user.username,
+                        "email": user.email,
+                        "referral_code": user.referral_code,
+                        "filleuls_count": filleuls,
+                    }
+                )
+
+        top_referrers_list = sorted(
+            top_referrers_list, key=lambda x: x["filleuls_count"], reverse=True
+        )[:10]
+
+        # Taux d'activation des codes de parrainage
+        total_referral_codes = User.objects.filter(
+            referral_code__isnull=False, referral_code__gt="", is_delete=False
+        ).count()
+
+        activated_referral_codes = (
+            User.objects.filter(
+                referrer_code__isnull=False, referrer_code__gt="", is_delete=False
+            )
+            .values("referrer_code")
+            .distinct()
+            .count()
+        )
+
+        activation_rate = (
+            (activated_referral_codes / total_referral_codes * 100)
+            if total_referral_codes > 0
+            else 0
+        )
+
+        # ========== STATISTIQUES DASHBOARD ==========
+        # Total Utilisateurs
+        total_users = User.objects.filter(is_delete=False).count()
+
+        # Utilisateurs Actifs/Inactifs
+        active_users_total = User.objects.filter(
+            is_active=True, is_block=False, is_delete=False
+        ).count()
+        inactive_users_total = User.objects.filter(
+            is_active=False, is_delete=False
+        ).count()
+
+        # Total Bonus
+        total_bonus = (
+            Bonus.objects.filter(bonus_delete=False).aggregate(total=Sum("amount"))[
+                "total"
+            ]
+            or 0
+        )
+
+        # Statistiques Bot
+        bot_transactions = transactions.filter(source="bot")
+        total_transactions_bot = bot_transactions.count()
+        total_deposit_bot = bot_transactions.filter(
+            type_trans="deposit", status="accept"
+        ).count()
+        total_withdrawal_bot = bot_transactions.filter(
+            type_trans="withdrawal", status="accept"
+        ).count()
+
+        # Utilisateurs Bot (TelegramUser)
+        telegram_users_count = TelegramUser.objects.count()
+        if start_date or end_date:
+            telegram_users_filter = Q()
+            if start_date:
+                telegram_users_filter &= Q(created_at__gte=start_date)
+            if end_date:
+                telegram_users_filter &= Q(created_at__lte=end_date)
+            telegram_users_count = TelegramUser.objects.filter(
+                telegram_users_filter
+            ).count()
+
+        # Total Transactions
+        total_transactions = transactions.count()
+
+        # Transactions par application
+        transactions_by_app = {}
+        apps = AppName.objects.all()
+
+        for app in apps:
+            transactions_by_app[app.name] = {}
+
+            for type_key, _ in TYPE_TRANS:
+                app_transactions = transactions.filter(
+                    app=app, status="accept", type_trans=type_key
+                )
+
+                transactions_by_app[app.name][type_key] = {
+                    "count": app_transactions.count(),
+                    "total_amount": float(
+                        app_transactions.aggregate(total=Sum("amount"))["total"] or 0
+                    ),
+                }
+
+        # Balance Bizao (Solde de caisse total)
+        total_balance_bizao = Caisse.objects.aggregate(total=Sum("solde"))["total"] or 0
+
+        # Dépôts et Retraits Bizao (depuis le modèle Deposit)
+        deposits_bizao = Deposit.objects.all()
+        if start_date:
+            deposits_bizao = deposits_bizao.filter(created_at__gte=start_date)
+        if end_date:
+            deposits_bizao = deposits_bizao.filter(created_at__lte=end_date)
+
+        total_deposits_bizao_count = deposits_bizao.count()
+        total_deposits_bizao_amount = (
+            deposits_bizao.aggregate(total=Sum("amount"))["total"] or 0
+        )
+
+        # Retraits Bizao (depuis Caisse - calculé différemment)
+        # On utilise les retraits acceptés des transactions
+        withdrawals_bizao = withdrawals
+        total_withdrawals_bizao_count = withdrawals_bizao.count()
+        total_withdrawals_bizao_amount = float(total_withdrawals_amount)
+
+        # Récompenses (Rewards)
+        total_rewards = Reward.objects.aggregate(total=Sum("amount"))["total"] or 0
+
+        # Remboursements (Disbursements)
+        disbursements = transactions.filter(type_trans="disbursements")
+        total_disbursements = disbursements.count()
+        total_disbursements_amount = (
+            disbursements.aggregate(total=Sum("amount"))["total"] or 0
+        )
+
+        # Publicités (Advertisements)
+        total_advertisements = Advertisement.objects.count()
+        active_advertisements = Advertisement.objects.filter(enable=True).count()
+
+        # Coupons
+        total_coupons = Coupon.objects.count()
+        # Coupons en cours (moins de 24h)
+        now = timezone.now()
+        last_24h = now - timedelta(hours=24)
+        active_coupons = Coupon.objects.filter(created_at__gte=last_24h).count()
+
+        return Response(
+            {
+                "dashboard_stats": {
+                    "total_users": total_users,
+                    "active_users": active_users_total,
+                    "inactive_users": inactive_users_total,
+                    "total_bonus": float(total_bonus),
+                    "bot_stats": {
+                        "total_transactions": total_transactions_bot,
+                        "total_deposits": total_deposit_bot,
+                        "total_withdrawals": total_withdrawal_bot,
+                        "total_users": telegram_users_count,
+                    },
+                    "total_transactions": total_transactions,
+                    "transactions_by_app": transactions_by_app,
+                    "balance_bizao": float(total_balance_bizao),
+                    "deposits_bizao": {
+                        "count": total_deposits_bizao_count,
+                        "amount": float(total_deposits_bizao_amount),
+                    },
+                    "withdrawals_bizao": {
+                        "count": total_withdrawals_bizao_count,
+                        "amount": total_withdrawals_bizao_amount,
+                    },
+                    "rewards": {"total": float(total_rewards)},
+                    "disbursements": {
+                        "count": total_disbursements,
+                        "amount": float(total_disbursements_amount),
+                    },
+                    "advertisements": {
+                        "total": total_advertisements,
+                        "active": active_advertisements,
+                    },
+                    "coupons": {"total": total_coupons, "active": active_coupons},
+                },
+                "volume_transactions": {
+                    "deposits": {
+                        "total_amount": float(total_deposits_amount),
+                        "total_count": total_deposits_count,
+                    },
+                    "withdrawals": {
+                        "total_amount": float(total_withdrawals_amount),
+                        "total_count": total_withdrawals_count,
+                    },
+                    "net_volume": float(net_volume),
+                    "evolution": {
+                        "daily": list(evolution_daily),
+                        "weekly": list(evolution_weekly),
+                        "monthly": list(evolution_monthly),
+                        "yearly": list(evolution_yearly),
+                    },
+                },
+                "user_growth": {
+                    "new_users": {
+                        "daily": list(new_users_daily),
+                        "weekly": list(new_users_weekly),
+                        "monthly": list(new_users_monthly),
+                    },
+                    "active_users_count": active_users_count,
+                    "users_by_source": list(users_by_source),
+                    "status": {
+                        "blocked": blocked_users,
+                        "active": active_status_users,
+                        "inactive": inactive_status_users,
+                    },
+                },
+                "referral_system": {
+                    "parrainages_count": parrainages_count,
+                    "total_referral_bonus": float(total_referral_bonus),
+                    "top_referrers": top_referrers_list,
+                    "activation_rate": round(activation_rate, 2),
+                },
+            }
+        )
+
+
+class APIBalanceView(decorators.APIView):
+    def get(self, request, *args, **kwargs):
+        # balance, created = BpaySold.objects.get_or_create()
+        data = {
+            # "barkapay": barkapay_balance(),
+            # "pal": balance_pal(),
+            "connect": float(connect_balance().get("data").get("balance")),
+            # "dgs_pay": dgs_pay_balance(),
+            # "bpay": balance.balance,
+        }
+        return Response(data, status=status.HTTP_200_OK)
+
+
+import asyncio
+
+
+class MobCashBalance(decorators.APIView):
+
+    def get(self, request, *args, **kwargs):
+        # Exécuter la logique async dans un contexte sync
+        result = asyncio.run(self.get_balances())
+        return Response(result, status=status.HTTP_200_OK)
+
+    async def get_balances(self):
+        from asgiref.sync import sync_to_async
+
+        soldes = await sync_to_async(list)(
+            Caisse.objects.select_related("bet_app").all()
+        )
+
+        result = []
+        for solde in soldes:
+            api_response = await get_balance(
+                solde.bet_app.cashdeskid,
+                solde.bet_app.hash,
+                solde.bet_app.cashierpass,
+            )
+
+            result.append(
+                {
+                    "app_name": solde.bet_app.name,
+                    "solde": float(solde.solde),
+                    "app_image": solde.bet_app.image,
+                    "balance_limit": (
+                        api_response.get("Limit") if api_response else None
+                    ),
+                }
+            )
+
+        return result
+
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from celery import shared_task
+
+
+@shared_task
+def feexpay_payout_task(amount: int, phone_number: str, network_name: str):
+    """
+    Task Celery pour créer un retrait Feexpay
+    """
+
+    connect_pro_logger.info("=== FEEXPAY PAYOUT TASK START ===")
+
+    # Variables d'environnement
+    shop = os.getenv("FEEXPAY_CUSTOMER_ID")
+    api_key = os.getenv("FEEXPAY_API_KEY")
+
+    if not shop:
+        connect_pro_logger.error("FEEXPAY_CUSTOMER_ID non configuré")
+        raise ValidationError("FEEXPAY_CUSTOMER_ID non configuré")
+
+    if not api_key:
+        connect_pro_logger.error("FEEXPAY_API_KEY non configuré")
+        raise ValidationError("FEEXPAY_API_KEY non configuré")
+
+    url = "https://api-v2.feexpay.me/api/payouts/public/celtiis_bj"
+
+    connect_pro_logger.info(
+        f"Initialisation retrait | amount={amount} | phone={phone_number} | network={network_name}"
+    )
+
+    data = {
+        "phoneNumber": phone_number,
+        "amount": str(amount),
+        "shop": shop,
+        "network": network_name,
+        "motif": "Retrait de caisse",
+    }
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+
+    try:
+        connect_pro_logger.info("Envoi requête Feexpay payout")
+
+        response = requests.post(url=url, json=data, headers=headers, timeout=90)
+
+        connect_pro_logger.info(
+            f"Réponse Feexpay | status={response.status_code} | body={response.text}"
+        )
+
+        response.raise_for_status()
+
+        response_data = response.json()
+
+        connect_pro_logger.info("=== FEEXPAY PAYOUT TASK SUCCESS ===")
+        return response_data
+
+    except requests.exceptions.RequestException as e:
+        connect_pro_logger.error(
+            f"Erreur HTTP Feexpay payout | {str(e)}", exc_info=True
+        )
+        raise
+
+    except Exception as e:
+        connect_pro_logger.critical(
+            f"Erreur inconnue Feexpay payout | {str(e)}", exc_info=True
+        )
+        raise
+
+
+class TestAPIViews(decorators.APIView):
+
+    def post(self, request, *args, **kwargs):
+        from mobcash_inte.helpers import cancel_old_pending_transactions
+        result = cancel_old_pending_transactions.delay()
+        connect_pro_logger.info(f"[TEST] cancel_old_pending_transactions lancée | task_id={result.id}")
+        return Response({"message": "Tâche lancée", "task_id": result.id}, status=status.HTTP_200_OK)
+
+
+class RechargeMobcashBalanceView(generics.ListCreateAPIView):
+    """
+    API pour créer et lister les recharges de balance Mobcash avec preuve de paiement.
+    Permission: Admin uniquement
+    """
+
+    serializer_class = RechargeMobcashBalanceSerializer
+    permission_classes = [permissions.IsAdminUser]
+    pagination_class = CustomPagination
+    queryset = RechargeMobcashBalance.objects.all()
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["request"] = self.request
+        return context
+
+    def create(self, request, *args, **kwargs):
+        """
+        Créer une recharge et envoyer la requête à l'API MobCash
+        """
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        # Créer l'instance
+        instance = serializer.save()
+
+        # Appeler l'API MobCash en passant directement request.data et request.FILES
+        try:
+            mobcash_service = MobCashExternalService()
+            result = mobcash_service.create_recharge_request_from_request(
+                request_data=request.data
+            )
+
+            connect_pro_logger.info(
+                f"Réponse de l'API MobCash pour la recharge {instance.payment_reference}: {result}"
+            )
+
+            # Si l'API retourne une erreur, on peut logger mais on garde l'instance créée
+            if not result.get("success"):
+                connect_pro_logger.error(
+                    f"Erreur lors de l'envoi à l'API MobCash pour {instance.payment_reference}: {result.get('error')}"
+                )
+
+        except Exception as e:
+            connect_pro_logger.error(
+                f"Exception lors de l'appel à l'API MobCash pour {instance.payment_reference}: {str(e)}",
+                exc_info=True,
+            )
+        return Response(
+            serializer.data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class UpdateCaisseBalanceView(decorators.APIView):
+    """
+    API simple pour récupérer le solde via MobCashExternalService
+    et mettre à jour la Caisse.
+    Pas de permissions requises.
+    """
+
+    def get(self, request, *args, **kwargs):
+        try:
+            connect_pro_logger.info(
+                "[UPDATE_CAISSE_BALANCE] Début de la mise à jour du solde"
+            )
+
+            # Récupérer le solde via MobCashExternalService
+            mobcash_service = MobCashExternalService()
+            balance = mobcash_service.get_wallet_balance()
+
+            if balance is None or balance < 0:
+                connect_pro_logger.error(
+                    f"[UPDATE_CAISSE_BALANCE] Échec récupération solde: {balance}"
+                )
+                return Response(
+                    {
+                        "success": False,
+                        "error": "Impossible de récupérer le solde",
+                        "balance": balance,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Mettre à jour toutes les caisses avec le nouveau solde
+            caisses = Caisse.objects.all()
+            updated_count = 0
+
+            if caisses.exists():
+                for caisse in caisses:
+                    caisse.solde = float(balance)
+                    caisse.updated_at = timezone.now()
+                    caisse.save()
+                    updated_count += 1
+                connect_pro_logger.info(
+                    f"[UPDATE_CAISSE_BALANCE] {updated_count} caisse(s) mise(s) à jour avec le solde {balance}"
+                )
+            else:
+                # Créer une caisse par défaut si aucune n'existe
+                # On a besoin d'un bet_app, donc on prend le premier disponible
+                first_app = AppName.objects.first()
+                if first_app:
+                    Caisse.objects.create(
+                        solde=float(balance),
+                        bet_app=first_app,
+                        updated_at=timezone.now(),
+                    )
+                    updated_count = 1
+                    connect_pro_logger.info(
+                        f"[UPDATE_CAISSE_BALANCE] Caisse créée avec le solde {balance} pour l'app {first_app.name}"
+                    )
+                else:
+                    connect_pro_logger.error(
+                        "[UPDATE_CAISSE_BALANCE] Aucune app disponible pour créer une caisse"
+                    )
+                    return Response(
+                        {
+                            "success": False,
+                            "error": "Aucune app disponible pour créer une caisse",
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            return Response(
+                {
+                    "success": True,
+                    "balance": float(balance),
+                    "updated_caisses": updated_count,
+                    "message": f"Solde mis à jour avec succès: {balance}",
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except Exception as e:
+            connect_pro_logger.error(
+                f"[UPDATE_CAISSE_BALANCE] Erreur lors de la mise à jour: {str(e)}",
+                exc_info=True,
+            )
+            return Response(
+                {"success": False, "error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class ProcessTransactionView(decorators.APIView):
+    """
+    API 1: Traiter une transaction (dépôt ou retrait)
+    Permission: Admin uniquement
+    """
+
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, *args, **kwargs):
+        serializer = ProcessTransactionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reference = serializer.validated_data.get("reference")
+
+        transaction = Transaction.objects.filter(reference=reference).first()
+        if not transaction:
+            return Response(
+                {"error": "Transaction non trouvée"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            # Tracker le statut initial si pas encore tracké
+            if not transaction.all_status:
+                TransactionStatusHistory.objects.create(transaction=transaction, old_status=transaction.status, new_status=transaction.status, trigger_source=TransactionStatusHistory.Source.SYSTEM, message="Statut initial enregistré")
+
+            # Traiter selon le type de transaction
+            if (
+                transaction.type_trans == "deposit"
+                or transaction.type_trans == "reward"
+            ):
+                # Pour les dépôts, utiliser webhook_transaction_success qui gère automatiquement betpay/mobcash
+                setting = Setting.objects.first()
+                webhook_transaction_success(transaction=transaction, setting=setting)
+            elif transaction.type_trans == "withdrawal":
+                # Pour les retraits, utiliser l'API appropriée selon transaction.api
+                if transaction.api == "connect":
+                    connect_pro_withd_process(transaction=transaction)
+                elif transaction.api == "feexpay":
+                    feexpay_withdrawall_process(transaction=transaction)
+                else:
+                    return Response(
+                        {"error": f"API de retrait non supportée: {transaction.api}"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            else:
+                return Response(
+                    {
+                        "error": f"Type de transaction non supporté: {transaction.type_trans}"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            transaction.refresh_from_db()
+            return Response(
+                TransactionDetailsSerializer(transaction).data,
+                status=status.HTTP_200_OK,
+            )
+
+        except Exception as e:
+            connect_pro_logger.error(
+                f"Erreur lors du traitement de la transaction {reference}: {str(e)}",
+                exc_info=True,
+            )
+            return Response(
+                {"error": f"Erreur lors du traitement: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class UpdateTransactionStatusView(decorators.APIView):
+    """
+    API 2: Changer le statut d'une transaction
+    Permission: Admin uniquement
+    """
+
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, *args, **kwargs):
+        serializer = UpdateTransactionStatusSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reference = serializer.validated_data.get("reference")
+        new_status = serializer.validated_data.get("new_status")
+
+        transaction = Transaction.objects.filter(reference=reference).first()
+        if not transaction:
+            return Response(
+                {"error": "Transaction non trouvée"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            old_status = transaction.status
+
+            transaction.change_status(
+                new_status=new_status,
+                source="ADMIN",
+                message=f"Statut modifié manuellement par admin (id={request.user.id})",
+            )
+            transaction.fixed_by_admin = True
+            transaction.save(update_fields=["fixed_by_admin"])
+
+            transaction.refresh_from_db()
+            return Response(
+                {
+                    "message": f"Statut changé de '{old_status}' à '{new_status}'",
+                    "transaction": TransactionDetailsSerializer(transaction).data,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except Exception as e:
+            connect_pro_logger.error(
+                f"Erreur lors du changement de statut pour {reference}: {str(e)}",
+                exc_info=True,
+            )
+            return Response(
+                {"error": f"Erreur lors du changement de statut: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class TransactionStatusHistoryView(decorators.APIView):
+    """
+    API 3: Consulter la traçabilité des statuts d'une transaction
+    Permission: Admin uniquement
+    """
+
+    permission_classes = [permissions.IsAdminUser]
+
+    def get(self, request, *args, **kwargs):
+        search = request.GET.get("search")
+
+        # Vérifier qu'un critère de recherche est fourni
+        if not search:
+            return Response(
+                {"error": "Le paramètre 'search' est requis"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        search_term = search.strip()
+
+        # Construire la requête pour rechercher dans tous les champs pertinents
+        query = Q()
+
+        # Recherche par référence (exacte ou partielle)
+        query |= Q(reference__icontains=search_term)
+
+        # Recherche par email dans User ou TelegramUser
+        query |= Q(user__email__icontains=search_term) | Q(
+            telegram_user__email__icontains=search_term
+        )
+
+        # Recherche par fullname (first_name + last_name) dans User ou TelegramUser
+        # Split le search_term en parties pour rechercher dans first_name et last_name
+        search_parts = search_term.split()
+        if len(search_parts) >= 2:
+            # Si plusieurs mots, chercher le premier dans first_name et le reste dans last_name
+            first_name_part = search_parts[0]
+            last_name_part = " ".join(search_parts[1:])
+            query |= Q(
+                user__first_name__icontains=first_name_part,
+                user__last_name__icontains=last_name_part,
+            ) | Q(
+                telegram_user__first_name__icontains=first_name_part,
+                telegram_user__last_name__icontains=last_name_part,
+            )
+        else:
+            # Si un seul mot, chercher dans first_name ou last_name
+            name_part = search_parts[0]
+            query |= (
+                Q(user__first_name__icontains=name_part)
+                | Q(user__last_name__icontains=name_part)
+                | Q(telegram_user__first_name__icontains=name_part)
+                | Q(telegram_user__last_name__icontains=name_part)
+            )
+
+        # Si plusieurs critères sont fournis, utiliser AND (tous doivent correspondre)
+        transactions = (
+            Transaction.objects.filter(query)
+            .select_related("user", "telegram_user")
+            .distinct()
+        )
+
+        transaction_count = transactions.count()
+
+        if transaction_count == 0:
+            return Response(
+                {
+                    "error": "Aucune transaction trouvée avec les critères de recherche fournis"
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Si plusieurs transactions correspondent, retourner un avertissement avec la première
+        if transaction_count > 1:
+            transaction = transactions.first()
+            warning_message = f"Attention: {transaction_count} transactions trouvées. Affichage de la première (référence: {transaction.reference})"
+        else:
+            transaction = transactions.first()
+            warning_message = None
+
+        # Retourner l'historique des statuts
+        all_status = transaction.all_status if transaction.all_status else []
+
+        # Si pas d'historique mais que la transaction existe, ajouter le statut actuel
+        if not all_status:
+            all_status = [
+                {
+                    "status": transaction.status,
+                    "timestamp": (
+                        transaction.created_at.isoformat()
+                        if transaction.created_at
+                        else timezone.now().isoformat()
+                    ),
+                    "source": "system",
+                }
+            ]
+
+        # Récupérer les infos utilisateur pour la réponse
+        user_email = None
+        user_fullname = None
+        if transaction.user:
+            user_email = transaction.user.email
+            user_fullname = transaction.user.full_name()
+        elif transaction.telegram_user:
+            user_email = transaction.telegram_user.email
+            user_fullname = transaction.telegram_user.full_name()
+
+        response_data = {
+            "reference": transaction.reference,
+            "current_status": transaction.status,
+            "fixed_by_admin": transaction.fixed_by_admin,
+            "status_history": all_status,
+            "total_status_changes": len(all_status),
+            "user_email": user_email,
+            "user_fullname": user_fullname,
+            "total_matching_transactions": transaction_count,
+        }
+
+        if warning_message:
+            response_data["warning"] = warning_message
+
+        return Response(response_data, status=status.HTTP_200_OK)
+
+
+class ChangeTransactionStatusManuelViews(decorators.APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, *args, **kwargs):
+        serializer = ChangeTransactionStatusSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reference = serializer.validated_data.get("reference")
+        new_status = serializer.validated_data.get("status")
+
+        transaction = Transaction.objects.filter(reference=reference).first()
+        if not transaction:
+            return Response(
+                {"error": "Transaction non trouvée"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        if not new_status:
+            return Response(
+                {"error": "Le statut est obligatoire"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        transaction.change_status(
+            new_status=new_status,
+            source="ADMIN",
+            message=f"Statut modifié manuellement par admin (id={request.user.id})",
+        )
+        transaction.fixed_by_admin = True
+        transaction.save(update_fields=["fixed_by_admin"])
+
+        return Response(
+            TransactionDetailsSerializer(transaction).data, status=status.HTTP_200_OK
+        )
+
+
+class FinalizeDepositTransaction(decorators.APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, *args, **kwargs):
+        reference = self.request.data.get("reference")
+        transaction = (
+            Transaction.objects.filter(reference=reference)
+            .exclude(status="accept")
+            .first()
+        )
+        if not transaction:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        servculAPI = resolve_api_service(transaction.app)
+        if servculAPI:
+            response = servculAPI.recharge_account(
+                amount=float(transaction.amount), userid=transaction.user_app_id
+            )
+            connect_pro_logger.info(
+                f"Reponse de l'api de {transaction.app.name}: {response}"
+            )
+            xbet_response_data = response.get("data") if "data" in response and "code" in response else response
+        else:
+            response = MobCashExternalService().create_deposit(transaction=transaction)
+            connect_pro_logger.info(
+                f"Reponse de l'api de {transaction.app.name}: {response}"
+            )
+            xbet_response_data = response
+
+        if xbet_response_data.get("Success") == True:
+            transaction.change_status(
+                new_status="accept",
+                source="API_RESPONSE",
+                data=xbet_response_data,
+                message="Dépôt finalisé par admin via API betting",
+            )
+            transaction.mobcash_response = str(response)
+            transaction.save(update_fields=["mobcash_response"])
+
+            check_solde.delay(transaction_id=transaction.id)
+            send_notification(
+                user=transaction.user,
+                title="Opération réussie avec succès",
+                content=f"Vous avez effectué un dépôt de {transaction.amount} FCFA sur votre compte {transaction.app.name if transaction.app else 'plateforme'}",
+            )
+        return Response(TransactionDetailsSerializer(transaction).data)
+
+
+class PublicFinalizeDepositTransaction(FinalizeDepositTransaction):
+    """
+    Clone public de finalize-transaction pour l'agent MyCustomer.
+    Même logique de crédit compte de paris, sans auth admin.
+    """
+
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+
+
+class LastTransactionView(generics.RetrieveAPIView):
+    """
+    Récupère la dernière transaction de l'utilisateur.
+    """
+    serializer_class = TransactionDetailsSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self):
+        from django.utils import timezone
+        from datetime import timedelta
+
+        cutoff = timezone.now() - timedelta(hours=24)
+
+        user = self.request.user
+        if user and user.is_authenticated:
+            return (
+                Transaction.objects.filter(
+                    user=user,
+                    status="pending",
+                    created_at__gte=cutoff,
+                )
+                .exclude(type_trans="withdrawal")
+                .order_by("-created_at")
+                .first()
+            )
+        # Pour les utilisateurs Telegram (via le header X-USER-ID géré par IsAuthenticated)
+        telegram_user = getattr(self.request, "telegram_user", None)
+        if telegram_user:
+            return (
+                Transaction.objects.filter(
+                    telegram_user=telegram_user,
+                    status="pending",
+                    created_at__gte=cutoff,
+                )
+                .order_by("-created_at")
+                .first()
+            )
+
+        return None
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if not instance:
+            return Response({"detail": "Aucune transaction trouvée."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
+
+
+class CancelTransactionView(decorators.APIView):
+    """
+    Change le statut d'une transaction en 'annuler' via sa référence.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        reference = request.data.get("reference")
+        if not reference:
+            return Response({"error": "La référence est requise."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        transaction = Transaction.objects.filter(reference=reference).first()
+        if not transaction:
+            return Response({"error": "Transaction non trouvée."}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Vérification optionnelle : s'assurer que la transaction appartient à l'utilisateur
+        # (IsAuthenticated peuple soit request.user soit request.telegram_user)
+        is_owner = False
+        if request.user and request.user.is_authenticated:
+            if transaction.user == request.user:
+                is_owner = True
+        elif hasattr(request, "telegram_user"):
+            if transaction.telegram_user == request.telegram_user:
+                is_owner = True
+        
+        if not is_owner and not request.user.is_staff:
+             return Response({"error": "Vous n'avez pas la permission d'annuler cette transaction."}, status=status.HTTP_403_FORBIDDEN)
+
+        if transaction.status in ["accept", "annuler"]:
+            return Response({"error": f"Impossible d'annuler une transaction déjà {transaction.status}."}, status=status.HTTP_400_BAD_REQUEST)
+
+        transaction.change_status(
+            new_status="annuler",
+            source="USER",
+            message=f"Transaction annulée par l'utilisateur",
+        )
+
+        return Response({
+            "message": "Transaction annulée avec succès.",
+            "transaction": TransactionDetailsSerializer(transaction).data
+        })
+
+class FinalizeDepositTransactionByUser(decorators.APIView):
+    """
+    Permet à l'utilisateur de finaliser/relancer un dépôt.
+    Génère une nouvelle référence et lance le processus de paiement.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        old_reference = request.data.get("reference")
+        setting = Setting.objects.first()
+        if not old_reference:
+            return Response({"error": "La référence est requise."}, status=status.HTTP_400_BAD_REQUEST)
+
+        transaction = Transaction.objects.filter(reference=old_reference).first()
+        if not transaction:
+            return Response({"error": "Transaction non trouvée."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Vérification de l'appartenance
+        is_owner = False
+        if request.user and request.user.is_authenticated:
+            if transaction.user == request.user:
+                is_owner = True
+        elif hasattr(request, "telegram_user"):
+            if transaction.telegram_user == request.telegram_user:
+                is_owner = True
+
+        if not is_owner:
+            return Response({"error": "Vous n'avez pas la permission de modifier cette transaction."}, status=status.HTTP_403_FORBIDDEN)
+
+        if transaction.status == "accept":
+            return Response({"error": "Cette transaction est déjà acceptée."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Mise à jour de la transaction
+        transaction.change_status(
+            new_status="pending",
+            source="USER",
+            message="Transaction relancée par l'utilisateur",
+        )
+        prefix = (
+            "depot-"
+            if transaction.type_trans in ["deposit", "reward"]
+            else "retrait-f-"
+        )
+        new_reference = generate_reference(prefix=prefix)
+        amount = transaction.amount
+        fee = calculate_fee(transaction.network, amount)
+        transaction.reference = new_reference
+        if fee:
+            amount = int(amount - fee)
+        if transaction.network.name == "wave":
+            transaction.transaction_link = transaction.transaction_link = (
+                setting.wave_default_link + f"?amount={amount}"
+            )
+        elif transaction.network.payment_by_link:
+            if transaction.network.name == "orange":
+                transaction.transaction_link = (
+                    setting.orange_default_link + f"&amount={amount}"
+                )
+            else:
+                transaction.transaction_link = (
+                    setting.mtn_default_link
+                    + f"?amount={amount}&reference={transaction.reference}"
+                )
+
+        transaction.save(update_fields=["reference", "transaction_link"])
+
+        # Lancement du processus de paiement
+        payment_fonction(reference=new_reference)
+
+        transaction.refresh_from_db()
+        return Response(TransactionDetailsSerializer(transaction).data)
+
+
+class DownloadAPKView(decorators.APIView):
+    """
+    Vue pour télécharger le fichier APK de l'application.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, *args, **kwargs):
+        import os
+        from django.http import FileResponse, Http404
+        
+        # Chemin vers le fichier APK
+        apk_path = os.path.join(settings.BASE_DIR, 'app-release.apk')
+        
+        # Vérifier si le fichier existe
+        if not os.path.exists(apk_path):
+            raise Http404("Le fichier APK n'existe pas.")
+        
+        # Retourner le fichier en téléchargement
+        response = FileResponse(
+            open(apk_path, 'rb'),
+            content_type='application/vnd.android.package-archive'
+        )
+        response['Content-Disposition'] = 'attachment; filename="app-release.apk"'
+        
+        return response
+
+
+import secrets as secrets_module
+
+
+def generate_api_keys() -> dict:
+    public_key = "pk_live_" + secrets_module.token_urlsafe()
+    secret_key = "sk_live_" + secrets_module.token_urlsafe()
+    return {"public_key": public_key, "secret_key": secret_key}
+
+
+def validate_partner_key(secret_key, public_key):
+    user = User.objects.filter(
+        secret_key=secret_key, public_key=public_key, is_partner=True, is_block=False
+    ).first()
+    if not user:
+        return {"is_valid": False}
+    return {"is_valid": True, "user": user}
+
+
+class RegenerateKey(decorators.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        user_id = request.GET.get("user_id")
+        if user_id and request.user.is_staff:
+            user = User.objects.filter(id=user_id).first()
+            if not user:
+                return Response({"details": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+            if not user.is_partner:
+                user.is_partner = True 
+                user.save()
+        else:
+            user = request.user
+
+        if not (user.is_partner or request.user.is_staff):
+            return Response(
+                {"details": "Votre compte n'est pas enregistré en tant que partenaire. Veuillez contacter l'équipe de support."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        keys = generate_api_keys()
+        user.secret_key = keys["secret_key"]
+        user.public_key = keys["public_key"]
+        user.save(update_fields=["secret_key", "public_key"])
+        return Response(keys)
+
+
+class CreatePartnerTransactionView(decorators.APIView):
+
+    def post(self, request, *args, **kwargs):
+        from mobcash_inte.models import PartnerTransaction
+        from mobcash_inte.helpers import generate_reference, init_mobcash
+        from mobcash_inte.serializers import PartnerTransactionSerializer
+        from mobcash_external_service import MobCashExternalService
+
+        secret = request.headers.get("X-Secret-Key")
+        public = request.headers.get("X-Public-Key")
+        auth = validate_partner_key(secret_key=secret, public_key=public)
+        if not auth.get("is_valid"):
+            return Response(status=status.HTTP_401_UNAUTHORIZED)
+
+        serializer = PartnerTransactionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        partner = auth["user"]
+        reference = generate_reference(prefix="partner-")
+        transaction = serializer.save(partner=partner, reference=reference)
+
+        app = transaction.app
+
+        if transaction.type_trans == "deposit":
+            try:
+                servculAPI = resolve_api_service(app)
+                if servculAPI:
+                    response = servculAPI.recharge_account(
+                        amount=float(transaction.amount), userid=transaction.user_app_id
+                    )
+                    xbet_data = response.get("data") if "data" in response and "code" in response else response
+                else:
+                    response = MobCashExternalService().create_deposit(transaction=transaction)
+                    xbet_data = response
+
+                if xbet_data.get("Success") == True or str(xbet_data.get("Success", "")).lower() == "true":
+                    transaction.status = "accept"
+                    transaction.validated_at = timezone.now()
+                else:
+                    transaction.status = "failed"
+                    transaction.bet_response = str(xbet_data.get("Message", ""))
+            except Exception as e:
+                transaction.status = "failed"
+                transaction.bet_response = str(e)
+
+        else:  # withdrawal
+            if transaction.validated_at:
+                connect_pro_logger.warning(
+                    f"[VALIDATION_CHECK] La transaction partenaire {transaction.id} (ref: {transaction.reference}) "
+                    f"a déjà été validée. Arrêt du processus."
+                )
+                transaction.status = "accept"
+                transaction.save()
+                return Response(PartnerTransactionSerializer(transaction).data, status=status.HTTP_201_CREATED)
+
+            try:
+                servculAPI = resolve_api_service(app)
+                if servculAPI:
+                    response = servculAPI.withdraw_from_account(
+                        userid=transaction.user_app_id, code=transaction.withdriwal_code
+                    )
+                    xbet_data = response.get("data") if "data" in response and "code" in response else response
+                else:
+                    response = MobCashExternalService().create_withdrawal(transaction=transaction)
+                    xbet_data = response
+
+                if str(xbet_data.get("Success", "")).lower() == "true":
+                    amount = float(xbet_data.get("Summa", transaction.amount)) * (-1)
+                    transaction.amount = abs(amount)
+                    transaction.status = "accept"
+                    transaction.validated_at = timezone.now()
+                else:
+                    transaction.status = "failed"
+                    transaction.bet_response = str(xbet_data.get("Message", ""))
+            except Exception as e:
+                transaction.status = "failed"
+                transaction.bet_response = str(e)
+
+        transaction.save()
+        transaction.refresh_from_db()
+        return Response(PartnerTransactionSerializer(transaction).data, status=status.HTTP_201_CREATED)
+
+    def get(self, request, *args, **kwargs):
+        from mobcash_inte.models import PartnerTransaction
+        from mobcash_inte.serializers import PartnerTransactionSerializer
+
+        secret = request.headers.get("X-Secret-Key")
+        public = request.headers.get("X-Public-Key")
+        auth = validate_partner_key(secret_key=secret, public_key=public)
+        if not auth.get("is_valid"):
+            return Response(status=status.HTTP_401_UNAUTHORIZED)
+
+        reference = request.GET.get("reference")
+        transaction = PartnerTransaction.objects.filter(reference=reference).first()
+        if not transaction:
+            return Response({"details": "Transaction not found"}, status=status.HTTP_404_NOT_FOUND)
+        return Response(PartnerTransactionSerializer(transaction).data)
+
+
+class PartnerTransactionStatusView(decorators.APIView):
+
+    def get(self, request, *args, **kwargs):
+        from mobcash_inte.models import PartnerTransaction
+        from mobcash_inte.serializers import PartnerTransactionSerializer
+
+        secret = request.headers.get("X-Secret-Key")
+        public = request.headers.get("X-Public-Key")
+        auth = validate_partner_key(secret_key=secret, public_key=public)
+        if not auth.get("is_valid"):
+            return Response(status=status.HTTP_401_UNAUTHORIZED)
+
+        external_reference = request.GET.get("external_reference")
+        if not external_reference:
+            return Response(
+                {"external_reference": ["external_reference is required"]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        transaction = PartnerTransaction.objects.filter(
+            external_reference=external_reference, partner=auth["user"]
+        ).first()
+        if not transaction:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response(PartnerTransactionSerializer(transaction).data)
+
+
+# ============================================================
+# Coupon System V2 Views
+# ============================================================
+
+class CouponV2View(generics.ListCreateAPIView):
+    serializer_class = CouponV2Serializer
+    pagination_class = CustomPagination
+
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
+
+    def get_queryset(self):
+        last_24h = timezone.now() - relativedelta(hours=24)
+        qs = CouponV2.objects.filter(created_at__gte=last_24h)
+        bet_app = self.request.query_params.get('bet_app')
+        if bet_app:
+            qs = qs.filter(bet_app__id=bet_app)
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        serializer = CouponV2CreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        setting = Setting.objects.first()
+
+        if not setting.coupon_enable:
+            return Response({"error": "Le système de coupons est désactivé."}, status=status.HTTP_403_FORBIDDEN)
+
+        if not (request.user.is_staff or setting.allow_all_users_publish_coupons or getattr(request.user, 'can_publish_coupons', False)):
+            return Response({"error": "Vous n'avez pas l'autorisation de publier des coupons."}, status=status.HTTP_403_FORBIDDEN)
+
+        bet_app = AppName.objects.filter(id=data['bet_app_id']).first()
+        if not bet_app:
+            return Response({"error": "Application bookmaker non trouvée."}, status=status.HTTP_404_NOT_FOUND)
+
+        today = timezone.now().date()
+        week_start = today - timezone.timedelta(days=today.weekday())
+
+        # 1 coupon par app par jour
+        if CouponV2.objects.filter(author=request.user, bet_app=bet_app, created_at__date=today).exists():
+            return Response({"error": f"Vous avez déjà créé un coupon pour {bet_app.name} aujourd'hui."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        # Quota journalier
+        if CouponV2.objects.filter(author=request.user, created_at__date=today).count() >= setting.max_coupons_per_day:
+            return Response({"error": f"Quota journalier de {setting.max_coupons_per_day} coupons atteint."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        # Quota hebdomadaire
+        if CouponV2.objects.filter(author=request.user, created_at__date__gte=week_start).count() >= setting.max_coupons_per_week:
+            return Response({"error": f"Quota hebdomadaire de {setting.max_coupons_per_week} coupons atteint."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        # Unicité du code par app
+        code = data.get('code')
+        if code and CouponV2.objects.filter(bet_app=bet_app, code=code).exists():
+            return Response({"error": "Ce code promo existe déjà pour cette application bookmaker."}, status=status.HTTP_400_BAD_REQUEST)
+
+        cote = data.get('cote', 1.00)
+        potential_gain = float(cote) * 10000
+
+        coupon = CouponV2.objects.create(
+            author=request.user,
+            bet_app=bet_app,
+            code=code,
+            coupon_type=data.get('coupon_type', 'combine'),
+            cote=cote,
+            match_count=data.get('match_count', 1),
+            potential_gain=potential_gain,
+        )
+        return Response(CouponV2Serializer(coupon, context={'request': request}).data, status=status.HTTP_201_CREATED)
+
+
+class CouponV2DetailView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = CouponV2.objects.all()
+    serializer_class = CouponV2Serializer
+
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [permissions.AllowAny()]
+        return [permissions.IsAdminUser()]
+
+
+class VoteCouponV2View(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        serializer = CouponRatingV2Serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        vote_type = serializer.validated_data['vote_type']
+        is_like = (vote_type == 'like')
+
+        setting = Setting.objects.first()
+        if not (setting.allow_all_users_publish_coupons or getattr(request.user, 'can_rate_coupons', False)):
+            return Response({"error": "Vous n'avez pas l'autorisation de noter des coupons."}, status=status.HTTP_403_FORBIDDEN)
+
+        coupon = CouponV2.objects.filter(id=pk).first()
+        if not coupon:
+            return Response({"error": "Coupon non trouvé."}, status=status.HTTP_404_NOT_FOUND)
+
+        if coupon.author == request.user:
+            return Response({"error": "Vous ne pouvez pas voter sur votre propre coupon."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Règle 1 vote/jour/auteur
+        today = timezone.now().date()
+        already_voted_today = CouponRatingV2.objects.filter(
+            user=request.user,
+            coupon__author=coupon.author,
+            created_at__date=today,
+        ).exclude(coupon=coupon).exists()
+        if already_voted_today:
+            return Response({"error": "Vous avez déjà voté aujourd'hui sur un coupon de cet auteur."}, status=status.HTTP_400_BAD_REQUEST)
+
+        monetization_enabled = setting.enable_coupon_monetization
+        monetization_amount = setting.monetization_amount
+        coupon_rating_points = setting.coupon_rating_points
+
+        author = coupon.author
+        wallet = None
+        if author:
+            wallet, _ = CouponWallet.objects.get_or_create(user=author)
+
+        existing_rating = CouponRatingV2.objects.filter(user=request.user, coupon=coupon).first()
+        adjustment = 0
+        points_delta = 0
+
+        if existing_rating is None:
+            # Nouveau vote
+            CouponRatingV2.objects.create(user=request.user, coupon=coupon, is_like=is_like)
+            if is_like:
+                coupon.likes_count += 1
+                adjustment = monetization_amount
+            else:
+                coupon.dislikes_count += 1
+                adjustment = -monetization_amount
+            points_delta = float(coupon_rating_points)
+
+        elif existing_rating.is_like == is_like:
+            # Annulation du vote
+            existing_rating.delete()
+            if is_like:
+                coupon.likes_count = max(0, coupon.likes_count - 1)
+                adjustment = -monetization_amount
+            else:
+                coupon.dislikes_count = max(0, coupon.dislikes_count - 1)
+                adjustment = monetization_amount
+            points_delta = -float(coupon_rating_points)
+
+        else:
+            # Changement de vote
+            existing_rating.is_like = is_like
+            existing_rating.save()
+            if is_like:
+                coupon.likes_count += 1
+                coupon.dislikes_count = max(0, coupon.dislikes_count - 1)
+                adjustment = 2 * monetization_amount
+            else:
+                coupon.dislikes_count += 1
+                coupon.likes_count = max(0, coupon.likes_count - 1)
+                adjustment = -2 * monetization_amount
+            # Pas de changement de points lors d'un changement de vote
+
+        coupon.save()
+
+        if author:
+            if points_delta != 0:
+                author.coupon_points = float(author.coupon_points or 0) + points_delta
+                author.save(update_fields=['coupon_points'])
+
+            if monetization_enabled and wallet and adjustment != 0:
+                wallet.balance = float(wallet.balance) + float(adjustment)
+                if float(adjustment) > 0:
+                    wallet.total_earned = float(wallet.total_earned) + float(adjustment)
+                wallet.save()
+
+        return Response({
+            "message": f"Vote {vote_type} enregistré avec succès",
+            "coupon": {
+                "id": str(coupon.id),
+                "likes": coupon.likes_count,
+                "dislikes": coupon.dislikes_count,
+                "user_liked": is_like if existing_rating is None else (existing_rating.is_like if existing_rating else False),
+                "user_disliked": not is_like if existing_rating is None else (not existing_rating.is_like if existing_rating else False),
+            },
+            "amount_earned": str(adjustment) if monetization_enabled else "0",
+            "points_delta": points_delta,
+        }, status=status.HTTP_200_OK)
+
+
+class CouponWalletView(generics.RetrieveAPIView):
+    serializer_class = CouponWalletSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self):
+        wallet, _ = CouponWallet.objects.get_or_create(user=self.request.user)
+        return wallet
+
+
+class CouponWithdrawalView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = CouponWithdrawalSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        setting = Setting.objects.first()
+        wallet, _ = CouponWallet.objects.get_or_create(user=request.user)
+
+        amount = data['amount']
+
+        if amount < setting.minimum_coupon_withdrawal:
+            return Response({"error": f"Montant minimum de retrait: {setting.minimum_coupon_withdrawal} FCFA."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if amount > wallet.balance:
+            return Response({"error": f"Solde insuffisant. Solde disponible: {wallet.balance} FCFA."}, status=status.HTTP_400_BAD_REQUEST)
+
+        network = Network.objects.filter(id=data['network']).first()
+        if not network:
+            return Response({"error": "Réseau de paiement non trouvé."}, status=status.HTTP_404_NOT_FOUND)
+
+        import secrets as secrets_module
+        reference = f"CW-{secrets_module.token_hex(8).upper()}"
+
+        transaction = Transaction.objects.create(
+            user=request.user,
+            type_trans="coupon_withdrawal",
+            amount=int(amount),
+            phone_number=data['phone_number'],
+            network=network,
+            reference=reference,
+            status="pending",
+        )
+
+        CouponWithdrawal.objects.create(
+            user=request.user,
+            wallet=wallet,
+            amount=amount,
+            bank_name=data.get('bank_name', ''),
+            account_number=data.get('account_number', ''),
+            account_holder=data.get('account_holder', ''),
+        )
+
+        wallet.balance = float(wallet.balance) - float(amount)
+        wallet.pending_payout = float(wallet.pending_payout) + float(amount)
+        wallet.save()
+
+        from payment import connect_pro_withd_process
+        connect_pro_withd_process(transaction=transaction)
+
+        from mobcash_inte.serializers import TransactionDetailsSerializer
+        return Response(TransactionDetailsSerializer(transaction).data, status=status.HTTP_201_CREATED)
+
+
+class CouponPayoutListView(generics.ListAPIView):
+    serializer_class = CouponPayoutSerializer
+    permission_classes = [permissions.IsAdminUser]
+    pagination_class = CustomPagination
+    queryset = CouponPayout.objects.all().order_by('-created_at')
+
+
+class AuthorCommentView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        coupon_author_id = request.query_params.get('coupon_author_id')
+        if not coupon_author_id:
+            return Response({"error": "coupon_author_id est requis."}, status=status.HTTP_400_BAD_REQUEST)
+        comments = AuthorComment.objects.filter(
+            coupon_author__id=coupon_author_id,
+            parent=None,
+            is_deleted=False,
+        ).order_by('-created_at')
+        serializer = AuthorCommentSerializer(comments, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        serializer = AuthorCommentCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        coupon = CouponV2.objects.filter(id=data['coupon_id']).first()
+        if not coupon:
+            return Response({"error": "Coupon non trouvé."}, status=status.HTTP_404_NOT_FOUND)
+
+        parent = None
+        if data.get('parent_id'):
+            parent = AuthorComment.objects.filter(id=data['parent_id']).first()
+            if not parent:
+                return Response({"error": "Commentaire parent non trouvé."}, status=status.HTTP_404_NOT_FOUND)
+
+        comment = AuthorComment.objects.create(
+            author=request.user,
+            coupon_author=coupon.author,
+            coupon=coupon,
+            content=data['content'],
+            parent=parent,
+        )
+        return Response(AuthorCommentSerializer(comment).data, status=status.HTTP_201_CREATED)
+
+
+class AuthorCommentDetailView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, pk):
+        comment = AuthorComment.objects.filter(id=pk, author=request.user, is_deleted=False).first()
+        if not comment:
+            return Response({"error": "Commentaire non trouvé ou non autorisé."}, status=status.HTTP_404_NOT_FOUND)
+        content = request.data.get('content')
+        if content:
+            comment.content = content
+            comment.save()
+        return Response(AuthorCommentSerializer(comment).data)
+
+    def delete(self, request, pk):
+        comment = AuthorComment.objects.filter(id=pk, author=request.user, is_deleted=False).first()
+        if not comment:
+            return Response({"error": "Commentaire non trouvé ou non autorisé."}, status=status.HTTP_404_NOT_FOUND)
+        comment.is_deleted = True
+        comment.deleted_at = timezone.now()
+        comment.save()
+        return Response({"message": "Commentaire supprimé avec succès."}, status=status.HTTP_200_OK)
+
+
+class AuthorRatingView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = AuthorRatingCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        coupon = CouponV2.objects.filter(id=data['coupon_id']).first()
+        if not coupon:
+            return Response({"error": "Coupon non trouvé."}, status=status.HTTP_404_NOT_FOUND)
+
+        coupon_author = coupon.author
+        if coupon_author == request.user:
+            return Response({"error": "Vous ne pouvez pas voter pour vous-même."}, status=status.HTTP_400_BAD_REQUEST)
+
+        rating, created = AuthorCouponRating.objects.update_or_create(
+            user=request.user,
+            coupon_author=coupon_author,
+            defaults={'is_like': data['is_like'], 'coupon': coupon},
+        )
+        return Response(AuthorCouponRatingSerializer(rating).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+class AuthorStatsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, user_id):
+        from accounts.models import User as UserModel
+        author = UserModel.objects.filter(id=user_id).first()
+        if not author:
+            return Response({"error": "Auteur non trouvé."}, status=status.HTTP_404_NOT_FOUND)
+
+        total_likes = AuthorCouponRating.objects.filter(coupon_author=author, is_like=True).count()
+        total_dislikes = AuthorCouponRating.objects.filter(coupon_author=author, is_like=False).count()
+        total_coupons = CouponV2.objects.filter(author=author).count()
+        total_votes = total_likes + total_dislikes
+        author_rating = round((total_likes / total_votes) * 5, 2) if total_votes > 0 else 0.0
+
+        return Response({
+            "user": {
+                "id": str(author.id),
+                "email": author.email,
+                "first_name": author.first_name,
+                "last_name": author.last_name,
+            },
+            "total_coupons": total_coupons,
+            "total_likes": total_likes,
+            "total_dislikes": total_dislikes,
+            "author_rating": author_rating,
+        })
+
+
+class UserCouponStatsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        total_coupons = CouponV2.objects.filter(author=user).count()
+        total_likes = sum(c.likes_count for c in CouponV2.objects.filter(author=user))
+        total_dislikes = sum(c.dislikes_count for c in CouponV2.objects.filter(author=user))
+        wallet, _ = CouponWallet.objects.get_or_create(user=user)
+
+        return Response({
+            "total_published_coupons": total_coupons,
+            "total_likes_received": total_likes,
+            "total_dislikes_received": total_dislikes,
+            "wallet_balance": str(wallet.balance),
+            "total_earned": str(wallet.total_earned),
+            "pending_payouts": str(wallet.pending_payout),
+        })
+
+
+# ============================================================
+# Cryptocurrency Views
+# ============================================================
+
+
+class CreateCryptocurrency(generics.ListCreateAPIView):
+    """
+    GET  – list all cryptocurrencies (authenticated)
+    POST – create a new cryptocurrency (admin only)
+    """
+
+    permission_classes = [permissions.IsAdminUser]
+    serializer_class = CryptocurrencySerializer
+    pagination_class = CustomPagination
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["type_trans"] = self.request.GET.get("type_trans")
+        return context
+
+    def get_queryset(self):
+        q = self.request.GET.get("q")
+        if q:
+            queryset = Cryptocurrency.objects.filter(
+                Q(name__icontains=q) | Q(code__icontains=q)
+            )
+        else:
+            queryset = Cryptocurrency.objects.all()
+
+        type_trans = self.request.GET.get("type_trans")
+        if type_trans == "sale":
+            queryset = queryset.filter(active_for_sale=True)
+        elif type_trans == "buy":
+            queryset = queryset.filter(active_for_buy=True)
+        return queryset
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            self.permission_classes = [permissions.IsAuthenticated]
+        else:
+            self.permission_classes = [permissions.IsAdminUser]
+        return super().get_permissions()
+
+
+class DetailsCryptocurrency(generics.RetrieveUpdateDestroyAPIView):
+    """
+    GET    – retrieve a single cryptocurrency (authenticated)
+    PUT/PATCH/DELETE – admin only
+    """
+
+    permission_classes = [permissions.IsAdminUser]
+    serializer_class = CryptocurrencySerializer
+    queryset = Cryptocurrency.objects.all()
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            self.permission_classes = [permissions.IsAuthenticated]
+        else:
+            self.permission_classes = [permissions.IsAdminUser]
+        return super().get_permissions()
+
+
+class CreateCryptoBuyTransactionView(generics.CreateAPIView):
+    """
+    Create a crypto **buy** transaction (user pays XOF, receives crypto).
+    POST body: amount, phone_number, app, user_app_id, network, crypto_id,
+               wallet_link (optional), total_crypto (optional), source
+    """
+
+    serializer_class = CryptoBuyTransactionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def create(self, request, *args, **kwargs):
+        crypto_id = request.data.get("crypto_id")
+        if not crypto_id:
+            return Response(
+                {"detail": "Le champ 'crypto_id' est requis."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        crypto = Cryptocurrency.objects.filter(id=crypto_id).first()
+        if not crypto:
+            return Response(
+                {"detail": "Cryptomonnaie non trouvée."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not crypto.active_for_buy:
+            return Response(
+                {"detail": "Cet achat de cryptomonnaie est désactivé."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = self.serializer_class(
+            data=request.data,
+            context={"request": request, "type_trans": "buy", "crypto": crypto},
+        )
+        serializer.is_valid(raise_exception=True)
+
+        # Use the network's buy_api to route the payment
+        network = serializer.validated_data.get("network")
+        buy_api = network.buy_api if (network and hasattr(network, "buy_api")) else "connect"
+
+        transaction = serializer.save(
+            reference=generate_reference(prefix="crypto-buy-"),
+            user=request.user,
+            type_trans="buy",
+            crypto=crypto,
+            api=buy_api,
+        )
+        TransactionStatusHistory.objects.create(
+            transaction=transaction,
+            old_status=transaction.status,
+            new_status=transaction.status,
+            trigger_source=TransactionStatusHistory.Source.SYSTEM,
+            message="Statut initial enregistré (crypto buy)",
+        )
+        transaction.save()
+
+        # Send admin Telegram notification
+        from mobcash_inte.helpers import send_telegram_message
+        try:
+            send_telegram_message(
+                content=f"Nouvelle demande d'achat de {crypto.name}. Réf: {transaction.reference}"
+            )
+        except Exception:
+            pass
+
+        payment_fonction(reference=transaction.reference)
+        transaction.refresh_from_db()
+
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CreateCryptoSaleTransactionView(generics.CreateAPIView):
+    """
+    Create a crypto **sale** transaction (user sells crypto, receives XOF).
+    POST body: amount, phone_number, app, user_app_id, network, crypto_id,
+               wallet_link, total_crypto (optional), source
+    """
+
+    serializer_class = CryptoBuyTransactionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def create(self, request, *args, **kwargs):
+        crypto_id = request.data.get("crypto_id")
+        if not crypto_id:
+            return Response(
+                {"detail": "Le champ 'crypto_id' est requis."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        crypto = Cryptocurrency.objects.filter(id=crypto_id).first()
+        if not crypto:
+            return Response(
+                {"detail": "Cryptomonnaie non trouvée."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not crypto.active_for_sale:
+            return Response(
+                {"detail": "Cette vente de cryptomonnaie est désactivée."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = self.serializer_class(
+            data=request.data,
+            context={"request": request, "type_trans": "sale", "crypto": crypto},
+        )
+        serializer.is_valid(raise_exception=True)
+
+        # Store the network's sale_api so ApproveCryptoTransactionView can route the payout
+        network = serializer.validated_data.get("network")
+        sale_api = network.sale_api if (network and hasattr(network, "sale_api")) else "connect"
+
+        transaction = serializer.save(
+            reference=generate_reference(prefix="crypto-sale-"),
+            user=request.user,
+            type_trans="sale",
+            crypto=crypto,
+            api=sale_api,
+        )
+        TransactionStatusHistory.objects.create(
+            transaction=transaction,
+            old_status=transaction.status,
+            new_status=transaction.status,
+            trigger_source=TransactionStatusHistory.Source.SYSTEM,
+            message="Statut initial enregistré (crypto sale)",
+        )
+        transaction.save()
+
+        # Send admin Telegram notification
+        from mobcash_inte.helpers import send_telegram_message
+        try:
+            send_telegram_message(
+                content=f"Nouvelle demande de vente de {crypto.name}. Réf: {transaction.reference}"
+            )
+        except Exception:
+            pass
+
+        # Sales wait for admin approval – no automatic payment trigger
+        transaction.refresh_from_db()
+
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ApproveCryptoTransactionView(decorators.APIView):
+    """
+    Admin-only endpoint to approve a pending crypto transaction.
+
+    For **buy**  transactions: marks status = "accept" and notifies the user.
+    For **sale** transactions: triggers the payment payout flow.
+
+    POST body: { "reference": "<transaction_reference>" }
+    """
+
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, *args, **kwargs):
+        reference = request.data.get("reference")
+        if not reference:
+            return Response(
+                {"detail": "Le champ 'reference' est requis."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        transaction = Transaction.objects.filter(reference=reference).first()
+        if not transaction:
+            return Response(
+                {"detail": "Transaction non trouvée."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if transaction.type_trans not in ("buy", "sale"):
+            return Response(
+                {"detail": "Cette transaction n'est pas une transaction crypto."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if transaction.status == "accept":
+            return Response(
+                {"detail": "Cette transaction est déjà approuvée."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if transaction.type_trans == "buy":
+            # Admin confirms crypto was sent → mark as accepted and notify user
+            transaction.change_status(
+                new_status="accept",
+                source=TransactionStatusHistory.Source.ADMIN,
+                message="Achat crypto approuvé par l'administrateur.",
+            )
+            if transaction.user and transaction.crypto:
+                from mobcash_inte.helpers import send_notification as _send_notification
+                try:
+                    _send_notification(
+                        user=transaction.user,
+                        title="Opération réussie",
+                        content=(
+                            f"Vous avez effectué un achat de {transaction.total_crypto} "
+                            f"{transaction.crypto.name} pour un montant de "
+                            f"{transaction.amount} F CFA."
+                        ),
+                    )
+                except Exception:
+                    pass
+            # Send admin Telegram notification
+            from mobcash_inte.helpers import send_telegram_message
+            try:
+                send_telegram_message(
+                    content=f"Nouvelle demande d'achat de {transaction.crypto.name}. Réf: {transaction.reference}"
+                )
+            except Exception:
+                pass
+
+        elif transaction.type_trans == "sale":
+            # Admin confirms crypto received → trigger payout to user's mobile money
+            # Send admin Telegram notification
+            from mobcash_inte.helpers import send_telegram_message
+            try:
+                send_telegram_message(
+                    content=f"Demande de vente de {transaction.crypto.name} approuvée. Réf: {transaction.reference}"
+                )
+            except Exception:
+                pass
+            payment_fonction(reference=transaction.reference)
+
+        transaction.refresh_from_db()
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+# ============================================================
+# Cryptocurrency V2 Views (fixed admin-defined prices)
+# ============================================================
+
+class CreateCryptocurrencyV2(generics.ListCreateAPIView):
+    """V2 — list/create with fixed admin-set prices (buy_price / sale_price)."""
+
+    serializer_class = CryptocurrencySerializerV2
+    pagination_class = CustomPagination
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            self.permission_classes = [permissions.AllowAny]
+        else:
+            self.permission_classes = [permissions.IsAdminUser]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        qs = Cryptocurrency.objects.all()
+        type_trans = self.request.GET.get("type_trans")
+        if type_trans == "sale":
+            qs = qs.filter(active_for_sale=True)
+        elif type_trans == "buy":
+            qs = qs.filter(active_for_buy=True)
+        q = self.request.GET.get("q")
+        if q:
+            qs = qs.filter(Q(name__icontains=q) | Q(code__icontains=q))
+        return qs
+
+
+class DetailsCryptocurrencyV2(generics.RetrieveUpdateDestroyAPIView):
+    """V2 — retrieve / update / delete a crypto with fixed prices."""
+
+    serializer_class = CryptocurrencySerializerV2
+    queryset = Cryptocurrency.objects.all()
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            self.permission_classes = [permissions.AllowAny]
+        else:
+            self.permission_classes = [permissions.IsAdminUser]
+        return super().get_permissions()
+
+
+# ============================================================
+# CryptoNetwork ViewSet (blockchain networks per crypto)
+# ============================================================
+
+class CryptoNetworkView(viewsets.ModelViewSet):
+    """
+    CRUD for blockchain networks linked to a Cryptocurrency.
+    GET (list/retrieve) — public
+    POST / PATCH / DELETE — admin only
+    Optional filters: ?crypto_id=<id>  ?is_active=true|false
+    """
+
+    serializer_class = CryptoNetworkSerializer
+    pagination_class = CustomPagination
+
+    def get_permissions(self):
+        if self.request.method in ("GET", "HEAD", "OPTIONS"):
+            self.permission_classes = [permissions.AllowAny]
+        else:
+            self.permission_classes = [permissions.IsAdminUser]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        qs = CryptoNetwork.objects.select_related("crypto").all()
+        crypto_id = self.request.GET.get("crypto_id")
+        is_active = self.request.GET.get("is_active")
+        if crypto_id:
+            qs = qs.filter(crypto_id=crypto_id)
+        if is_active is not None:
+            qs = qs.filter(is_active=is_active.lower() == "true")
+        return qs
+
+    def perform_create(self, serializer):
+        crypto_id = self.request.data.get("crypto_id")
+        crypto = None
+        if crypto_id:
+            crypto = Cryptocurrency.objects.filter(id=crypto_id).first()
+        serializer.save(crypto=crypto)
+
+    def perform_update(self, serializer):
+        crypto_id = self.request.data.get("crypto_id")
+        if crypto_id is not None:
+            crypto = Cryptocurrency.objects.filter(id=crypto_id).first()
+            serializer.save(crypto=crypto)
+        else:
+            serializer.save()
+
+
+# ============================================================
+# Crypto Buy / Sale V2 (fixed price)
+# ============================================================
+
+class CreateBuyCryptoViewV2(decorators.APIView):
+    """
+    V2 — buy crypto at the fixed admin price (buy_price).
+    Amount in FCFA = total_crypto × crypto.buy_price
+    POST body: total_crypto, crypto_id, network_id, phone_number, wallet_link, hash
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        serializer = BuyCryptoV2Serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        vd = serializer.validated_data
+        crypto: Cryptocurrency = vd["_crypto"]
+        network: Network = vd["_network"]
+        amount: float = vd["_amount"]
+
+        buy_api = network.buy_api if hasattr(network, "buy_api") else "connect"
+
+        transaction = Transaction.objects.create(
+            user=request.user,
+            reference=generate_reference(prefix="crypto-buy-v2-"),
+            type_trans="buy",
+            crypto=crypto,
+            network=network,
+            amount=int(amount),
+            total_crypto=vd["total_crypto"],
+            phone_number=vd.get("phone_number") or "",
+            wallet_link=vd.get("wallet_link") or "",
+            hash=vd.get("hash") or "",
+            api=buy_api,
+            source=request.data.get("source", "mobile"),
+        )
+
+        TransactionStatusHistory.objects.create(
+            transaction=transaction,
+            old_status=transaction.status,
+            new_status=transaction.status,
+            trigger_source=TransactionStatusHistory.Source.SYSTEM,
+            message="Statut initial enregistré (crypto buy V2)",
+        )
+
+        payment_fonction(reference=transaction.reference)
+        transaction.refresh_from_db()
+
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CreateSaleCryptoViewV2(decorators.APIView):
+    """
+    V2 — sell crypto at the fixed admin price (sale_price).
+    Amount in FCFA = total_crypto × crypto.sale_price
+    POST body: total_crypto, crypto_id, network_id, phone_number, wallet_link, hash
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        serializer = SaleCryptoV2Serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        vd = serializer.validated_data
+        crypto: Cryptocurrency = vd["_crypto"]
+        network: Network = vd["_network"]
+        amount: float = vd["_amount"]
+
+        sale_api = network.sale_api if hasattr(network, "sale_api") else "connect"
+
+        transaction = Transaction.objects.create(
+            user=request.user,
+            reference=generate_reference(prefix="crypto-sale-v2-"),
+            type_trans="sale",
+            crypto=crypto,
+            network=network,
+            amount=int(amount),
+            total_crypto=vd["total_crypto"],
+            phone_number=vd.get("phone_number") or "",
+            wallet_link=vd.get("wallet_link") or "",
+            hash=vd.get("hash") or "",
+            api=sale_api,
+            source=request.data.get("source", "mobile"),
+        )
+
+        TransactionStatusHistory.objects.create(
+            transaction=transaction,
+            old_status=transaction.status,
+            new_status=transaction.status,
+            trigger_source=TransactionStatusHistory.Source.SYSTEM,
+            message="Statut initial enregistré (crypto sale V2)",
+        )
+
+        # Sales wait for admin approval — no payment triggered here
+        transaction.refresh_from_db()
+
+        return Response(
+            TransactionDetailsSerializer(transaction).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+# ============================================================
+# QR Code endpoints for CryptoNetwork
+# ============================================================
+
+class CryptoNetworkQRCodeView(decorators.APIView):
+    """
+    GET /mobcash/crypto-network-qrcode?network_id=<id>
+    Returns the wallet address + a base64-encoded QR code PNG.
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, *args, **kwargs):
+        from io import BytesIO
+        import base64
+        try:
+            import qrcode
+            from PIL import Image as PilImage
+        except ImportError:
+            # Fallback: return address only without QR code
+            network_id = request.GET.get("network_id")
+            if not network_id:
+                return Response(
+                    {"error": "network_id parameter is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            try:
+                crypto_network = CryptoNetwork.objects.select_related("crypto").get(id=network_id)
+            except CryptoNetwork.DoesNotExist:
+                return Response({"error": "Crypto network not found"}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {
+                    "network_id": str(crypto_network.id),
+                    "network_name": crypto_network.name,
+                    "crypto": crypto_network.crypto.name if crypto_network.crypto else None,
+                    "address": crypto_network.address or "",
+                    "qr_code_base64": None,
+                    "qr_code_url": None,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        network_id = request.GET.get("network_id")
+        if not network_id:
+            return Response(
+                {"error": "network_id parameter is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            crypto_network = CryptoNetwork.objects.select_related("crypto").get(id=network_id)
+        except CryptoNetwork.DoesNotExist:
+            return Response(
+                {"error": "Crypto network not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not crypto_network.address:
+            return Response(
+                {"error": "No address configured for this crypto network"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(crypto_network.address)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+
+        buffer = BytesIO()
+        img.save(buffer, format="PNG")
+        buffer.seek(0)
+        img_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+        image_url = request.build_absolute_uri(
+            f"/mobcash/crypto-network-qrcode-image?network_id={network_id}"
+        )
+
+        return Response(
+            {
+                "network_id": str(crypto_network.id),
+                "network_name": crypto_network.name,
+                "crypto": crypto_network.crypto.name if crypto_network.crypto else None,
+                "address": crypto_network.address,
+                "qr_code_base64": f"data:image/png;base64,{img_base64}",
+                "qr_code_url": image_url,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class CryptoNetworkQRCodeImageView(decorators.APIView):
+    """
+    GET /mobcash/crypto-network-qrcode-image?network_id=<id>
+    Returns the QR code as a raw PNG image (Content-Type: image/png).
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, *args, **kwargs):
+        from io import BytesIO
+        from django.http import HttpResponse
+        try:
+            import qrcode
+            from PIL import Image as PilImage
+        except ImportError:
+            return Response(
+                {"error": "qrcode[pil] not installed on server. Run: pip install qrcode[pil]"},
+                status=status.HTTP_501_NOT_IMPLEMENTED,
+            )
+
+        network_id = request.GET.get("network_id")
+        if not network_id:
+            return Response(
+                {"error": "network_id parameter is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            crypto_network = CryptoNetwork.objects.select_related("crypto").get(id=network_id)
+        except CryptoNetwork.DoesNotExist:
+            return Response(
+                {"error": "Crypto network not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not crypto_network.address:
+            return Response(
+                {"error": "No address configured for this crypto network"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(crypto_network.address)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+
+        buffer = BytesIO()
+        img.save(buffer, format="PNG")
+        buffer.seek(0)
+
+        return HttpResponse(buffer.getvalue(), content_type="image/png")
