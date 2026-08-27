@@ -278,7 +278,77 @@ def round_up_half(n):
     return int(Decimal(n).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
+def _reuse_existing_wave_on_duplicate(
+    *,
+    transaction: Transaction,
+    body: dict,
+    setting,
+    amount: int,
+) -> None:
+    """
+    Connect Pro refuse un 2e Wave (même montant/téléphone) tant que le 1er est pending.
+    On ne crée rien de nouveau : on rattache public_id / lien de la session déjà ouverte.
+    """
+    existing_ref = body.get("existing_reference")
+    connect_pro_logger.warning(
+        f"[DEPOSIT_CONNECT] DUPLICATE_TRANSACTION txn={transaction.id} "
+        f"existing={existing_ref} status={body.get('existing_status')} — "
+        f"réutilisation de la session Wave existante"
+    )
+
+    # Appel parallèle : le 1er a peut‑être déjà sauvé public_id
+    try:
+        transaction.refresh_from_db(fields=["public_id", "transaction_link"])
+    except Exception:
+        pass
+
+    uid = transaction.public_id or body.get("existing_uid")
+    if not uid and isinstance(body.get("data"), dict):
+        uid = body["data"].get("uid")
+
+    # Txn locale qui a déjà ouvert cette session Wave
+    if not uid and existing_ref:
+        sibling = (
+            Transaction.objects.filter(connect_pro_response__contains=str(existing_ref))
+            .exclude(Q(public_id__isnull=True) | Q(public_id=""))
+            .exclude(pk=transaction.pk)
+            .order_by("-id")
+            .first()
+        )
+        if sibling:
+            uid = sibling.public_id
+            if sibling.transaction_link and not transaction.transaction_link:
+                transaction.transaction_link = sibling.transaction_link
+
+    # Sinon, récupérer le détail côté Connect (réf WBT ou uid)
+    if not uid and existing_ref:
+        existing = connect_pro_status(reference=existing_ref, is_wave=True)
+        if isinstance(existing, dict):
+            uid = existing.get("uid")
+            if not uid and isinstance(existing.get("data"), dict):
+                uid = existing["data"].get("uid")
+
+    if uid:
+        transaction.public_id = uid
+
+    if not transaction.transaction_link and setting and setting.wave_default_link:
+        transaction.transaction_link = setting.wave_default_link + f"?amount={amount}"
+
+    connect_pro_logger.info(
+        f"[DEPOSIT_CONNECT] session Wave réutilisée txn={transaction.id} "
+        f"public_id={transaction.public_id} ref={existing_ref}"
+    )
+
+
 def deposit_connect(transaction: Transaction):
+    # Évite de recréer une session Wave/MoMo si déjà ouverte
+    if transaction.public_id:
+        connect_pro_logger.info(
+            f"[DEPOSIT_CONNECT] public_id déjà présent txn={transaction.id} "
+            f"public_id={transaction.public_id} — skip création Connect"
+        )
+        return
+
     token = connect_pro_token()
     setting = Setting.objects.first()
     headers = {
@@ -305,12 +375,28 @@ def deposit_connect(transaction: Transaction):
         }
         try:
             response = requests.post(url, json=data, headers=headers, timeout=30)
-            connect_pro_logger.info(f" connect pro  response {response.json()}")
-            transaction.public_id = response.json().get("data").get("uid")
-            transaction.transaction_link = (
-                setting.wave_default_link + f"?amount={amount}"
-            )
-            transaction.connect_pro_response = str(response.content)
+            body = response.json() if response.content else {}
+            connect_pro_logger.info(f" connect pro  response {body}")
+            transaction.connect_pro_response = str(body)
+
+            if body.get("success") and isinstance(body.get("data"), dict):
+                transaction.public_id = body["data"].get("uid")
+                transaction.transaction_link = (
+                    setting.wave_default_link + f"?amount={amount}"
+                )
+            elif body.get("error") == "DUPLICATE_TRANSACTION":
+                # Pas d'erreur : on réutilise la session Wave déjà ouverte
+                _reuse_existing_wave_on_duplicate(
+                    transaction=transaction,
+                    body=body,
+                    setting=setting,
+                    amount=amount,
+                )
+            else:
+                connect_pro_logger.error(
+                    f"[DEPOSIT_CONNECT] Création Wave échouée txn={transaction.id}: "
+                    f"{body.get('message') or body}"
+                )
             transaction.save()
         except Exception as e:
             transaction.connect_pro_response = str(e)
@@ -338,20 +424,26 @@ def deposit_connect(transaction: Transaction):
         )
         try:
             response = requests.post(url, json=data, headers=headers, timeout=30)
+            body = response.json() if response.content else {}
             connect_pro_logger.info(
-                f"[CONNECT_MOMO_PAY] Response status={response.status_code} | body={response.text[:500]}"
+                f"[CONNECT_MOMO_PAY] Response status={response.status_code} | body={str(body)[:500]}"
             )
-            transaction.public_id = response.json().get("data").get("uid")
-            if transaction.network.name == "orange":
-                transaction.transaction_link = (
-                    setting.orange_default_link + f"&amount={amount}"
-                )
+            transaction.connect_pro_response = str(body)
+            if body.get("success") and isinstance(body.get("data"), dict):
+                transaction.public_id = body["data"].get("uid")
+                if transaction.network.name == "orange":
+                    transaction.transaction_link = (
+                        setting.orange_default_link + f"&amount={amount}"
+                    )
+                else:
+                    transaction.transaction_link = (
+                        setting.mtn_default_link
+                        + f"?amount={amount}&reference={transaction.reference}"
+                    )
             else:
-                transaction.transaction_link = (
-                    setting.mtn_default_link
-                    + f"?amount={amount}&reference={transaction.reference}"
+                connect_pro_logger.error(
+                    f"[CONNECT_MOMO_PAY] Échec txn={transaction.id}: {body.get('message') or body}"
                 )
-            transaction.connect_pro_response = str(response.content)
             transaction.save()
         except Exception as e:
             transaction.connect_pro_response = str(e)
