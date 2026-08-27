@@ -101,11 +101,13 @@ if [ -f "manage.py" ]; then
             warn "Commit précédent non disponible pour restauration"
         fi
         
-        # Redémarrer supervisorctl restart all
-        info "Redémarrage de tous les services Supervisor..."
-        sudo supervisorctl restart all || {
-            error "Erreur lors du redémarrage des services Supervisor"
-        }
+        # Redémarrer seulement Celery/Gunicorn de CE projet (pas restart all)
+        info "Redémarrage ciblé des services mobcash après rollback..."
+        sudo systemctl restart gunicorn_mobcash.service 2>/dev/null || true
+        sudo supervisorctl status 2>/dev/null | awk '/celery_mobcash/ {print $1}' | while read -r prog; do
+            [ -z "$prog" ] && continue
+            sudo supervisorctl restart "$prog" || true
+        done
         
         error "Déploiement annulé à cause d'erreurs de vérification Django"
         exit 1
@@ -153,59 +155,101 @@ else
     sudo systemctl status gunicorn_mobcash.service || true
 fi
 
-# Étape 5: Redémarrer tous les services Supervisor
-info "Étape 5: Redémarrage des services Supervisor..."
+# Étape 5: Isoler Celery mobcash puis redémarrer UNIQUEMENT ses services
+# (ne pas faire "supervisorctl restart all" — d'autres projets tournent sur le même serveur)
+info "Étape 5: Isolation Celery mobcash_inte + redémarrage ciblé..."
 
-# Trouver tous les fichiers de configuration supervisor
 SUPERVISOR_CONF_DIR="/etc/supervisor/conf.d"
-if [ -d "$SUPERVISOR_CONF_DIR" ]; then
-    # Lister tous les fichiers .conf
-    CONFIG_FILES=$(find "$SUPERVISOR_CONF_DIR" -name "*.conf" 2>/dev/null || true)
-    
-    if [ -n "$CONFIG_FILES" ]; then
-        info "Fichiers de configuration Supervisor trouvés:"
-        echo "$CONFIG_FILES" | while read -r conf_file; do
-            # Extraire le nom du service depuis le nom du fichier
-            service_name=$(basename "$conf_file" .conf)
-            info "  - $service_name"
-        done
-        
-        # Recharger la configuration supervisor
-        if sudo supervisorctl reread; then
-            info "Configuration Supervisor rechargée"
-        else
-            warn "Erreur lors du rechargement de la configuration Supervisor"
-        fi
-        
-        # Mettre à jour les services
-        if sudo supervisorctl update; then
-            info "Services Supervisor mis à jour"
-        else
-            warn "Erreur lors de la mise à jour des services Supervisor"
-        fi
-        
-        # Redémarrer tous les services
-        if sudo supervisorctl restart all; then
-            info "Tous les services Supervisor redémarrés"
-        else
-            warn "Erreur lors du redémarrage de tous les services Supervisor"
-            # Essayer de redémarrer individuellement
-            echo "$CONFIG_FILES" | while read -r conf_file; do
-                service_name=$(basename "$conf_file" .conf)
-                if sudo supervisorctl restart "$service_name"; then
-                    info "  ✓ $service_name redémarré"
-                else
-                    warn "  ✗ Échec du redémarrage de $service_name"
-                fi
-            done
-        fi
-        
-        # Afficher le statut
-        info "Statut des services Supervisor:"
-        sudo supervisorctl status || true
-    else
-        warn "Aucun fichier de configuration Supervisor trouvé dans $SUPERVISOR_CONF_DIR"
+CELERY_QUEUE="mobcash_inte"
+
+patch_mobcash_celery_queue() {
+    local conf_file="$1"
+    if [ ! -f "$conf_file" ]; then
+        return 1
     fi
+    # Uniquement les confs de CE projet
+    if ! grep -q "mobcash_inte_backend" "$conf_file" 2>/dev/null; then
+        return 1
+    fi
+    # Seulement les lignes worker (pas beat)
+    if ! grep -q "mobcash_inte_backend worker" "$conf_file" 2>/dev/null; then
+        return 1
+    fi
+
+    if grep -q -- "-Q ${CELERY_QUEUE}" "$conf_file" 2>/dev/null; then
+        info "  ✓ $(basename "$conf_file") : -Q ${CELERY_QUEUE} déjà présent"
+        return 0
+    fi
+
+    # Retirer un éventuel ancien -Q puis ajouter -Q mobcash_inte en fin de commande worker
+    sudo sed -i -E \
+        "/mobcash_inte_backend worker/ s/[[:space:]]+-Q[[:space:]]+[^[:space:]]+//g" \
+        "$conf_file"
+    sudo sed -i -E \
+        "/command=.*mobcash_inte_backend worker/ s|[[:space:]]*$| -Q ${CELERY_QUEUE}|" \
+        "$conf_file"
+
+    if grep -q -- "-Q ${CELERY_QUEUE}" "$conf_file" 2>/dev/null; then
+        info "  ✓ $(basename "$conf_file") : -Q ${CELERY_QUEUE} ajouté"
+        return 0
+    fi
+
+    warn "  ✗ Impossible d'ajouter -Q ${CELERY_QUEUE} dans $(basename "$conf_file") — à faire à la main"
+    return 1
+}
+
+if [ -d "$SUPERVISOR_CONF_DIR" ]; then
+    PATCHED_ANY=0
+    # Cibles connues + toute conf qui lance le worker mobcash_inte_backend
+    while IFS= read -r conf_file; do
+        [ -z "$conf_file" ] && continue
+        if patch_mobcash_celery_queue "$conf_file"; then
+            PATCHED_ANY=1
+        fi
+    done < <(
+        {
+            printf '%s\n' \
+                "$SUPERVISOR_CONF_DIR/celery_mobcash.conf" \
+                "$SUPERVISOR_CONF_DIR/celery_mobcash_worker.conf"
+            grep -l "mobcash_inte_backend worker" "$SUPERVISOR_CONF_DIR"/*.conf 2>/dev/null || true
+        } | sort -u
+    )
+
+    if [ "$PATCHED_ANY" -eq 0 ]; then
+        warn "Aucune conf Supervisor celery mobcash trouvée — worker non isolé automatiquement"
+    fi
+
+    if sudo supervisorctl reread; then
+        info "Configuration Supervisor rechargée"
+    else
+        warn "Erreur lors du rechargement de la configuration Supervisor"
+    fi
+
+    if sudo supervisorctl update; then
+        info "Services Supervisor mis à jour"
+    else
+        warn "Erreur lors de la mise à jour des services Supervisor"
+    fi
+
+    # Redémarrer seulement les programmes Celery de ce projet (jamais "restart all")
+    MOBCASH_CELERY_PROGS=$(sudo supervisorctl status 2>/dev/null | awk '/celery_mobcash/ {print $1}' || true)
+    if [ -n "$MOBCASH_CELERY_PROGS" ]; then
+        info "Redémarrage ciblé Celery mobcash:"
+        echo "$MOBCASH_CELERY_PROGS" | while read -r prog; do
+            [ -z "$prog" ] && continue
+            if sudo supervisorctl restart "$prog"; then
+                info "  ✓ $prog redémarré"
+            else
+                warn "  ✗ Échec redémarrage $prog"
+            fi
+        done
+    else
+        warn "Aucun programme supervisor celery_mobcash* trouvé"
+        warn "Ne redémarre PAS 'all' pour ne pas impacter les autres projets"
+    fi
+
+    info "Statut Celery mobcash:"
+    sudo supervisorctl status 2>/dev/null | grep -E "celery_mobcash|mobcash" || true
 else
     warn "Répertoire Supervisor non trouvé: $SUPERVISOR_CONF_DIR"
 fi
@@ -236,6 +280,24 @@ for module in "${CRITICAL_MODULES[@]}"; do
     fi
 done
 
+# Vérifier que Django pointe bien sur Redis DB isolé + file mobcash_inte
+info "Vérification isolation Celery (broker / file)..."
+python3 - <<'PY' || warn "Impossible de vérifier la config Celery Django"
+import os
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "mobcash_inte_backend.settings")
+import django
+django.setup()
+from django.conf import settings
+broker = getattr(settings, "CELERY_BROKER_URL", "")
+queue = getattr(settings, "CELERY_TASK_DEFAULT_QUEUE", "")
+print(f"  CELERY_BROKER_URL={broker}")
+print(f"  CELERY_TASK_DEFAULT_QUEUE={queue}")
+if "/2" not in str(broker) and not os.getenv("CELERY_BROKER_URL"):
+    print("  WARN: broker n'utilise pas Redis DB 2 — risque de collision avec d'autres projets")
+if queue != "mobcash_inte":
+    print(f"  WARN: file attendue mobcash_inte, trouvée: {queue!r}")
+PY
+
 echo ""
 echo "=========================================="
 info "Déploiement terminé avec succès!"
@@ -248,7 +310,7 @@ info "  - Vérification Django effectuée"
 info "  - Migrations générées puis appliquées (makemigrations + migrate)"
 info "  - Aucun backup/restore des clés chiffrées"
 info "  - Gunicorn redémarré"
-info "  - Services Supervisor redémarrés"
+info "  - Celery mobcash isolé (-Q mobcash_inte) et redémarré (pas restart all)"
 info "  - Vérifications Python effectuées"
 echo ""
 

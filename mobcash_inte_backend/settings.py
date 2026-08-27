@@ -607,12 +607,17 @@ SIMPLE_JWT = {
 
 """CELERY CONFIGURATION"""
 """CELERY CONFIGURATION"""
-CELERY_BROKER_URL = "redis://127.0.0.1:6379/0"
-CELERY_RESULT_BACKEND = "redis://127.0.0.1:6379/0"
+# Configuration Celery — broker/file isolés des autres projets sur le même serveur
+# (évite qu'un autre worker Redis /0 / queue "celery" vole les tâches)
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/2")
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://127.0.0.1:6379/2")
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = "UTC"
+CELERY_TASK_DEFAULT_QUEUE = "mobcash_inte"
+CELERY_TASK_DEFAULT_EXCHANGE = "mobcash_inte"
+CELERY_TASK_DEFAULT_ROUTING_KEY = "mobcash_inte"
 
 # Configuration des tâches périodiques Celery Beat
 CELERY_BEAT_SCHEDULE = {

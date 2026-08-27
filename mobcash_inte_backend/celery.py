@@ -9,6 +9,9 @@ app = Celery("mobcash_inte_backend")
 app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks()
 app.conf.broker_connection_retry_on_startup = True
+app.conf.task_default_queue = "mobcash_inte"
+app.conf.task_default_exchange = "mobcash_inte"
+app.conf.task_default_routing_key = "mobcash_inte"
 
 app.conf.beat_schedule = {
     'grant-coupon-publishing-permissions': {
