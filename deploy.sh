@@ -219,6 +219,45 @@ if [ -d "$SUPERVISOR_CONF_DIR" ]; then
         warn "Aucune conf Supervisor celery mobcash trouvée — worker non isolé automatiquement"
     fi
 
+    # Créer le beat s'il manque (poll BetMomo / FeexPay toutes les 30s)
+    # Ne touche pas aux autres projets — conf dédiée celery_mobcash_beat.conf
+    BEAT_CONF="$SUPERVISOR_CONF_DIR/celery_mobcash_beat.conf"
+    BEAT_EXISTS=$(sudo supervisorctl status 2>/dev/null | awk '/celery_mobcash.*beat|celery_mobcash_beat/ {print $1}' || true)
+    if [ -z "$BEAT_EXISTS" ] && [ ! -f "$BEAT_CONF" ]; then
+        # Réutilise le même venv / directory que le worker mobcash
+        WORKER_CONF="$SUPERVISOR_CONF_DIR/celery_mobcash.conf"
+        if [ -f "$WORKER_CONF" ]; then
+            VENV_CELERY=$(grep -E '^command=' "$WORKER_CONF" | head -1 | sed -E 's|^command=||; s|[[:space:]].*||')
+            WORK_DIR=$(grep -E '^directory=' "$WORKER_CONF" | head -1 | cut -d= -f2-)
+            RUN_USER=$(grep -E '^user=' "$WORKER_CONF" | head -1 | cut -d= -f2-)
+            if [ -n "$VENV_CELERY" ] && [ -n "$WORK_DIR" ]; then
+                info "Création conf Celery Beat manquante: $BEAT_CONF"
+                sudo tee "$BEAT_CONF" > /dev/null <<EOF
+[program:celery_mobcash_beat]
+command=${VENV_CELERY} -A mobcash_inte_backend beat --loglevel=info
+directory=${WORK_DIR}
+user=${RUN_USER:-root}
+numprocs=1
+stdout_logfile=/var/log/celery_mobcash_beat.log
+stderr_logfile=/var/log/celery_mobcash_beat_error.log
+autostart=true
+autorestart=true
+startsecs=10
+stopwaitsecs=60
+stopasgroup=true
+killasgroup=true
+priority=999
+EOF
+            else
+                warn "Impossible de déduire venv/directory pour créer le beat automatiquement"
+            fi
+        else
+            warn "Pas de celery_mobcash.conf — beat non créé automatiquement"
+        fi
+    else
+        info "Celery Beat mobcash déjà présent (conf ou process)"
+    fi
+
     if sudo supervisorctl reread; then
         info "Configuration Supervisor rechargée"
     else
@@ -232,6 +271,7 @@ if [ -d "$SUPERVISOR_CONF_DIR" ]; then
     fi
 
     # Redémarrer seulement les programmes Celery de ce projet (jamais "restart all")
+    # Inclut celery_mobcash, celery_mobcash_worker, celery_mobcash_beat
     MOBCASH_CELERY_PROGS=$(sudo supervisorctl status 2>/dev/null | awk '/celery_mobcash/ {print $1}' || true)
     if [ -n "$MOBCASH_CELERY_PROGS" ]; then
         info "Redémarrage ciblé Celery mobcash:"
@@ -250,6 +290,14 @@ if [ -d "$SUPERVISOR_CONF_DIR" ]; then
 
     info "Statut Celery mobcash:"
     sudo supervisorctl status 2>/dev/null | grep -E "celery_mobcash|mobcash" || true
+
+    # Sanity: le worker doit écouter mobcash_inte ; le beat doit être RUNNING
+    if ! sudo supervisorctl status 2>/dev/null | grep -qE "celery_mobcash.*RUNNING|celery_mobcash_beat.*RUNNING"; then
+        warn "Worker/Beat mobcash pas RUNNING — vérifier: sudo supervisorctl status | grep celery_mobcash"
+    fi
+    if ! sudo supervisorctl status 2>/dev/null | grep -qE "celery_mobcash_beat|celery_mobcash.*beat"; then
+        warn "Celery BEAT manquant → poll BetMomo (30s) ne tournera PAS"
+    fi
 else
     warn "Répertoire Supervisor non trouvé: $SUPERVISOR_CONF_DIR"
 fi

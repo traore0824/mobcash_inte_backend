@@ -13,21 +13,23 @@ app.conf.task_default_queue = "mobcash_inte"
 app.conf.task_default_exchange = "mobcash_inte"
 app.conf.task_default_routing_key = "mobcash_inte"
 
-app.conf.beat_schedule = {
-    'grant-coupon-publishing-permissions': {
-        'task': 'mobcash_inte.tasks.grant_coupon_publishing_permissions',
-        'schedule': crontab(hour=0, minute=0),
+# Fusionner avec CELERY_BEAT_SCHEDULE (settings) — ne pas écraser le poll BetMomo/FeexPay
+_extra_beat = {
+    "grant-coupon-publishing-permissions": {
+        "task": "mobcash_inte.tasks.grant_coupon_publishing_permissions",
+        "schedule": crontab(hour=0, minute=0),
     },
-    'grant-coupon-rating-permissions': {
-        'task': 'mobcash_inte.tasks.grant_coupon_rating_permissions',
-        'schedule': crontab(hour=0, minute=0),
+    "grant-coupon-rating-permissions": {
+        "task": "mobcash_inte.tasks.grant_coupon_rating_permissions",
+        "schedule": crontab(hour=0, minute=0),
     },
-    'expire-coupons': {
-        'task': 'mobcash_inte.tasks.expire_coupons',
-        'schedule': crontab(minute='*/30'),  # Toutes les 30 minutes
+    "expire-coupons": {
+        "task": "mobcash_inte.tasks.expire_coupons",
+        "schedule": crontab(minute="*/30"),
     },
-    'grant-daily-user-credits': {
-        'task': 'mobcash_inte.tasks.grant_daily_user_credits',
-        'schedule': crontab(hour=0, minute=0),  # Tous les jours à minuit
+    "grant-daily-user-credits": {
+        "task": "mobcash_inte.tasks.grant_daily_user_credits",
+        "schedule": crontab(hour=0, minute=0),
     },
 }
+app.conf.beat_schedule = {**(app.conf.beat_schedule or {}), **_extra_beat}
