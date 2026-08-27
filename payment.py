@@ -616,14 +616,25 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                 )
                 outcome = provider_outcome(xbet_response_data)
                 if outcome == "pending":
+                    op_ref = (
+                        (xbet_response_data or {}).get("OperationId")
+                        if isinstance(xbet_response_data, dict)
+                        else None
+                    )
+                    extra = []
+                    if op_ref and not transaction.betmomo_operation_ref:
+                        transaction.betmomo_operation_ref = op_ref
+                        extra.append("betmomo_operation_ref")
                     transaction.change_status(
                         new_status="init_payment",
                         source="API_RESPONSE",
                         data=xbet_response_data,
                         message="Dépôt BetMomo en attente de confirmation",
+                        extra_fields=extra or None,
                     )
                     connect_pro_logger.info(
-                        f"Transaction {transaction.id} BetMomo pending — polling statut"
+                        f"Transaction {transaction.id} BetMomo pending — polling statut "
+                        f"ref={transaction.betmomo_operation_ref}"
                     )
                     try:
                         from mobcash_inte.tasks import schedule_betmomo_status_check

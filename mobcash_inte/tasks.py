@@ -3,7 +3,6 @@ from django.utils import timezone
 from dateutil.relativedelta import relativedelta
 from django.db.models import Sum
 import logging
-import time
 
 logger = logging.getLogger("mobcash_inte_backend.transactions")
 @shared_task
@@ -128,6 +127,10 @@ def finalize_betmomo_transaction(txn) -> str:
     if txn.status not in ("init_payment", "pending"):
         return "skipped"
     if not txn.betmomo_operation_ref:
+        logger.warning(
+            "[BETMOMO] [FINALIZE] txn=%s sans betmomo_operation_ref — skip",
+            getattr(txn, "id", None),
+        )
         return "skipped"
     # Déjà validé côté betting + payout déjà lancé
     if txn.type_trans == "withdrawal" and txn.validated_at and txn.public_id:
@@ -255,41 +258,61 @@ def finalize_betmomo_transaction(txn) -> str:
     return "success"
 
 
-def schedule_betmomo_status_check(transaction_id) -> None:
-    """Planifie le check statut BetMomo (sleep 10s dans la tâche Celery)."""
-    try:
-        from django.db import transaction as db_transaction
+def schedule_betmomo_status_check(transaction_id, *, countdown: int = 10) -> None:
+    """
+    Planifie le check statut BetMomo après commit DB.
+    Nécessite un worker Celery actif — sinon la txn reste en init_payment.
+    """
+    from django.db import connection, transaction as db_transaction
 
-        db_transaction.on_commit(
-            lambda: check_betmomo_transaction_status.delay(transaction_id)
-        )
+    def _enqueue():
+        try:
+            async_result = check_betmomo_transaction_status.apply_async(
+                args=[transaction_id],
+                kwargs={"attempt": 1, "max_attempts": 6},
+                countdown=max(0, int(countdown)),
+            )
+            logger.info(
+                "[BETMOMO] [SCHEDULE] check planifié txn=%s countdown=%ss task_id=%s",
+                transaction_id,
+                countdown,
+                getattr(async_result, "id", None),
+            )
+        except Exception:
+            logger.exception(
+                "[BETMOMO] [SCHEDULE] échec enqueue txn=%s", transaction_id
+            )
+
+    try:
+        if connection.in_atomic_block:
+            db_transaction.on_commit(_enqueue)
+            logger.info(
+                "[BETMOMO] [SCHEDULE] on_commit enregistré txn=%s", transaction_id
+            )
+        else:
+            _enqueue()
     except Exception:
         logger.exception(
             "[BETMOMO] Impossible de planifier check statut txn=%s",
             transaction_id,
         )
-        try:
-            check_betmomo_transaction_status.delay(transaction_id)
-        except Exception:
-            logger.exception(
-                "[BETMOMO] Fallback delay échoué txn=%s", transaction_id
-            )
+        _enqueue()
 
 
-@shared_task
-def check_betmomo_transaction_status(transaction_id, attempt=1, max_attempts=3):
+@shared_task(bind=True, max_retries=0)
+def check_betmomo_transaction_status(self, transaction_id, attempt=1, max_attempts=6):
     """
-    Après dépôt/retrait BetMomo pending :
-    sleep 10s puis vérifie le statut. Si encore pending, retente (max 3).
+    Après dépôt/retrait BetMomo pending : vérifie le statut.
+    Si encore pending, retente avec countdown 10s (max_attempts).
     """
     from mobcash_inte.models import Transaction
 
     logger.info(
-        "[BETMOMO] [CHECK] Attente 10s avant check txn=%s attempt=%s",
+        "[BETMOMO] [CHECK] txn=%s attempt=%s/%s",
         transaction_id,
         attempt,
+        max_attempts,
     )
-    time.sleep(10)
 
     txn = (
         Transaction.objects.filter(id=transaction_id)
@@ -308,9 +331,11 @@ def check_betmomo_transaction_status(transaction_id, attempt=1, max_attempts=3):
         attempt,
     )
 
-    if result == "pending" and attempt < max_attempts:
-        check_betmomo_transaction_status.delay(
-            transaction_id, attempt=attempt + 1, max_attempts=max_attempts
+    if result in ("pending", "error") and attempt < max_attempts:
+        check_betmomo_transaction_status.apply_async(
+            args=[transaction_id],
+            kwargs={"attempt": attempt + 1, "max_attempts": max_attempts},
+            countdown=10,
         )
 
     return result
@@ -340,11 +365,25 @@ def poll_betmomo_pending_transactions():
     )
 
     processed = 0
+    pending_count = 0
     for txn in transactions:
         if not uses_betmomo(txn.app):
             continue
+        pending_count += 1
         result = finalize_betmomo_transaction(txn)
+        logger.info(
+            "[BETMOMO] [POLL] txn=%s ref=%s result=%s",
+            txn.id,
+            txn.betmomo_operation_ref,
+            result,
+        )
         if result in ("success", "failed"):
             processed += 1
 
+    if pending_count:
+        logger.info(
+            "[BETMOMO] [POLL] terminé: %s en file, %s finalisées",
+            pending_count,
+            processed,
+        )
     return processed

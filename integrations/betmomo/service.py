@@ -10,7 +10,13 @@ from .client import BetmomoClient
 
 logger = logging.getLogger("mobcash_inte")
 
-INITIATED_STATUSES = frozenset({"initiated", "pending"})
+INITIATED_STATUSES = frozenset({"initiated", "pending", "processing", "in_progress"})
+SUCCESS_STATUSES = frozenset(
+    {"success", "successful", "completed", "complete", "done", "ok", "confirmed"}
+)
+FAILED_STATUSES = frozenset(
+    {"failed", "failure", "error", "cancelled", "canceled", "rejected"}
+)
 
 
 def _extract_data(raw: dict) -> dict:
@@ -22,10 +28,14 @@ def _extract_data(raw: dict) -> dict:
 
 
 def normalize_betmomo_status(status: str) -> str:
-    """Mappe initiated → pending pour la logique interne."""
-    normalized = str(status or "").lower()
-    if normalized == "initiated":
+    """Mappe les variantes BeWallet vers pending | success | failed."""
+    normalized = str(status or "").strip().lower()
+    if normalized in INITIATED_STATUSES:
         return "pending"
+    if normalized in SUCCESS_STATUSES:
+        return "success"
+    if normalized in FAILED_STATUSES:
+        return "failed"
     return normalized
 
 
