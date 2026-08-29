@@ -526,7 +526,9 @@ class Transaction(models.Model):
         Change le statut de la transaction ET crée une entrée d'audit automatiquement.
         Remplace le pattern : transaction.status = "xxx" + track_status_change() + save()
         """
+        import json
         from django.utils import timezone as tz
+
         old_status = self.status
         self.status = new_status
         fields_to_update = ["status"]
@@ -556,12 +558,23 @@ class Transaction(models.Model):
         self.all_status = temp
         self.save(update_fields=["all_status"])
 
+        # JSONField strict : éviter rollback si data contient Decimal/datetime/objets
+        if isinstance(data, (dict, list)):
+            try:
+                trigger_data = json.loads(json.dumps(data, default=str))
+            except Exception:
+                trigger_data = {"raw_info": str(data)[:2000]}
+        elif data:
+            trigger_data = {"raw_info": str(data)[:2000]}
+        else:
+            trigger_data = {}
+
         TransactionStatusHistory.objects.create(
             transaction=self,
             old_status=old_status,
             new_status=new_status,
             trigger_source=source,
-            trigger_data=data if isinstance(data, (dict, list)) else {"raw_info": str(data)} if data else {},
+            trigger_data=trigger_data,
             message=message or f"Status changed from {old_status} to {new_status} via {source}",
         )
 
