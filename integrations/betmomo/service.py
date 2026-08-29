@@ -65,14 +65,49 @@ def parse_betmomo_write_response(raw: dict) -> Dict[str, Any]:
 def parse_betmomo_status_response(raw: dict) -> Dict[str, Any]:
     """Normalise une réponse de endpoint status."""
     data = _extract_data(raw)
-    status = normalize_betmomo_status(data.get("status", ""))
+    raw_status = (
+        data.get("status")
+        or data.get("state")
+        or data.get("transaction_status")
+        or data.get("payment_status")
+        or ""
+    )
+    status = normalize_betmomo_status(raw_status)
     return {
         "status": status,
         "amount": data.get("amount"),
         "reference": data.get("reference") or data.get("transaction_id"),
+        "transaction_id": data.get("transaction_id"),
         "data": data,
         "raw": raw,
     }
+
+
+def extract_betmomo_status_refs(
+    operation_ref: str | None,
+    mobcash_response: str | None = None,
+) -> list[str]:
+    """
+    BeWallet peut exposer le statut via reference (BWTSP...) OU transaction_id (WUTO...).
+    On tente les deux.
+    """
+    import re
+
+    refs: list[str] = []
+    for value in (operation_ref,):
+        if value and str(value).strip() and str(value).strip() not in refs:
+            refs.append(str(value).strip())
+
+    raw = str(mobcash_response or "")
+    for pattern in (
+        r"['\"]transaction_id['\"]\s*:\s*['\"]([^'\"]+)['\"]",
+        r"['\"]reference['\"]\s*:\s*['\"]([^'\"]+)['\"]",
+    ):
+        for match in re.finditer(pattern, raw):
+            candidate = match.group(1).strip()
+            if candidate and candidate not in refs:
+                refs.append(candidate)
+    return refs
 
 
 def build_mobcash_response_payload(parsed: dict, raw: dict) -> dict:
@@ -132,27 +167,54 @@ class BetMomoService:
         self,
         operation_ref: str,
         transaction_type: str,
+        *,
+        mobcash_response: str | None = None,
     ) -> Optional[dict]:
-        """Récupère les détails via l'endpoint status dédié."""
-        if not operation_ref:
+        """Récupère les détails via l'endpoint status (essaie reference + transaction_id)."""
+        refs = extract_betmomo_status_refs(operation_ref, mobcash_response)
+        if not refs:
             return None
 
-        try:
-            if transaction_type == "WITHDRAWAL":
-                raw = self._client.payout_status(operation_ref)
-            else:
-                raw = self._client.topup_status(operation_ref)
-            return parse_betmomo_status_response(raw)
-        except Exception as exc:
+        last_error = None
+        for ref in refs:
+            try:
+                if transaction_type == "WITHDRAWAL":
+                    raw = self._client.payout_status(ref)
+                else:
+                    raw = self._client.topup_status(ref)
+                parsed = parse_betmomo_status_response(raw)
+                logger.info(
+                    "[BETMOMO] [STATUS] type=%s ref=%s status=%s raw_keys=%s",
+                    transaction_type,
+                    ref,
+                    parsed.get("status"),
+                    list((parsed.get("data") or {}).keys())[:12],
+                )
+                # Même pending : on renvoie pour que l'appelant loggue / attende
+                if parsed.get("status") or parsed.get("data"):
+                    parsed["queried_ref"] = ref
+                    return parsed
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    "[BETMOMO] [STATUS] échec ref=%s type=%s: %s",
+                    ref,
+                    transaction_type,
+                    exc,
+                )
+
+        if last_error:
             logger.warning(
-                "Impossible de récupérer le statut BetMomo: %s",
-                exc,
+                "Impossible de récupérer le statut BetMomo après %s refs: %s",
+                len(refs),
+                last_error,
                 extra={
                     "operation_ref": operation_ref,
                     "transaction_type": transaction_type,
+                    "refs": refs,
                 },
             )
-            return None
+        return None
 
     def get_operation_status(
         self,

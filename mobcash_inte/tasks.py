@@ -144,13 +144,31 @@ def finalize_betmomo_transaction(txn) -> str:
 
     try:
         service = BetMomoService(token=token)
-        details = service.get_transaction_details(operation_ref, op_type)
+        details = service.get_transaction_details(
+            operation_ref,
+            op_type,
+            mobcash_response=getattr(txn, "mobcash_response", None),
+        )
         op_status = (details or {}).get("status") or ""
+        logger.info(
+            "[BETMOMO] [FINALIZE] txn=%s ref=%s api_status=%r queried=%s",
+            txn_id,
+            operation_ref,
+            op_status,
+            (details or {}).get("queried_ref"),
+        )
     except Exception as exc:
         logger.warning(
             "[BETMOMO] [FINALIZE] Erreur statut txn=%s: %s",
             txn_id,
             exc,
+        )
+        return "error"
+
+    if details is None:
+        logger.warning(
+            "[BETMOMO] [FINALIZE] txn=%s status API indisponible — retry plus tard",
+            txn_id,
         )
         return "error"
 
@@ -394,18 +412,18 @@ def poll_betmomo_pending_transactions():
         pending_count += 1
         result = finalize_betmomo_transaction(txn)
         logger.info(
-            "[BETMOMO] [POLL] txn=%s ref=%s result=%s",
+            "[BETMOMO] [POLL] txn=%s ref=%s status=%s result=%s",
             txn.id,
             txn.betmomo_operation_ref,
+            txn.status,
             result,
         )
         if result in ("success", "failed"):
             processed += 1
 
-    if pending_count:
-        logger.info(
-            "[BETMOMO] [POLL] terminé: %s en file, %s finalisées",
-            pending_count,
-            processed,
-        )
+    logger.info(
+        "[BETMOMO] [POLL] terminé: %s en file, %s finalisées",
+        pending_count,
+        processed,
+    )
     return processed
