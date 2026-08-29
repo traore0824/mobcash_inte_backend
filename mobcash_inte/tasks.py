@@ -199,7 +199,7 @@ def finalize_betmomo_transaction(txn) -> str:
     try:
         with db_transaction.atomic():
             locked = (
-                Transaction.objects.select_for_update()
+                Transaction.objects.select_for_update(of=("self",))
                 .select_related("app", "user", "network")
                 .filter(id=txn_id)
                 .first()
