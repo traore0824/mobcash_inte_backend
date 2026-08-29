@@ -949,7 +949,6 @@ class ConnectProWebhook(decorators.APIView):
                     f"[STEP 3] WebhookLog created={created}, processed={webhook_log.processed}"
                 )
 
-                # Si déjà en cours de traitement par une autre requête
                 if not created and webhook_log.processed:
                     connect_pro_logger.info(
                         f"[RACE-CONDITION] Webhook {uid} déjà traité"
@@ -958,8 +957,49 @@ class ConnectProWebhook(decorators.APIView):
                         {"message": "Webhook déjà traité"}, status=status.HTTP_200_OK
                     )
 
-                # Si déjà créé mais pas encore traité (retry)
+                # Retry uniquement si le 1er passage a planté AVANT le topup betting.
+                # Si BetMomo/init_payment a déjà une ref → ne pas rappeler create_deposit.
                 if not created and not webhook_log.processed:
+                    from mobcash_inte.models import Transaction as TxnModel
+
+                    existing_txn = (
+                        TxnModel.objects.filter(public_id=uid)
+                        .only("id", "status", "betmomo_operation_ref", "mobcash_response")
+                        .first()
+                    )
+                    if existing_txn and (
+                        existing_txn.betmomo_operation_ref
+                        or (
+                            existing_txn.status == "init_payment"
+                            and existing_txn.mobcash_response
+                        )
+                    ):
+                        connect_pro_logger.warning(
+                            f"[RETRY-SKIP] Webhook {uid} txn={existing_txn.id} "
+                            f"déjà soumis au betting (ref={existing_txn.betmomo_operation_ref}) "
+                            f"— pas de 2e topup, on marque processed"
+                        )
+                        webhook_log.processed = True
+                        webhook_log.processed_at = timezone.now()
+                        webhook_log.error_message = None
+                        webhook_log.save(
+                            update_fields=[
+                                "processed",
+                                "processed_at",
+                                "error_message",
+                            ]
+                        )
+                        try:
+                            from mobcash_inte.tasks import schedule_betmomo_status_check
+
+                            if existing_txn.betmomo_operation_ref:
+                                schedule_betmomo_status_check(existing_txn.id)
+                        except Exception:
+                            pass
+                        return Response(
+                            {"message": "Webhook déjà soumis au betting"},
+                            status=status.HTTP_200_OK,
+                        )
                     connect_pro_logger.warning(
                         f"[RETRY] Webhook {uid} en retry (erreur: {webhook_log.error_message})"
                     )

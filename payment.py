@@ -591,6 +591,38 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
         ) and transaction.status != "accept":
 
             try:
+                # Anti double-topup : un 2e webhook Connect pendant init_payment
+                # (BetMomo pending) rappellerait create_deposit → crédit x2.
+                transaction.refresh_from_db(
+                    fields=["status", "betmomo_operation_ref", "mobcash_response"]
+                )
+                if transaction.status == "accept":
+                    connect_pro_logger.warning(
+                        f"[DEDUP] txn={transaction.id} déjà accept — skip dépôt API"
+                    )
+                    return
+                if transaction.betmomo_operation_ref or (
+                    uses_betmomo(transaction.app)
+                    and transaction.mobcash_response
+                    and transaction.status == "init_payment"
+                ):
+                    connect_pro_logger.warning(
+                        f"[DEDUP] txn={transaction.id} dépôt BetMomo déjà soumis "
+                        f"ref={transaction.betmomo_operation_ref} "
+                        f"resp={str(transaction.mobcash_response)[:80]} — "
+                        f"pas de 2e appel API, polling uniquement"
+                    )
+                    try:
+                        from mobcash_inte.tasks import schedule_betmomo_status_check
+
+                        schedule_betmomo_status_check(transaction.id)
+                    except Exception as e:
+                        connect_pro_logger.error(
+                            f"Erreur schedule_betmomo_status_check dedup txn={transaction.id}: {e}",
+                            exc_info=True,
+                        )
+                    return
+
                 transaction.change_status(
                     new_status="init_payment",
                     source="WEBHOOK",
@@ -607,6 +639,11 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
                     transaction.deposit_reward_amount = bonus
                     transaction.net_payable_amout = amount
                     transaction.save()
+
+                # Claim avant l'HTTP BetMomo pour qu'un 2e webhook concurrent voie le flag
+                if uses_betmomo(transaction.app) and not transaction.betmomo_operation_ref:
+                    transaction.mobcash_response = "BETMOMO_DEPOSIT_IN_FLIGHT"
+                    transaction.save(update_fields=["mobcash_response"])
 
                 xbet_response_data = execute_platform_deposit(
                     transaction, amount=amount

@@ -114,148 +114,170 @@ def finalize_betmomo_transaction(txn) -> str:
     """
     Vérifie le statut BetMomo d'une transaction et met à jour si final.
     Retourne: skipped | pending | success | failed | error
+    Protégé par select_for_update pour éviter check+poll en parallèle
+    (double notif dépôt / double payout Connect retrait).
     """
+    from django.db import transaction as db_transaction
     from django.utils import timezone as dj_tz
 
     from integrations.betmomo.service import BetMomoService
     from mobcash_inte.helpers import get_betmomo_token, uses_betmomo
+    from mobcash_inte.models import Transaction
 
     if not txn or not uses_betmomo(txn.app):
         return "skipped"
-    # pending = retrait BetMomo réussi côté API mais planté avant init_payment
-    # (ex: montant négatif sur PositiveIntegerField)
-    if txn.status not in ("init_payment", "pending"):
-        return "skipped"
-    if not txn.betmomo_operation_ref:
-        logger.warning(
-            "[BETMOMO] [FINALIZE] txn=%s sans betmomo_operation_ref — skip",
-            getattr(txn, "id", None),
-        )
-        return "skipped"
-    # Déjà validé côté betting + payout déjà lancé
-    if txn.type_trans == "withdrawal" and txn.validated_at and txn.public_id:
-        return "skipped"
 
+    txn_id = txn.id
     token = get_betmomo_token(txn.app)
     if not token:
         return "skipped"
 
+    # Snapshot hors lock (appel HTTP ne doit pas bloquer la row longtemps)
     op_type = "WITHDRAWAL" if txn.type_trans == "withdrawal" else "DEPOSIT"
+    operation_ref = txn.betmomo_operation_ref
+    if not operation_ref:
+        logger.warning(
+            "[BETMOMO] [FINALIZE] txn=%s sans betmomo_operation_ref — skip",
+            txn_id,
+        )
+        return "skipped"
+
     try:
         service = BetMomoService(token=token)
-        details = service.get_transaction_details(txn.betmomo_operation_ref, op_type)
+        details = service.get_transaction_details(operation_ref, op_type)
         op_status = (details or {}).get("status") or ""
     except Exception as exc:
         logger.warning(
             "[BETMOMO] [FINALIZE] Erreur statut txn=%s: %s",
-            txn.id,
+            txn_id,
             exc,
         )
         return "error"
 
-    # Si l'API status ne répond pas mais la réponse initiale était déjà success
     if not op_status or op_status == "pending":
         raw = str(txn.mobcash_response or "")
         if '"Success": True' in raw or "'Success': True" in raw:
             if '"Pending": False' in raw or "'Pending': False" in raw:
                 op_status = "success"
-                details = details or {"status": "success", "reference": txn.betmomo_operation_ref}
+                details = details or {
+                    "status": "success",
+                    "reference": operation_ref,
+                }
             else:
                 return "pending"
         else:
             return "pending"
 
-    if op_status == "failed":
-        txn.change_status(
-            new_status="error",
-            source="API_RESPONSE",
-            data=details,
-            message="Opération BetMomo échouée",
-        )
-        try:
-            from payment import process_transaction_notifications_and_bonus
-
-            process_transaction_notifications_and_bonus.delay(
-                transaction_id=txn.id,
-                is_error=True,
-                error_message="Opération BetMomo échouée",
-            )
-        except Exception:
-            logger.exception("[BETMOMO] [FINALIZE] notification erreur txn=%s", txn.id)
-        return "failed"
-
-    if op_status != "success":
+    if op_status not in ("success", "failed"):
         return "pending"
 
-    if txn.type_trans == "withdrawal":
-        # Si déjà validé mais payout Connect jamais lancé → relancer le paiement
-        if txn.validated_at and not txn.public_id:
+    with db_transaction.atomic():
+        locked = (
+            Transaction.objects.select_for_update()
+            .select_related("app", "user", "network")
+            .filter(id=txn_id)
+            .first()
+        )
+        if not locked or not uses_betmomo(locked.app):
+            return "skipped"
+        if locked.status not in ("init_payment", "pending"):
+            return "skipped"
+        # Déjà validé + payout Connect lancé
+        if locked.type_trans == "withdrawal" and locked.validated_at and locked.public_id:
+            return "skipped"
+
+        if op_status == "failed":
+            locked.change_status(
+                new_status="error",
+                source="API_RESPONSE",
+                data=details,
+                message="Opération BetMomo échouée",
+            )
+            try:
+                from payment import process_transaction_notifications_and_bonus
+
+                process_transaction_notifications_and_bonus.delay(
+                    transaction_id=locked.id,
+                    is_error=True,
+                    error_message="Opération BetMomo échouée",
+                )
+            except Exception:
+                logger.exception(
+                    "[BETMOMO] [FINALIZE] notification erreur txn=%s", locked.id
+                )
+            return "failed"
+
+        if locked.type_trans == "withdrawal":
+            # Si déjà validé mais payout Connect jamais lancé → relancer une seule fois
+            if locked.validated_at and not locked.public_id:
+                try:
+                    from payment import connect_pro_withd_process
+
+                    locked.amount = abs(float(locked.amount or 0))
+                    locked.save(update_fields=["amount"])
+                    connect_pro_withd_process(locked, disbursements=True)
+                except Exception:
+                    logger.exception(
+                        "[BETMOMO] [FINALIZE] retry payout txn=%s", locked.id
+                    )
+                return "success"
+            if locked.validated_at:
+                return "skipped"
+
+            amount = BetMomoService.withdrawal_amount_from_details(details, {})
+            extra_fields = []
+            if amount:
+                locked.amount = abs(float(amount))
+            else:
+                locked.amount = abs(float(locked.amount or 0))
+            extra_fields.append("amount")
+            # Claim immédiat sous lock avant payout Connect
+            locked.validated_at = dj_tz.now()
+            locked.change_status(
+                new_status="init_payment",
+                source="API_RESPONSE",
+                data=details,
+                message="Retrait BetMomo confirmé, paiement en cours",
+                extra_fields=extra_fields + ["validated_at"],
+            )
             try:
                 from payment import connect_pro_withd_process
 
-                txn.amount = abs(float(txn.amount or 0))
-                txn.save(update_fields=["amount"])
-                connect_pro_withd_process(txn, disbursements=True)
+                connect_pro_withd_process(locked, disbursements=True)
             except Exception:
                 logger.exception(
-                    "[BETMOMO] [FINALIZE] retry payout txn=%s", txn.id
+                    "[BETMOMO] [FINALIZE] paiement retrait txn=%s", locked.id
                 )
             return "success"
-        if txn.validated_at:
+
+        if locked.status == "accept":
             return "skipped"
-        amount = BetMomoService.withdrawal_amount_from_details(details, {})
-        extra_fields = []
-        if amount:
-            txn.amount = abs(float(amount))
-            extra_fields.append("amount")
-        else:
-            txn.amount = abs(float(txn.amount or 0))
-            extra_fields.append("amount")
-        txn.change_status(
-            new_status="init_payment",
+
+        locked.validated_at = dj_tz.now()
+        locked.change_status(
+            new_status="accept",
             source="API_RESPONSE",
             data=details,
-            message="Retrait BetMomo confirmé, paiement en cours",
-            extra_fields=extra_fields,
+            message="Dépôt BetMomo confirmé",
+            extra_fields=["validated_at"],
         )
-        txn.validated_at = dj_tz.now()
-        txn.save(update_fields=["validated_at", "amount"])
+        if locked.type_trans == "reward":
+            from mobcash_inte.models import Bonus
+
+            Bonus.objects.filter(
+                user=locked.user, bonus_with=False, bonus_delete=False
+            ).update(bonus_with=True)
         try:
-            from payment import connect_pro_withd_process
+            from payment import (
+                check_solde,
+                process_transaction_notifications_and_bonus,
+            )
 
-            connect_pro_withd_process(txn, disbursements=True)
+            process_transaction_notifications_and_bonus.delay(transaction_id=locked.id)
+            check_solde.delay(transaction_id=locked.id)
         except Exception:
-            logger.exception("[BETMOMO] [FINALIZE] paiement retrait txn=%s", txn.id)
+            logger.exception("[BETMOMO] [FINALIZE] post-success txn=%s", locked.id)
         return "success"
-
-    if txn.status == "accept":
-        return "skipped"
-
-    txn.validated_at = dj_tz.now()
-    txn.change_status(
-        new_status="accept",
-        source="API_RESPONSE",
-        data=details,
-        message="Dépôt BetMomo confirmé",
-        extra_fields=["validated_at"],
-    )
-    if txn.type_trans == "reward":
-        from mobcash_inte.models import Bonus
-
-        Bonus.objects.filter(
-            user=txn.user, bonus_with=False, bonus_delete=False
-        ).update(bonus_with=True)
-    try:
-        from payment import (
-            check_solde,
-            process_transaction_notifications_and_bonus,
-        )
-
-        process_transaction_notifications_and_bonus.delay(transaction_id=txn.id)
-        check_solde.delay(transaction_id=txn.id)
-    except Exception:
-        logger.exception("[BETMOMO] [FINALIZE] post-success txn=%s", txn.id)
-    return "success"
 
 
 def schedule_betmomo_status_check(transaction_id, *, countdown: int = 10) -> None:
