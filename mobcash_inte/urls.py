@@ -54,6 +54,7 @@ urlpatterns = [
     path("upload/file", views.UploadFileView.as_view()),
     path("search-user", views.SearchUserBet.as_view()),
     path("v2/chatbot/message/", views.ChatbotMessageView.as_view()),
+    path("v2/chatbot/mark-read/", views.ChatbotMarkReadView.as_view()),
     path("v2/chatbot/webhook/", ChatbotWebhookView.as_view()),
     path("v2/chatbot/human-messages/", ChatbotHumanMessagesView.as_view()),
     path(

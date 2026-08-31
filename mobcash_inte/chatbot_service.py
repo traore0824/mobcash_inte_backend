@@ -159,3 +159,84 @@ def send_chatbot_message(
         return body if isinstance(body, dict) else {"detail": str(body)}, out_status
 
     return body if isinstance(body, dict) else {"detail": str(body)}, response.status_code
+
+
+def get_chatbot_mark_read_url() -> str:
+    override = (os.getenv("MYCUSTOMER_CHATBOT_MARK_READ_URL") or "").strip()
+    if override:
+        return override.rstrip("/")
+    wa = get_whatsapp_base_url().rstrip("/")
+    if wa.endswith("/v1"):
+        return f"{wa[:-3]}/sdk/mark-read/"
+    if wa.endswith("/api"):
+        return f"{wa}/sdk/mark-read/"
+    return f"{wa}/sdk/mark-read/"
+
+
+def mark_chatbot_read(*, conversation_id: str) -> tuple[dict, int]:
+    setting = Setting.objects.first()
+    if not setting or not setting.use_chatbot:
+        return {"detail": "Chatbot désactivé.", "code": "chatbot_disabled"}, 403
+    if not setting.openwa_token:
+        return {"detail": "Clé My Customer manquante.", "code": "missing_api_key"}, 503
+    cid = (conversation_id or "").strip()
+    if not cid:
+        return {"detail": "conversation_id est requis."}, 400
+
+    url = get_chatbot_mark_read_url()
+    headers = {
+        "X-API-Key": setting.openwa_token,
+        "Content-Type": "application/json",
+    }
+    try:
+        response = requests.post(
+            url,
+            headers=headers,
+            json={"conversation_id": cid},
+            timeout=(10, 20),
+        )
+    except requests.RequestException as exc:
+        logger.exception("Chatbot mark-read failed: %s", exc)
+        return {"detail": "Service chatbot indisponible.", "code": "upstream_error"}, 502
+
+    try:
+        body = response.json()
+    except Exception:
+        body = {"detail": "Réponse chatbot invalide.", "code": "invalid_upstream"}
+    if response.status_code >= 400:
+        out_status = 502 if response.status_code >= 500 else response.status_code
+        return body if isinstance(body, dict) else {"detail": str(body)}, out_status
+    return body if isinstance(body, dict) else {"detail": str(body)}, response.status_code
+
+
+def fetch_chatbot_read_status(*, conversation_id: str) -> tuple[dict, int]:
+    setting = Setting.objects.first()
+    if not setting or not setting.use_chatbot:
+        return {"detail": "Chatbot désactivé.", "code": "chatbot_disabled"}, 403
+    if not setting.openwa_token:
+        return {"detail": "Clé My Customer manquante.", "code": "missing_api_key"}, 503
+    cid = (conversation_id or "").strip()
+    if not cid:
+        return {"detail": "conversation_id est requis."}, 400
+
+    url = get_chatbot_mark_read_url()
+    headers = {"X-API-Key": setting.openwa_token}
+    try:
+        response = requests.get(
+            url,
+            headers=headers,
+            params={"conversation_id": cid},
+            timeout=(10, 20),
+        )
+    except requests.RequestException as exc:
+        logger.exception("Chatbot read-status failed: %s", exc)
+        return {"detail": "Service chatbot indisponible.", "code": "upstream_error"}, 502
+
+    try:
+        body = response.json()
+    except Exception:
+        body = {"detail": "Réponse chatbot invalide.", "code": "invalid_upstream"}
+    if response.status_code >= 400:
+        out_status = 502 if response.status_code >= 500 else response.status_code
+        return body if isinstance(body, dict) else {"detail": str(body)}, out_status
+    return body if isinstance(body, dict) else {"detail": str(body)}, response.status_code

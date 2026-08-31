@@ -232,6 +232,29 @@ class ChatbotMessageView(decorators.APIView):
         return Response(body, status=code)
 
 
+class ChatbotMarkReadView(decorators.APIView):
+    """Proxy → My Customer /sdk/mark-read/ (accusé de lecture client)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        from mobcash_inte.chatbot_service import mark_chatbot_read
+
+        data = request.data if hasattr(request.data, "get") else {}
+        body, code = mark_chatbot_read(
+            conversation_id=str(data.get("conversation_id") or "").strip(),
+        )
+        return Response(body, status=code)
+
+    def get(self, request):
+        from mobcash_inte.chatbot_service import fetch_chatbot_read_status
+
+        body, code = fetch_chatbot_read_status(
+            conversation_id=str(request.GET.get("conversation_id") or "").strip(),
+        )
+        return Response(body, status=code)
+
+
 class CreateNetworkView(generics.ListCreateAPIView):
     serializer_class = NetworkSerializer
 

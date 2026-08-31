@@ -58,6 +58,10 @@ def notify_user_chatbot_reply(
         body = "Nouveau message vocal"
     elif kind == "image":
         body = "Nouvelle image"
+    elif kind == "video":
+        body = "Nouvelle vidéo"
+    elif kind == "document":
+        body = "Nouveau document"
     else:
         body = (content or "").strip() or "Nouveau message"
     if len(body) > 180:
@@ -117,12 +121,28 @@ class ChatbotWebhookView(APIView):
         content = (data.get("message") or "").strip()
         media_type = (data.get("media_type") or "text").strip().lower()
         media_url = (data.get("media_url") or "").strip()
-        if media_type not in {"text", "audio", "image"}:
-            media_type = "text"
+        if media_type not in {"text", "audio", "image", "video", "document"}:
+            # Heuristique : PDF / doc envoyés avant le support explicite
+            lower_url = media_url.lower()
+            if ".pdf" in lower_url or "/human_doc_" in lower_url:
+                media_type = "document"
+            elif any(ext in lower_url for ext in (".mp4", ".webm", ".mov")):
+                media_type = "video"
+            else:
+                media_type = "text"
         if not conversation_id or (not content and not media_url):
             return Response({"detail": "conversation_id et message requis."}, status=400)
         if not content:
-            content = "Message vocal" if media_type == "audio" else "Image"
+            if media_type == "audio":
+                content = "Message vocal"
+            elif media_type == "image":
+                content = "Image"
+            elif media_type == "video":
+                content = "Vidéo"
+            elif media_type == "document":
+                content = "Document"
+            else:
+                content = "Message"
 
         customer = data.get("customer") or {}
         remote_id = (data.get("message_id") or "").strip() or None
