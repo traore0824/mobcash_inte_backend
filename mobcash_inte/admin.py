@@ -41,6 +41,7 @@ class NetworkAdmin(admin.ModelAdmin):
         "deposit_api",
         "withdrawal_api",
         "payment_by_link",
+        "wave_business",
         "otp_required",
         "active_for_deposit",
         "active_for_with",
@@ -54,6 +55,7 @@ class NetworkAdmin(admin.ModelAdmin):
         "withdrawal_api",
         "otp_required",
         "payment_by_link",
+        "wave_business",
         "active_for_deposit",
         "active_for_with",
         "customer_pay_fee",
@@ -103,6 +105,16 @@ class NetworkAdmin(admin.ModelAdmin):
                     "customer_pay_fee",
                     "manual_processing",
                 )
+            },
+        ),
+        (
+            "Wave",
+            {
+                "fields": (
+                    "wave_business",
+                    "wave_personnel_numero",
+                ),
+                "description": "Wave Business = lien Connect. Sinon numéro personnel affiché au client.",
             },
         ),
         (

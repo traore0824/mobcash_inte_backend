@@ -317,6 +317,8 @@ class TransactionDetailsSerializer(serializers.ModelSerializer):
     user = SmallUserSerializer()
     app_details = serializers.SerializerMethodField()
     crypto = serializers.SerializerMethodField()
+    wave_business = serializers.SerializerMethodField()
+    wave_personnel_numero = serializers.SerializerMethodField()
 
     class Meta:
         model = Transaction
@@ -324,6 +326,22 @@ class TransactionDetailsSerializer(serializers.ModelSerializer):
 
     def get_app_details(self, obj):
         return ReadAppNameSerializer(obj.app).data
+
+    def get_wave_business(self, obj):
+        network = getattr(obj, "network", None)
+        if network and network.name == "wave":
+            return bool(getattr(network, "wave_business", True))
+        return None
+
+    def get_wave_personnel_numero(self, obj):
+        network = getattr(obj, "network", None)
+        if (
+            network
+            and network.name == "wave"
+            and not getattr(network, "wave_business", True)
+        ):
+            return getattr(network, "wave_personnel_numero", None)
+        return None
 
     def get_crypto(self, obj):
         if obj.crypto:

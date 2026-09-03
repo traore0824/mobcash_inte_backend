@@ -296,6 +296,18 @@ class Network(models.Model):
         null=True,
         help_text="URL de l'exemple de capture d'écran à envoyer au client lors d'une demande de preuve.",
     )
+    # Wave Business (Connect Pro + lien) vs Wave personnel (numéro marchand manuel)
+    wave_business = models.BooleanField(
+        default=True,
+        help_text="Si True (défaut): dépôt Wave via Connect Business + lien. "
+        "Si False: paiement manuel vers wave_personnel_numero.",
+    )
+    wave_personnel_numero = models.CharField(
+        max_length=30,
+        blank=True,
+        null=True,
+        help_text="Numéro Wave personnel/marchand affiché au client quand wave_business=False.",
+    )
 
 
 class Setting(models.Model):

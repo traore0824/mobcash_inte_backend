@@ -362,6 +362,26 @@ def deposit_connect(transaction: Transaction):
         amount = int(amount - fee)
 
     if transaction.network.name == "wave":
+        # Wave personnel : pas d'appel Connect Business, pas de lien —
+        # le front affiche wave_personnel_numero pour un envoi manuel.
+        if not getattr(transaction.network, "wave_business", True):
+            connect_pro_logger.info(
+                "[DEPOSIT_CONNECT] Wave personnel txn=%s numero=%s — skip Connect Business",
+                transaction.id,
+                getattr(transaction.network, "wave_personnel_numero", None),
+            )
+            transaction.transaction_link = None
+            transaction.connect_pro_response = str(
+                {
+                    "wave_business": False,
+                    "wave_personnel_numero": transaction.network.wave_personnel_numero,
+                }
+            )
+            transaction.save(
+                update_fields=["transaction_link", "connect_pro_response"]
+            )
+            return
+
         connect_pro_logger.info("debut de creatuion de transaction wave")
         url = CONNECT_PRO_BASE_URL + "/api/payments/wave-business-transactions/"
         data = {
