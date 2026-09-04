@@ -652,6 +652,50 @@ def _mark_deposit_accept_aligned(transaction: Transaction) -> bool:
         return False
 
 
+def _deposit_await_proof_agent_message(
+    transaction: Transaction,
+    *,
+    phone_number: str = "",
+    connect_meta: dict | None = None,
+) -> str:
+    """Rapport agent : paiement MM non confirmé — ne pas approuver sans preuve."""
+    app_label = _app_public_label(transaction)
+    payer = (
+        (transaction.phone_number or "").strip()
+        or (phone_number or "").strip()
+        or "N/A"
+    )
+    player = (transaction.user_app_id or "").strip() or "N/A"
+    amount = transaction.amount or 0
+    connect = connect_meta if isinstance(connect_meta, dict) else {}
+    connect_ok = connect.get("ok")
+    connect_status = (connect.get("status") or connect.get("class") or "").strip() or "n/a"
+    if connect_ok is True:
+        connect_line = f"• Connect : confirmé ({connect_status})"
+    elif connect_ok is False:
+        connect_line = f"• Connect : NON confirmé ({connect_status})"
+    else:
+        connect_line = f"• Connect : non vérifié / non confirmé ({connect_status})"
+    mobcash = _mobcash_success_flag(transaction)
+    if mobcash is True:
+        credit_line = f"• Crédit jeu ({app_label}) : déjà OK"
+    elif mobcash is False:
+        credit_line = f"• Crédit jeu ({app_label}) : non crédité"
+    else:
+        credit_line = f"• Crédit jeu ({app_label}) : inconnu"
+    return (
+        "À vérifier — dépôt : paiement Mobile Money NON confirmé\n\n"
+        f"• Référence : {transaction.reference}\n"
+        f"• Montant : {amount} FCFA\n"
+        f"• ID joueur : {player}\n"
+        f"• Numéro payeur : {payer}\n"
+        f"{connect_line}\n"
+        f"{credit_line}\n"
+        "• **Recommandation : NE PAS approuver.** Attendre la capture / preuve SMS.\n"
+        "  Si preuve OK → Approuver. Sinon → Refuser."
+    )
+
+
 def _deposit_credit_pending_agent_message(
     transaction: Transaction,
     *,
@@ -1284,6 +1328,11 @@ def build_lookup_response(
             phone_match=True,
             connect=connect_meta,
             transfer_retry={"attempted": False, "success": None},
+            agent_message=_deposit_await_proof_agent_message(
+                transaction,
+                phone_number=phone_number,
+                connect_meta=connect_meta if isinstance(connect_meta, dict) else None,
+            ),
         ), status.HTTP_200_OK
 
     # --- Retrait ---
@@ -1542,6 +1591,10 @@ def build_confirm_payment_response(
             phone_match=True,
             money_sent=True if money_sent else None,
             needs_escalation=False,
+            agent_message=_deposit_await_proof_agent_message(
+                transaction,
+                phone_number=payer_phone,
+            ),
         ), status.HTTP_200_OK
 
     # Lecture seule : aligné sur verify-sms (client) + rapport agent simple.
