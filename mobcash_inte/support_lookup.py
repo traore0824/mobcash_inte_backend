@@ -243,14 +243,21 @@ def _connect_status_payload(transaction: Transaction) -> dict | None:
 
 
 def _extract_connect_sms_items(payload: dict | None) -> list[dict]:
-    """Extrais les SMS Connect (texte + méta) pour le rapport conseiller."""
+    """Extrais les SMS / notifications Connect pour le rapport conseiller.
+
+    Wave / momo-pay mettent souvent la preuve dans ``fcm_notifications``
+    (pas dans ``sms``).
+    """
     if not isinstance(payload, dict):
         return []
-    raw_list = payload.get("sms")
-    if not isinstance(raw_list, list):
-        return []
+    raw_list: list = []
+    for key in ("sms", "fcm_notifications", "notifications", "messages"):
+        chunk = payload.get(key)
+        if isinstance(chunk, list):
+            raw_list.extend(chunk)
     items: list[dict] = []
-    for entry in raw_list[:3]:
+    seen: set[str] = set()
+    for entry in raw_list:
         if not isinstance(entry, dict):
             continue
         data = entry.get("data") if isinstance(entry.get("data"), dict) else {}
@@ -264,17 +271,23 @@ def _extract_connect_sms_items(payload: dict | None) -> list[dict]:
             or ""
         )
         body = str(body).strip()
-        if not body:
+        if not body or body in seen:
             continue
+        seen.add(body)
         items.append(
             {
                 "body": body[:500],
                 "amount": data.get("amount", entry.get("amount")),
                 "phone": data.get("phone", entry.get("phone")),
                 "timestamp": entry.get("timestamp") or data.get("timestamp"),
+                "source": str(entry.get("source") or "").strip(),
             }
         )
+        if len(items) >= 3:
+            break
     return items
+
+
 
 
 def _connect_sms_items_as_nearby(sms_items: list[dict]) -> list[dict]:
@@ -589,15 +602,9 @@ def _connect_proof_lines_for_agent(
     *,
     connect_status: str | None = None,
 ) -> str:
-    """Preuve Connect lisible pour le rapport agent (SMS / confirmed_at)."""
+    """Preuve Connect lisible pour le rapport agent (SMS/notif en priorité)."""
     lines: list[str] = []
     if isinstance(connect_payload, dict):
-        confirmed = str(connect_payload.get("confirmed_at") or "").strip()
-        if confirmed:
-            lines.append(f"confirmed_at: {confirmed}")
-        st = (connect_status or _connect_status_value(connect_payload) or "").strip()
-        if st:
-            lines.append(f"statut Connect: {st}")
         sms_items = _extract_connect_sms_items(connect_payload)
         for i, item in enumerate(sms_items, 1):
             body = str(
@@ -606,14 +613,29 @@ def _connect_proof_lines_for_agent(
                 or item.get("text")
                 or ""
             ).strip()
-            if body:
-                lines.append(f"SMS {i}: {body[:400]}")
+            if not body:
+                continue
+            source = str(item.get("source") or "").strip().lower()
+            label = "Notification" if source == "notification" else "SMS / notif"
+            lines.append(f"{label} {i}: {body[:400]}")
             amt = item.get("amount")
             if amt not in (None, ""):
-                lines.append(f"  montant SMS: {amt}")
+                lines.append(f"  montant: {amt}")
+        confirmed = str(connect_payload.get("confirmed_at") or "").strip()
+        if confirmed:
+            lines.append(f"Confirmé Connect le: {confirmed}")
+        st = (connect_status or _connect_status_value(connect_payload) or "").strip()
+        if st:
+            lines.append(f"Statut Connect: {st}")
     if not lines:
         return "Preuve Connect disponible (paiement confirmé), détail SMS non disponible."
+    if not any(l.startswith(("SMS", "Notification")) for l in lines):
+        return (
+            "Preuve Connect (paiement confirmé), mais SMS/notification non renvoyé.\n"
+            + "\n".join(lines)
+        )
     return "\n".join(lines)
+
 
 
 def _mark_deposit_accept_aligned(transaction: Transaction) -> bool:
