@@ -216,6 +216,8 @@ class SettingMobileSerializer(serializers.ModelSerializer):
             "whatsapp_phone",
             "telegram",
             "dowload_apk_link",
+            "min_version",
+            "last_version",
             "use_whatsapp",
             "use_chatbot",
             "open_whatsapp_for_support",
