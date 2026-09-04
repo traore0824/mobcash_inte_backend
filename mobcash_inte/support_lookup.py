@@ -602,38 +602,58 @@ def _connect_proof_lines_for_agent(
     *,
     connect_status: str | None = None,
 ) -> str:
-    """Preuve Connect lisible pour le rapport agent (SMS/notif en priorité)."""
-    lines: list[str] = []
+    """Preuve Connect pour le rapport agent — style SMS UI ([[SMS_LIST]]…[[/SMS_LIST]])."""
+    meta_lines: list[str] = []
+    sms_entries: list[dict] = []
     if isinstance(connect_payload, dict):
-        sms_items = _extract_connect_sms_items(connect_payload)
-        for i, item in enumerate(sms_items, 1):
+        for item in _extract_connect_sms_items(connect_payload):
             body = str(
                 item.get("body")
                 or item.get("original_body")
                 or item.get("text")
                 or ""
             ).strip()
-            if not body:
-                continue
-            source = str(item.get("source") or "").strip().lower()
-            label = "Notification" if source == "notification" else "SMS / notif"
-            lines.append(f"{label} {i}: {body[:400]}")
-            amt = item.get("amount")
-            if amt not in (None, ""):
-                lines.append(f"  montant: {amt}")
+            if body:
+                sms_entries.append(item)
         confirmed = str(connect_payload.get("confirmed_at") or "").strip()
         if confirmed:
-            lines.append(f"Confirmé Connect le: {confirmed}")
+            meta_lines.append(f"Confirmé Connect le: {confirmed}")
         st = (connect_status or _connect_status_value(connect_payload) or "").strip()
         if st:
-            lines.append(f"Statut Connect: {st}")
-    if not lines:
+            meta_lines.append(f"Statut Connect: {st}")
+
+    if not sms_entries:
+        if meta_lines:
+            return (
+                "Preuve Connect (paiement confirmé), mais SMS/notification non renvoyé.\n"
+                + "\n".join(meta_lines)
+            )
         return "Preuve Connect disponible (paiement confirmé), détail SMS non disponible."
-    if not any(l.startswith(("SMS", "Notification")) for l in lines):
-        return (
-            "Preuve Connect (paiement confirmé), mais SMS/notification non renvoyé.\n"
-            + "\n".join(lines)
-        )
+
+    n = len(sms_entries)
+    lines = [
+        f"Voici les {n} derniers SMS/notifications (preuve de paiement) :",
+        f"[[SMS_LIST count={n}]]",
+    ]
+    for i, item in enumerate(sms_entries, 1):
+        body = str(item.get("body") or "").replace("\r\n", "\n").strip()[:500]
+        lines.append(f"[[SMS i={i}]]")
+        lines.append(body or "(vide)")
+        meta_parts = []
+        ts = item.get("timestamp")
+        amt = item.get("amount")
+        if ts:
+            meta_parts.append(f"ts={ts}")
+        if amt not in (None, ""):
+            meta_parts.append(f"montant={amt}")
+        source = str(item.get("source") or "").strip()
+        if source:
+            meta_parts.append(f"source={source}")
+        if meta_parts:
+            lines.append(f"meta: {', '.join(meta_parts)}")
+        lines.append("[[/SMS]]")
+    lines.append("[[/SMS_LIST]]")
+    lines.extend(meta_lines)
     return "\n".join(lines)
 
 
@@ -780,25 +800,41 @@ def _deposit_credit_pending_agent_message(
 
 
 def _format_verify_matched_sms_lines(connect_result: dict | None) -> str:
-    """Corps SMS matchés (candidates) pour la preuve agent."""
+    """Corps SMS matchés (candidates) — style SMS UI agent."""
     if not isinstance(connect_result, dict):
         return "  (détail SMS non disponible)"
-    lines: list[str] = []
+    entries: list[dict] = []
     raw = connect_result.get("candidates")
     if isinstance(raw, list):
         for entry in raw[:3]:
-            if not isinstance(entry, dict):
-                continue
-            body = (_nearby_body(entry) or "").strip()
-            if body:
-                lines.append(f"  {body[:400]}")
-    if not lines:
+            if isinstance(entry, dict) and (_nearby_body(entry) or "").strip():
+                entries.append(entry)
+    if not entries:
         for entry in _sms_entries_from_verify(connect_result)[:3]:
-            body = (_nearby_body(entry) or "").strip()
-            if body:
-                lines.append(f"  {body[:400]}")
-    if not lines:
+            if isinstance(entry, dict) and (_nearby_body(entry) or "").strip():
+                entries.append(entry)
+    if not entries:
         return "  (détail SMS non disponible)"
+    n = len(entries)
+    lines = [
+        f"Voici les {n} derniers SMS/notifications (preuve de paiement) :",
+        f"[[SMS_LIST count={n}]]",
+    ]
+    for i, entry in enumerate(entries, 1):
+        body = (_nearby_body(entry) or "(vide)").replace("\r\n", "\n").strip()[:500]
+        lines.append(f"[[SMS i={i}]]")
+        lines.append(body)
+        meta_parts = []
+        ts = entry.get("timestamp") or entry.get("received_at") or ""
+        amount = entry.get("amount")
+        if ts:
+            meta_parts.append(f"ts={ts}")
+        if amount not in (None, ""):
+            meta_parts.append(f"montant={amount}")
+        if meta_parts:
+            lines.append(f"meta: {', '.join(meta_parts)}")
+        lines.append("[[/SMS]]")
+    lines.append("[[/SMS_LIST]]")
     return "\n".join(lines)
 
 
