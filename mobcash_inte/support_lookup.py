@@ -832,6 +832,56 @@ def _sms_proof_not_found_agent_message(
     )
 
 
+def _sms_proof_connect_issue_agent_message(
+    transaction: Transaction,
+    *,
+    result_key: str,
+    nearby: list[dict] | None = None,
+) -> str:
+    """Rapport agent : Connect Pro indisponible / introuvable — décision manuelle."""
+    app_label = _app_public_label(transaction)
+    payer = (transaction.phone_number or "").strip() or "N/A"
+    player = (transaction.user_app_id or "").strip() or "N/A"
+    amount = transaction.amount or 0
+    key = (result_key or "").strip().lower()
+    if key == "tx_not_found":
+        connect_line = (
+            "• **Connect Pro : transaction liée INTROUVABLE** "
+            "(impossible de valider automatiquement la preuve)."
+        )
+        title = "À vérifier — dépôt : Connect Pro introuvable"
+    elif key == "forbidden":
+        connect_line = (
+            "• **Connect Pro : vérification de preuve REFUSÉE / impossible.**"
+        )
+        title = "À vérifier — dépôt : vérification Connect impossible"
+    elif key == "tx_already_success":
+        connect_line = (
+            "• **Connect Pro : transaction déjà marquée en succès côté opérateur.**"
+        )
+        title = f"À vérifier — dépôt : déjà succès opérateur, compte {app_label} ?"
+    else:
+        connect_line = (
+            f"• **Connect Pro : résultat technique « {key or 'inconnu'} ».**"
+        )
+        title = "À vérifier — dépôt : preuve à contrôler manuellement"
+    nearby_block = _format_nearby_for_agent(nearby or [])
+    if not nearby_block:
+        nearby_block = "Aucun SMS / notification récent pour ce numéro."
+    return (
+        f"{title}\n\n"
+        f"• Référence : {transaction.reference}\n"
+        f"• Montant TX : {amount} FCFA\n"
+        f"• ID joueur : {player}\n"
+        f"• Numéro payeur : {payer}\n"
+        f"{connect_line}\n"
+        f"{nearby_block}\n"
+        "• **Recommandation : vérifier la capture manuellement.**\n"
+        "  Ne pas Approuver Connect tant que la preuve n'est pas claire.\n"
+        f"  Si preuve OK → Approuver (crédit {app_label}). Sinon → Refuser."
+    )
+
+
 def _sms_verify_agent_message(
     transaction: Transaction,
     *,
@@ -851,7 +901,19 @@ def _sms_verify_agent_message(
             transaction,
             nearby=nearby,
         )
-    return fallback
+    if key in {"tx_not_found", "forbidden", "tx_already_success"}:
+        return _sms_proof_connect_issue_agent_message(
+            transaction,
+            result_key=key,
+            nearby=nearby,
+        )
+    # Jamais le message client (« Un conseiller vérifiera… ») dans le rapport agent.
+    del fallback
+    return _sms_proof_connect_issue_agent_message(
+        transaction,
+        result_key=key or "technical_error",
+        nearby=nearby,
+    )
 
 
 def _mobcash_success_flag(transaction: Transaction) -> bool | None:
