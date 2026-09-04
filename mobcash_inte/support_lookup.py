@@ -652,6 +652,34 @@ def _mark_deposit_accept_aligned(transaction: Transaction) -> bool:
         return False
 
 
+
+def _deposit_await_proof_client_message(
+    intro: str,
+    payer_phone: str,
+    *,
+    short: bool = False,
+) -> str:
+    """Message client Blaffa/mobcash : demander SMS/notification ou capture Wave."""
+    phone = (payer_phone or "").strip() or "le numéro utilisé"
+    head = (
+        f"{intro}\n\n"
+        "Nous n'avons pas encore pu confirmer votre paiement Mobile Money.\n"
+        "Merci d'envoyer une preuve de paiement :\n"
+        "• le SMS ou la notification reçu(e) après le transfert, ou\n"
+        "• la capture d'écran Wave / Mobile Money\n"
+        f"(depuis le numéro {phone})."
+    ).strip()
+    if short:
+        return head
+    return (
+        f"{head}\n\n"
+        "Assurez-vous que c'est bien le numéro de la transaction qui a effectué "
+        "le dépôt : cela peut aussi être la raison du problème.\n"
+        "Si c'est un autre numéro qui a fait le transfert, envoyez-nous la capture "
+        "de paiement et le bon numéro."
+    ).strip()
+
+
 def _deposit_await_proof_agent_message(
     transaction: Transaction,
     *,
@@ -1311,16 +1339,7 @@ def build_lookup_response(
             ), status.HTTP_200_OK
 
         payer_phone = (transaction.phone_number or "").strip() or "le numéro utilisé"
-        message = (
-            f"{intro}\n\n"
-            "Nous n'avons pas encore pu confirmer votre paiement Mobile Money.\n"
-            "Merci d'envoyer la capture d'écran de votre transfert\n"
-            f"(depuis le numéro {payer_phone}).\n\n"
-            "Assurez-vous que c'est bien le numéro de la transaction qui a effectué "
-            "le dépôt : cela peut aussi être la raison du problème.\n"
-            "Si c'est un autre numéro qui a fait le transfert, envoyez-nous la capture "
-            "de paiement et le bon numéro."
-        ).strip()
+        message = _deposit_await_proof_client_message(intro, payer_phone)
         return _base_payload(
             transaction,
             message=message,
@@ -1581,12 +1600,7 @@ def build_confirm_payment_response(
         payer_phone = (transaction.phone_number or "").strip() or "le numéro utilisé"
         return _base_payload(
             transaction,
-            message=(
-                f"{intro}\n\n"
-                "Nous n'avons pas encore pu confirmer votre paiement Mobile Money.\n"
-                "Merci d'envoyer la capture d'écran de votre transfert\n"
-                f"(depuis le numéro {payer_phone})."
-            ).strip(),
+            message=_deposit_await_proof_client_message(intro, payer_phone, short=True),
             phase="await_screenshot",
             phone_match=True,
             money_sent=True if money_sent else None,
