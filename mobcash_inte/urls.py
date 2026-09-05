@@ -94,6 +94,16 @@ urlpatterns = [
     ),
     path("coupon", views.CreateCoupon.as_view()),
     path("coupon/<int:pk>", views.CouponDetailAPIView.as_view()),
+    path(
+        "cancellation-debt-blacklist",
+        views.CancellationDebtBlacklistListView.as_view(),
+        name="cancellation-debt-blacklist",
+    ),
+    path(
+        "cancellation-debt-blacklist/<int:pk>",
+        views.CancellationDebtBlacklistDetailView.as_view(),
+        name="cancellation-debt-blacklist-detail",
+    ),
     path("ann", views.CreateAdvertisementViews.as_view()),
     path("ann/<str:pk>", views.DetailsAdvertisementViews.as_view()),
     path("statistics", views.StatisticsView.as_view()),

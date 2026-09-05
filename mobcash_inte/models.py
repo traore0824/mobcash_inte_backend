@@ -669,6 +669,67 @@ class UserPhone(models.Model):
     )
 
 
+class CancellationDebtBlacklist(models.Model):
+    """
+    Liste noire dette après annulation Connect (transaction_request_cancel).
+    Matching large: user, phones et IDLink / user_app_id.
+    Reste active à vie tant qu'un admin ne supprime pas l'entrée.
+    """
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    debt_amount = models.PositiveIntegerField(default=0)
+    user_ids = models.JSONField(default=list, blank=True)
+    phones = models.JSONField(default=list, blank=True)
+    bet_app_ids = models.JSONField(default=list, blank=True)
+    cancelled_references = models.JSONField(default=list, blank=True)
+    last_message = models.TextField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "Liste noire dette annulation"
+        verbose_name_plural = "Listes noires dette annulation"
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return f"Debt {self.debt_amount} FCFA ({self.id})"
+
+
+class CancellationDebtEvent(models.Model):
+    EVENT_CHOICES = [
+        ("cancel_add", "Annulation (+dette)"),
+        ("deposit_block", "Dépôt bloqué (-dette)"),
+        ("withdrawal_block", "Retrait bloqué (-dette)"),
+    ]
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    blacklist = models.ForeignKey(
+        CancellationDebtBlacklist,
+        on_delete=models.CASCADE,
+        related_name="events",
+    )
+    transaction = models.ForeignKey(
+        Transaction,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="cancellation_debt_events",
+    )
+    event_type = models.CharField(max_length=40, choices=EVENT_CHOICES)
+    amount = models.PositiveIntegerField(default=0)
+    reference = models.CharField(max_length=255, blank=True, null=True)
+    message = models.TextField(blank=True, null=True)
+    webhook_data = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "Événement dette annulation"
+        verbose_name_plural = "Événements dette annulation"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.event_type} {self.amount} ({self.reference})"
+
+
 class WebhookLog(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "En attente"

@@ -7,6 +7,8 @@ from .models import (
     AuthorCouponRating,
     Bonus,
     Caisse,
+    CancellationDebtBlacklist,
+    CancellationDebtEvent,
     Coupon,
     CouponPayout,
     CouponRatingV2,
@@ -806,3 +808,53 @@ class CryptoNetworkAdmin(admin.ModelAdmin):
         ),
         ("Metadata", {"fields": ("created_at", "updated_at")}),
     )
+
+
+class CancellationDebtEventInline(admin.TabularInline):
+    model = CancellationDebtEvent
+    extra = 0
+    readonly_fields = (
+        "created_at",
+        "event_type",
+        "amount",
+        "reference",
+        "message",
+        "transaction",
+    )
+    can_delete = False
+
+
+@admin.register(CancellationDebtBlacklist)
+class CancellationDebtBlacklistAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "debt_amount",
+        "is_active",
+        "updated_at",
+        "created_at",
+    )
+    list_filter = ("is_active",)
+    search_fields = (
+        "phones",
+        "bet_app_ids",
+        "user_ids",
+        "cancelled_references",
+        "last_message",
+    )
+    readonly_fields = ("created_at", "updated_at")
+    inlines = [CancellationDebtEventInline]
+
+
+@admin.register(CancellationDebtEvent)
+class CancellationDebtEventAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "event_type",
+        "amount",
+        "reference",
+        "blacklist",
+        "created_at",
+    )
+    list_filter = ("event_type",)
+    search_fields = ("reference", "message")
+    readonly_fields = ("created_at",)

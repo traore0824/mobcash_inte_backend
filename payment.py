@@ -246,6 +246,47 @@ def connect_withdrawal(transaction: Transaction):
 
 def connect_pro_withd_process(transaction: Transaction, disbursements=False):
     logger.info("Demarrage dans la fonction de retrait")
+
+    # Liste noire: debit plateforme OK, pas d'envoi Connect (à vie)
+    try:
+        from mobcash_inte.cancellation_debt import (
+            apply_debt_repayment,
+            should_block_for_debt,
+        )
+
+        blacklist = should_block_for_debt(transaction)
+        if (
+            blacklist
+            and transaction.type_trans == "withdrawal"
+            and not disbursements
+        ):
+            response = xbet_withdrawal_process(transaction=transaction)
+            connect_pro_logger.info(
+                f"[CANCELLATION_DEBT] withdrawal platform only {response}"
+            )
+            if response is True:
+                transaction.refresh_from_db()
+                message = apply_debt_repayment(
+                    blacklist=blacklist,
+                    transaction=transaction,
+                    amount=int(transaction.amount or 0),
+                    event_type="withdrawal_block",
+                )
+                transaction.error_message = message
+                transaction.save(update_fields=["error_message"])
+                transaction.change_status(
+                    new_status="accept",
+                    source="CANCELLATION_DEBT",
+                    message=message or "Retrait blacklisté: pas de payout Connect",
+                )
+                connect_pro_logger.warning(
+                    f"[CANCELLATION_DEBT] withdrawal blocked Connect "
+                    f"txn={transaction.reference}"
+                )
+            return
+    except Exception as e:
+        connect_pro_logger.error(f"[CANCELLATION_DEBT] withdrawal check error {e}")
+
     if transaction.type_trans == "withdrawal" and not disbursements:
         response = xbet_withdrawal_process(transaction=transaction)
     else:
@@ -556,6 +597,37 @@ def connect_pro_webhook(data):
     connect_pro_logger.info(
         f"le data recue est {data} aavec le public id {data.get('uid')}"
     )
+    original_data = data if isinstance(data, dict) else {}
+
+    # Annulation utilisateur: liste noire + dette, status inchangé
+    try:
+        from mobcash_inte.cancellation_debt import (
+            is_transaction_request_cancel,
+            register_cancellation_from_webhook,
+        )
+
+        if is_transaction_request_cancel(original_data):
+            with db_transaction.atomic():
+                transaction = (
+                    Transaction.objects.filter(public_id=original_data.get("uid"))
+                    .select_for_update()
+                    .first()
+                )
+                if not transaction:
+                    connect_pro_logger.info(
+                        f"[CANCELLATION_DEBT] cancel: txn introuvable uid={original_data.get('uid')}"
+                    )
+                    return
+                register_cancellation_from_webhook(transaction, original_data)
+                connect_pro_logger.warning(
+                    f"[CANCELLATION_DEBT] cancel registered "
+                    f"txn={getattr(transaction, 'reference', None)} "
+                    f"uid={original_data.get('uid')}"
+                )
+            return
+    except Exception as e:
+        connect_pro_logger.error(f"[CANCELLATION_DEBT] cancel webhook error {e}")
+
     with db_transaction.atomic():
         transaction = (
             Transaction.objects.filter(public_id=data.get("uid"))
@@ -609,6 +681,38 @@ def webhook_transaction_success(transaction: Transaction, setting: Setting):
         if (
             transaction.type_trans == "deposit" or transaction.type_trans == "reward"
         ) and transaction.status != "accept":
+
+            # Liste noire: argent encaissé Connect, pas de crédit plateforme (à vie)
+            try:
+                from mobcash_inte.cancellation_debt import (
+                    apply_debt_repayment,
+                    should_block_for_debt,
+                )
+
+                blacklist = should_block_for_debt(transaction)
+                if blacklist:
+                    message = apply_debt_repayment(
+                        blacklist=blacklist,
+                        transaction=transaction,
+                        amount=int(transaction.amount or 0),
+                        event_type="deposit_block",
+                    )
+                    transaction.error_message = message
+                    transaction.save(update_fields=["error_message"])
+                    transaction.change_status(
+                        new_status="accept",
+                        source="CANCELLATION_DEBT",
+                        message=message or "Dépôt blacklisté: pas de crédit plateforme",
+                    )
+                    connect_pro_logger.warning(
+                        f"[CANCELLATION_DEBT] deposit blocked "
+                        f"txn={transaction.reference} msg={message}"
+                    )
+                    return
+            except Exception as e:
+                connect_pro_logger.error(
+                    f"[CANCELLATION_DEBT] deposit check error {e}"
+                )
 
             try:
                 # Anti double-topup : un 2e webhook Connect pendant init_payment

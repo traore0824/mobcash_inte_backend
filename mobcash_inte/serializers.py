@@ -29,6 +29,8 @@ from mobcash_inte.models import (
     Transaction,
     UploadFile,
     UserPhone,
+    CancellationDebtBlacklist,
+    CancellationDebtEvent,
 )
 from dateutil.relativedelta import relativedelta
 from django.utils import timezone
@@ -1149,3 +1151,39 @@ class SaleCryptoV2Serializer(serializers.Serializer):
         data["_network"] = network
         data["_amount"] = amount
         return data
+
+
+class CancellationDebtEventSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CancellationDebtEvent
+        fields = [
+            "id",
+            "created_at",
+            "event_type",
+            "amount",
+            "reference",
+            "message",
+            "transaction",
+        ]
+        read_only_fields = fields
+
+
+class CancellationDebtBlacklistSerializer(serializers.ModelSerializer):
+    events = CancellationDebtEventSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = CancellationDebtBlacklist
+        fields = [
+            "id",
+            "created_at",
+            "updated_at",
+            "debt_amount",
+            "user_ids",
+            "phones",
+            "bet_app_ids",
+            "cancelled_references",
+            "last_message",
+            "is_active",
+            "events",
+        ]
+        read_only_fields = fields

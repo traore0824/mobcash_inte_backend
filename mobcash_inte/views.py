@@ -59,6 +59,7 @@ from mobcash_inte.models import (
     UploadFile,
     UserPhone,
     WebhookLog,
+    CancellationDebtBlacklist,
 )
 from django_filters.rest_framework import DjangoFilterBackend
 from mobcash_inte.permissions import IsAuthenticated
@@ -91,6 +92,7 @@ from mobcash_inte.serializers import (
     UpdateTransactionStatusSerializer,
     ValidateVersionSerializer,
     CouponSerializer,
+    CancellationDebtBlacklistSerializer,
     CreateAppNameSerializer,
     CreateSettingSerializer,
     DepositSerializer,
@@ -1725,6 +1727,40 @@ class CouponDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
         if self.request.method == "GET":
             self.permission_classes = [permissions.IsAuthenticated]
         return super().get_permissions()
+
+
+class CancellationDebtBlacklistListView(generics.ListAPIView):
+    """Admin : liste des entrées liste noire (dette annulation Connect)."""
+
+    permission_classes = [permissions.IsAdminUser]
+    serializer_class = CancellationDebtBlacklistSerializer
+    pagination_class = CustomPagination
+
+    def get_queryset(self):
+        qs = CancellationDebtBlacklist.objects.prefetch_related("events").order_by(
+            "-updated_at"
+        )
+        search = (self.request.query_params.get("search") or "").strip()
+        if search:
+            qs = qs.filter(
+                Q(phones__icontains=search)
+                | Q(bet_app_ids__icontains=search)
+                | Q(user_ids__icontains=search)
+                | Q(cancelled_references__icontains=search)
+                | Q(last_message__icontains=search)
+            )
+        active = self.request.query_params.get("is_active")
+        if active is not None and active != "":
+            qs = qs.filter(is_active=str(active).lower() in ("1", "true", "yes"))
+        return qs
+
+
+class CancellationDebtBlacklistDetailView(generics.RetrieveDestroyAPIView):
+    """Admin : détail / suppression d'une entrée liste noire (seule façon de sortir)."""
+
+    permission_classes = [permissions.IsAdminUser]
+    serializer_class = CancellationDebtBlacklistSerializer
+    queryset = CancellationDebtBlacklist.objects.prefetch_related("events").all()
 
 
 class CreateAdvertisementViews(generics.ListCreateAPIView):
