@@ -1710,6 +1710,25 @@ class CreateCoupon(generics.ListCreateAPIView):
 
         return Coupon.objects.none()
 
+    def list(self, request, *args, **kwargs):
+        """Ajoute des clés flags pour que le front sache si l'utilisateur a fait
+        un dépôt accepté dans les 24 dernières heures."""
+        response = super().list(request, *args, **kwargs)
+        setting = Setting.objects.first()
+        user = request.user
+        if user.is_staff:
+            response.data["has_recent_deposit"] = True
+            response.data["requires_recent_deposit"] = False
+        else:
+            has_recent = user_has_recent_accepted_deposit(user)
+            response.data["has_recent_deposit"] = has_recent
+            response.data["requires_recent_deposit"] = bool(
+                setting
+                and setting.requires_recent_deposit_to_view_coupon
+                and not has_recent
+            )
+        return response
+
 
 class CouponDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
     """

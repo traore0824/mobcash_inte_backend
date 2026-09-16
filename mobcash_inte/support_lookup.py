@@ -1347,6 +1347,76 @@ def _handle_phone_mismatch(
     )
 
 
+def _deposit_local_accept_response(transaction: Transaction) -> dict:
+    """Statut local accepté : « crédité » seulement si MobCash Success=true."""
+    app_label = _app_public_label(transaction)
+    amount = transaction.amount or 0
+    mobcash_ok = _mobcash_success_flag(transaction)
+    player = (transaction.user_app_id or "").strip() or "N/A"
+    payer = (transaction.phone_number or "").strip() or "N/A"
+    connect_skipped = {"checked": False, "ok": None, "status": None, "class": "skipped"}
+    if mobcash_ok is True:
+        msg = (
+            f"Oui, nous avons bien reçu votre dépôt de {amount} FCFA.\n"
+            f"Votre compte {app_label} a bien été crédité.\n"
+            "Si le solde n'apparaît pas encore, actualisez l'application "
+            "ou reconnectez-vous."
+        )
+        agent_msg = (
+            f"Dépôt accepté — crédit jeu {app_label} confirmé (MobCash Success)\n\n"
+            f"• Référence : {transaction.reference}\n"
+            f"• Montant : {amount} FCFA\n"
+            f"• ID joueur : {player}\n"
+            f"• Numéro payeur : {payer}\n"
+            "• Statut local : accept\n"
+            f"• Crédit jeu ({app_label}) : confirmé"
+        )
+        return _base_payload(
+            transaction,
+            message=msg,
+            phase="done",
+            phone_match=True,
+            needs_escalation=False,
+            connect=connect_skipped,
+            transfer_retry={"attempted": False, "success": None},
+            mobcash_success=True,
+            agent_message=agent_msg,
+        )
+    credit_line = (
+        f"• Crédit jeu ({app_label}) : non crédité"
+        if mobcash_ok is False
+        else f"• Crédit jeu ({app_label}) : non confirmé (MobCash Success absent)"
+    )
+    client_msg = (
+        f"Oui, nous avons bien trouvé votre dépôt de {amount} FCFA.\n"
+        f"Le crédit sur votre compte {app_label} n'est pas encore confirmé.\n"
+        "Un conseiller va vérifier et finaliser le crédit. "
+        "Vous serez crédité sous peu."
+    )
+    agent_msg = (
+        f"À traiter — dépôt : statut local accepté, compte {app_label} non confirmé\n\n"
+        f"• Référence : {transaction.reference}\n"
+        f"• Montant : {amount} FCFA\n"
+        f"• ID joueur : {player}\n"
+        f"• Numéro payeur : {payer}\n"
+        "• Statut local : accept\n"
+        f"{credit_line}\n"
+        "• **Ne pas dire au client que le compte est déjà crédité.**\n"
+        "• Vérifier le crédit jeu et finaliser si le paiement est bien reçu."
+    )
+    return _base_payload(
+        transaction,
+        message=client_msg,
+        phase="done",
+        phone_match=True,
+        needs_escalation=True,
+        connect=connect_skipped,
+        transfer_retry={"attempted": False, "success": None},
+        mobcash_success=mobcash_ok,
+        agent_message=agent_msg,
+    )
+
+
 def build_lookup_response(
     *,
     reference: str,
@@ -1366,23 +1436,7 @@ def build_lookup_response(
     if type_trans == "deposit":
         intro = _intro(transaction, type_trans)
         if transaction.status == "accept":
-            app_label = _app_public_label(transaction)
-            amount = transaction.amount or 0
-            msg = (
-                f"Oui, nous avons bien reçu votre dépôt de {amount} FCFA.\n"
-                f"Votre compte {app_label} a bien été crédité.\n"
-                "Si le solde n'apparaît pas encore, actualisez l'application "
-                "ou reconnectez-vous."
-            )
-            return _base_payload(
-                transaction,
-                message=msg,
-                phase="done",
-                phone_match=True,
-                needs_escalation=False,
-                connect={"checked": False, "ok": None, "status": None, "class": "skipped"},
-                transfer_retry={"attempted": False, "success": None},
-            ), status.HTTP_200_OK
+            return _deposit_local_accept_response(transaction), status.HTTP_200_OK
 
         connect_payload = _connect_status_payload(transaction)
         connect_class = _classify_connect(connect_payload)
