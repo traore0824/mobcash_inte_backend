@@ -423,6 +423,19 @@ class Setting(models.Model):
     telegram_bot_username = models.CharField(max_length=150, blank=True, null=True)
     telegram_bot_token = models.CharField(max_length=500, blank=True, null=True)
     use_sms = models.BooleanField(default=False)
+    # Commissions My Solde (gains estimés admin)
+    deposit_commission_percent = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        default=0,
+        help_text="Commission gagnée sur dépôt (% du montant accepté).",
+    )
+    withdrawal_commission_percent = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        default=0,
+        help_text="Commission gagnée sur retrait (% du montant accepté).",
+    )
 
     def __str__(self):
         return str(self.id)
@@ -589,6 +602,44 @@ class Transaction(models.Model):
             trigger_data=trigger_data,
             message=message or f"Status changed from {old_status} to {new_status} via {source}",
         )
+
+
+class CaisseBalanceSnapshot(models.Model):
+    """
+    Historique du solde d'une AppName après une transaction réussie.
+    Écrit en Celery (async) pour ne pas bloquer le flux de paiement.
+    """
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    bet_app = models.ForeignKey(
+        AppName,
+        on_delete=models.CASCADE,
+        related_name="balance_snapshots",
+    )
+    solde = models.DecimalField(max_digits=14, decimal_places=2)
+    transaction = models.ForeignKey(
+        Transaction,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="balance_snapshots",
+    )
+    type_trans = models.CharField(max_length=120, blank=True, null=True)
+    amount = models.PositiveIntegerField(blank=True, null=True)
+    network_name = models.CharField(max_length=100, blank=True, null=True)
+    reference = models.CharField(max_length=255, blank=True, null=True)
+
+    class Meta:
+        verbose_name = "Snapshot solde caisse"
+        verbose_name_plural = "Snapshots solde caisse"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["bet_app", "-created_at"]),
+        ]
+
+    def __str__(self):
+        app = getattr(self.bet_app, "name", self.bet_app_id)
+        return f"{app} @ {self.created_at}: {self.solde}"
 
 
 class TransactionStatusHistory(models.Model):

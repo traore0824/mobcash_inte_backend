@@ -7,6 +7,7 @@ from .models import (
     AuthorCouponRating,
     Bonus,
     Caisse,
+    CaisseBalanceSnapshot,
     CancellationDebtBlacklist,
     CancellationDebtEvent,
     Coupon,
@@ -319,6 +320,15 @@ class SettingAdmin(admin.ModelAdmin):
             },
         ),
         (
+            "My Solde — commissions",
+            {
+                "fields": (
+                    "deposit_commission_percent",
+                    "withdrawal_commission_percent",
+                )
+            },
+        ),
+        (
             "Versions et APK",
             {
                 "fields": (
@@ -457,6 +467,26 @@ class CaisseAdmin(admin.ModelAdmin):
         (None, {"fields": ("bet_app", "solde")}),
         ("Mise à jour", {"fields": ("updated_at",)}),
     )
+
+
+@admin.register(CaisseBalanceSnapshot)
+class CaisseBalanceSnapshotAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "bet_app",
+        "solde",
+        "type_trans",
+        "amount",
+        "network_name",
+        "reference",
+        "created_at",
+    )
+    list_filter = ("type_trans", "bet_app", "created_at")
+    search_fields = ("reference", "network_name", "bet_app__name")
+    readonly_fields = ("created_at",)
+    date_hierarchy = "created_at"
+    ordering = ("-created_at",)
+
 
 # admin.site.register(Transaction)
 

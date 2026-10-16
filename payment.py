@@ -1307,6 +1307,63 @@ def check_solde(transaction_id):
             transaction.save(update_fields=["fond_calculate"])
             transaction.refresh_from_db()
 
+            # Snapshot solde en Celery (async) — uniquement txn réussie (accept)
+            if (
+                transaction.status == "accept"
+                and transaction.app_id
+                and transaction.type_trans in ("deposit", "withdrawal", "reward")
+            ):
+                try:
+                    record_caisse_balance_snapshot.delay(
+                        transaction_id=transaction.id,
+                        bet_app_id=transaction.app_id,
+                        solde=float(caisse.solde),
+                    )
+                except Exception as snap_err:
+                    connect_pro_logger.warning(
+                        f"[CHECK_SOLDE] Impossible de planifier snapshot solde "
+                        f"txn={transaction.id}: {snap_err}"
+                    )
+
+
+@shared_task
+def record_caisse_balance_snapshot(transaction_id, bet_app_id, solde):
+    """
+    Enregistre le solde de l'app après une transaction réussie.
+    Tâche légère, fire-and-forget depuis check_solde.
+    """
+    try:
+        from mobcash_inte.models import CaisseBalanceSnapshot, Transaction
+
+        txn = (
+            Transaction.objects.select_related("network", "app")
+            .filter(id=transaction_id, status="accept")
+            .first()
+        )
+        if not txn:
+            return
+
+        network_name = None
+        if txn.network_id:
+            network_name = getattr(txn.network, "name", None) or getattr(
+                txn.network, "public_name", None
+            )
+
+        CaisseBalanceSnapshot.objects.create(
+            bet_app_id=bet_app_id,
+            solde=solde,
+            transaction=txn,
+            type_trans=txn.type_trans,
+            amount=txn.amount,
+            network_name=network_name,
+            reference=txn.reference,
+        )
+    except Exception as e:
+        connect_pro_logger.error(
+            f"[SNAPSHOT_SOLDE] Erreur txn={transaction_id} app={bet_app_id}: {e}",
+            exc_info=True,
+        )
+
 
 @shared_task
 def payment_fonction(reference):
