@@ -78,6 +78,7 @@ INSTALLED_APPS = [
     "daphne", "django.contrib.staticfiles",
     "mobcash_inte",
     "accounts",
+    "predictions",
     "django_filters",
     "rest_framework",
     "rest_framework_simplejwt",

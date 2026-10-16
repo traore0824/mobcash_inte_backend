@@ -8,4 +8,5 @@ urlpatterns = [
     path("mobcash/", include("mobcash_inte.urls")),
     path("blaffa/", include("mobcash_inte.urls")),
     path("auth/", include("accounts.urls")),
+    path("api/v1/predictions/", include("predictions.urls")),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

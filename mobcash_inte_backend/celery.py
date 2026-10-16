@@ -31,5 +31,20 @@ _extra_beat = {
         "task": "mobcash_inte.tasks.grant_daily_user_credits",
         "schedule": crontab(hour=0, minute=0),
     },
+    # Pronos IA — 01:00 UTC création du jour ; update toutes les 3 h
+    "predictions-daily-pipeline": {
+        "task": "predictions.tasks.run_daily_pipeline",
+        "schedule": crontab(hour=1, minute=0),
+        "options": {"queue": "predictions"},
+    },
+    "predictions-update-pipeline": {
+        "task": "predictions.tasks.run_update_pipeline",
+        "schedule": crontab(minute=0, hour="*/3"),
+        "options": {"queue": "predictions"},
+    },
 }
 app.conf.beat_schedule = {**(app.conf.beat_schedule or {}), **_extra_beat}
+app.conf.task_routes = {
+    **(getattr(app.conf, "task_routes", None) or {}),
+    "predictions.tasks.*": {"queue": "predictions"},
+}

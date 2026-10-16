@@ -56,6 +56,10 @@ incremental==24.7.2
 kombu==5.5.4
 msgpack==1.1.1
 packaging==25.0
+pandas>=2.0
+numpy>=1.24
+scipy>=1.11
+penaltyblog>=1.5
 pillow==11.3.0
 qrcode[pil]==8.0
 prompt_toolkit==3.0.52
