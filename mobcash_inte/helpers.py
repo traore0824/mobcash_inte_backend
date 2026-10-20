@@ -426,3 +426,22 @@ def user_has_recent_accepted_deposit(user) -> bool:
         status="accept",
         created_at__gte=last_24h,
     ).exists()
+
+
+def user_has_recent_accepted_transaction(user, days: int = 7) -> bool:
+    """Dépôt ou retrait accepté dans les N derniers jours (pronostics)."""
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    if getattr(user, "is_staff", False):
+        return True
+
+    from datetime import timedelta
+    from django.utils import timezone
+
+    since = timezone.now() - timedelta(days=days)
+    return Transaction.objects.filter(
+        user=user,
+        type_trans__in=["deposit", "withdrawal"],
+        status="accept",
+        created_at__gte=since,
+    ).exists()

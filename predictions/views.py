@@ -5,6 +5,7 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from mobcash_inte.helpers import user_has_recent_accepted_transaction
 from predictions.models import Prediction, PredictionSettings
 from predictions.serializers import PredictionCardSerializer, PublicSettingsSerializer
 
@@ -61,6 +62,7 @@ class TodayPredictionsView(APIView):
             {
                 "date": today.isoformat(),
                 "count": qs.count(),
+                "unlocked": user_has_recent_accepted_transaction(request.user, days=7),
                 "groups": list(groups.values()),
             }
         )

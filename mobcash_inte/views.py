@@ -301,8 +301,8 @@ class NotificationView(generics.ListCreateAPIView):
     def get_queryset(self):
         queryset = Notification.objects.all()
         if not self.request.user.is_staff:
-            queryset = queryset.filter(user=self.request.user, is_read=False)
-        return queryset
+            queryset = queryset.filter(user=self.request.user)
+        return queryset.order_by("-created_at")
 
     def create(self, request, *args, **kwargs):
         if not request.user.is_staff:
