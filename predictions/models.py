@@ -153,13 +153,7 @@ class PredictionSettings(models.Model):
     )
     auto_publish = models.BooleanField(default=True)
     disclaimer_version = models.CharField(max_length=20, default="1.0")
-    disclaimer_text = models.TextField(
-        default=(
-            "TurainCash Pronos est un outil d'analyse statistique. "
-            "Ce n'est pas un site de paris : aucune mise n'est collectée. "
-            "Les prédictions ne garantissent aucun résultat."
-        )
-    )
+    disclaimer_text = models.TextField(blank=True, default="")
     sync_interval_hours = models.PositiveSmallIntegerField(default=3)
     updated_at = models.DateTimeField(auto_now=True)
 

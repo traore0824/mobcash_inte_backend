@@ -144,9 +144,9 @@ def generate_predictions_for_day(day: date | None = None) -> dict:
     """Crée / met à jour les prédictions du jour (non figées)."""
     day = day or timezone.localdate()
     engine = PredictionEngine()
-    model_version = ensure_active_model()
+    model_version = ensure_active_model("dixon_coles_csv_v2")
     slug_to_fd = {
-        slug: cfg.get("football_data_name") for slug, cfg in LEAGUES.items()
+        slug: cfg.get("football_data_code") for slug, cfg in LEAGUES.items()
     }
 
     fixtures = (
@@ -162,11 +162,12 @@ def generate_predictions_for_day(day: date | None = None) -> dict:
     updated = 0
     for fixture in fixtures:
         existing = Prediction.objects.filter(fixture=fixture).first()
+        # Regénérer tant que non figé (y compris anciens heuristiques)
         if existing and existing.is_locked:
             continue
 
-        fd_name = slug_to_fd.get(fixture.competition.slug)
-        pick = engine.predict_match(fixture.home.name, fixture.away.name, fd_name)
+        fd_code = slug_to_fd.get(fixture.competition.slug)
+        pick = engine.predict_match(fixture.home.name, fixture.away.name, fd_code)
 
         defaults = {
             "model_version": model_version,
@@ -274,18 +275,23 @@ def run_update_pipeline() -> dict:
 def train_all_domestic_models() -> dict:
     engine = PredictionEngine()
     results = {}
+    seen_codes: set[str] = set()
     for slug, cfg in LEAGUES.items():
-        name = cfg.get("football_data_name")
-        if not name:
+        code = cfg.get("football_data_code")
+        if not code or slug == "copa_del_rey":
             continue
-        path = engine.train_league(name)
+        if code in seen_codes:
+            results[slug] = results.get(code)
+            continue
+        seen_codes.add(code)
+        path = engine.train_league(code)
+        results[code] = path
         results[slug] = path
         if path:
             ModelVersion.objects.create(
-                name="dixon_coles_v1",
+                name="dixon_coles_csv_v2",
                 is_active=True,
                 artifact_path=path,
-                params={"league": slug, "source": name},
+                params={"league": slug, "code": code},
             )
-    # Désactiver les anciennes versions sauf la dernière par ligue
     return results

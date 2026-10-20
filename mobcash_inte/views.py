@@ -1362,6 +1362,7 @@ class BotWithdrawalTransactionViews(generics.CreateAPIView):
             reference=generate_reference(prefix="retrait-"),
             type_trans="withdrawal",
             telegram_user=request.telegram_user,
+            source="bot",
         )
         transaction.api = transaction.network.withdrawal_api
         TransactionStatusHistory.objects.create(transaction=transaction, old_status=transaction.status, new_status=transaction.status, trigger_source=TransactionStatusHistory.Source.SYSTEM, message="Statut initial enregistré")

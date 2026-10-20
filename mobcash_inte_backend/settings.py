@@ -40,16 +40,13 @@ from google.oauth2 import service_account
 cred = credentials.Certificate(os.path.join(BASE_DIR, "mobcash.json"))
 initialize_app(cred)
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
-if DEBUG == "False":
-    DEBUG = False
-else:
-    DEBUG = True
+DEBUG = os.getenv("DEBUG", "False").strip().lower() in {"1", "true", "yes", "on"}
 
 ALLOWED_HOSTS = [
     "dev.slaterci.net",
     "api.turaincash.com",
     "127.0.0.1",
+    "localhost",
     "apiv2.coobet.app",
     "api.turaincash.net",
     "api.zefast.net",
@@ -63,7 +60,9 @@ ALLOWED_HOSTS = [
     "api.mobcash.supercashci.net",
     "api.i-cashci.net",
     "api.cashika.net",
-    "api.ti-cash.net"
+    "api.ti-cash.net",
+    "api.trovebet.io",
+    "46.202.130.135",
 ]
 
 
@@ -103,6 +102,8 @@ MIDDLEWARE = [
 
 
 CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
     "http://localhost:3000",
     "https://localhost",
     "https://turaincash.net",
@@ -169,6 +170,12 @@ CORS_ALLOWED_ORIGINS = [
     "https://module.turaincash.net",
     "https://partners.cashika.net",
     "https://partners.turaincash.net",
+    "https://trovebet.io",
+    "https://www.trovebet.io",
+    "https://api.trovebet.io",
+    "https://admin.trovebet.io",
+    "https://mymobcashadmin-one.vercel.app",
+    "https://mymobcashadmin-traore0824s-projects.vercel.app",
 ]
 
 
@@ -190,6 +197,12 @@ CSRF_TRUSTED_ORIGINS = [
     "https://api.supercashci.net",
     "https://supercashci.net",
     "https://api.mobcash.supercashci.net",
+    "https://api.trovebet.io",
+    "https://trovebet.io",
+    "https://www.trovebet.io",
+    "https://admin.trovebet.io",
+    "https://mymobcashadmin-one.vercel.app",
+    "https://mymobcashadmin-traore0824s-projects.vercel.app",
 ]
 
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')

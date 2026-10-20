@@ -62,10 +62,6 @@ class TodayPredictionsView(APIView):
                 "date": today.isoformat(),
                 "count": qs.count(),
                 "groups": list(groups.values()),
-                "disclaimer": {
-                    "version": settings.disclaimer_version,
-                    "text": settings.disclaimer_text,
-                },
             }
         )
 
