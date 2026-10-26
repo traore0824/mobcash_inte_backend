@@ -432,8 +432,6 @@ def user_has_recent_accepted_transaction(user, days: int = 7) -> bool:
     """Dépôt ou retrait accepté dans les N derniers jours (pronostics)."""
     if not user or not getattr(user, "is_authenticated", False):
         return False
-    if getattr(user, "is_staff", False):
-        return True
 
     from datetime import timedelta
     from django.utils import timezone
