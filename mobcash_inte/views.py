@@ -1,3 +1,4 @@
+import hmac
 import logging
 import os
 from django.forms import ValidationError
@@ -130,6 +131,7 @@ from payment import (
     feexpay_webhook,
     connect_pro_withd_process,
     feexpay_withdrawall_process,
+    autopayer_withdrawall_process,
     check_solde,
     process_transaction_notifications_and_bonus,
 )
@@ -1203,6 +1205,168 @@ class FeexpayWebhook(decorators.APIView):
             )
 
 
+class AutoPayerWebhook(decorators.APIView):
+    """
+    Webhook AutoPayer — auth HMAC uniquement (pas de JWT).
+    Signature: X-Webhook-Signature = HMAC-SHA256(raw_body, webhook_secret)
+    """
+
+    authentication_classes = []
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        from integrations.autopayer.service import (
+            autopayer_verify_webhook_signature,
+            process_autopayer_webhook,
+        )
+
+        raw_body = request.body or b""
+        signature = request.headers.get("X-Webhook-Signature") or request.META.get(
+            "HTTP_X_WEBHOOK_SIGNATURE"
+        )
+
+        if not autopayer_verify_webhook_signature(raw_body, signature):
+            connect_pro_logger.warning(
+                "[AUTOPAYER][WEBHOOK] signature HMAC invalide ou secret manquant"
+            )
+            return Response(
+                {"error": "Signature invalide"},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        # Défense en profondeur : si AutoPayer envoie X-Api-Key, elle doit matcher
+        api_key_hdr = request.headers.get("X-Api-Key") or request.META.get(
+            "HTTP_X_API_KEY"
+        )
+        expected_key = (os.getenv("AUTOPAYER_API_KEY") or "").strip()
+        if api_key_hdr and expected_key and not hmac.compare_digest(
+            str(api_key_hdr).strip(), expected_key
+        ):
+            connect_pro_logger.warning("[AUTOPAYER][WEBHOOK] X-Api-Key mismatch")
+            return Response(
+                {"error": "Clé API invalide"},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        try:
+            data = request.data
+            if not isinstance(data, dict):
+                return Response(
+                    {"error": "Payload invalide"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            body = data.get("data") if isinstance(data.get("data"), dict) else data
+            reference = (
+                (body or {}).get("external_id")
+                or (body or {}).get("externalId")
+                or (body or {}).get("uid")
+                or (body or {}).get("reference")
+                or data.get("external_id")
+                or data.get("uid")
+            )
+            status_raw = str(
+                (body or {}).get("status") or data.get("status") or "unknown"
+            ).strip().lower()
+
+            if not reference:
+                connect_pro_logger.warning("[AUTOPAYER][WEBHOOK] sans référence")
+                return Response(
+                    {"error": "Référence manquante"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Une entrée par (ref, statut) — AutoPayer notifie chaque transition
+            log_ref = f"autopayer:{reference}:{status_raw}"
+
+            with transaction.atomic():
+                existing_log = (
+                    WebhookLog.objects.select_for_update()
+                    .filter(reference=log_ref, processed=True)
+                    .first()
+                )
+                if existing_log:
+                    return Response(
+                        {"message": "Webhook déjà traité"},
+                        status=status.HTTP_200_OK,
+                    )
+
+                webhook_log, created = WebhookLog.objects.select_for_update().get_or_create(
+                    reference=log_ref,
+                    defaults={
+                        "api": "AUTOPAYER",
+                        "webhook_data": data,
+                        "header": str(request.headers),
+                        "processed": False,
+                    },
+                )
+                if not created and webhook_log.processed:
+                    return Response(
+                        {"message": "Webhook déjà traité"},
+                        status=status.HTTP_200_OK,
+                    )
+
+            try:
+                process_autopayer_webhook(data=data)
+                with transaction.atomic():
+                    webhook_log.processed = True
+                    webhook_log.processed_at = timezone.now()
+                    webhook_log.error_message = None
+                    webhook_log.save(
+                        update_fields=["processed", "processed_at", "error_message"]
+                    )
+                return Response(
+                    {"message": "Webhook traité avec succès"},
+                    status=status.HTTP_200_OK,
+                )
+            except Exception as e:
+                with transaction.atomic():
+                    webhook_log.error_message = str(e)[:1000]
+                    webhook_log.save(update_fields=["error_message"])
+                connect_pro_logger.error(
+                    "[AUTOPAYER][WEBHOOK] traitement échoué ref=%s err=%s",
+                    reference,
+                    e,
+                    exc_info=True,
+                )
+                return Response(
+                    {"error": "Erreur lors du traitement"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+
+        except Exception as e:
+            connect_pro_logger.error(
+                "[AUTOPAYER][WEBHOOK] erreur critique: %s", e, exc_info=True
+            )
+            return Response(
+                {"error": "Erreur interne du serveur"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class AutoPayerNetworksView(decorators.APIView):
+    """GET réseaux AutoPayer (admin) — pour mapper Network.autopayer_network_uid."""
+
+    permission_classes = [permissions.IsAdminUser]
+
+    def get(self, request, *args, **kwargs):
+        from integrations.autopayer.service import autopayer_get_networks
+        from integrations.autopayer.client import AutoPayerAPIError, AutoPayerConfigError
+
+        force = str(request.GET.get("refresh", "")).lower() in {"1", "true", "yes"}
+        try:
+            networks = autopayer_get_networks(force_refresh=force)
+            return Response(
+                {"success": True, "data": networks},
+                status=status.HTTP_200_OK,
+            )
+        except (AutoPayerConfigError, AutoPayerAPIError) as exc:
+            return Response(
+                {"success": False, "error": str(exc)},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+
 class DisbursmentTransactionView(decorators.APIView):
     def post(self, request, *args, **kwargs):
         serializer = DisbursmentTransactionSerializer(data=request.data)
@@ -1346,6 +1510,14 @@ class TransactionStatus(decorators.APIView):
             return Response(data, status=status.HTTP_200_OK)
         elif transaction.api == "feexpay":
             data = feexpay_check_status(public_id=transaction.public_id)
+            return Response(data, status=status.HTTP_200_OK)
+        elif transaction.api == "autopayer":
+            from integrations.autopayer.service import autopayer_check_status
+
+            data = autopayer_check_status(
+                public_id=transaction.public_id,
+                external_id=transaction.reference,
+            )
             return Response(data, status=status.HTTP_200_OK)
         return Response(status=status.HTTP_200_OK)
 
@@ -2591,7 +2763,9 @@ class ProcessTransactionView(decorators.APIView):
                 if transaction.api == "connect":
                     connect_pro_withd_process(transaction=transaction)
                 elif transaction.api == "feexpay":
-                    feexpay_withdrawall_process(transaction=transaction)
+                    feexpay_withdrawall_process(transaction_id=transaction.id)
+                elif transaction.api == "autopayer":
+                    autopayer_withdrawall_process.delay(transaction_id=transaction.id)
                 else:
                     return Response(
                         {"error": f"API de retrait non supportée: {transaction.api}"},

@@ -249,16 +249,23 @@ def run_daily_pipeline() -> dict:
 
 
 def run_update_pipeline() -> dict:
-    """Toutes les 2–3 h — refresh scores + settlement + nouveaux matchs du jour."""
+    """Toutes les 30 min — 1 appel API (aujourd'hui). Hier seulement 00h–08h UTC.
+
+    Quota free API-Football = 100 req/jour. 48 cycles × 1 appel ≈ 48, + hier le matin ≈ 64.
+    """
     today = timezone.localdate()
     yesterday = today - timedelta(days=1)
+    now = timezone.now()
     sync_today = sync_fixtures_for_day(today)
-    # 1 appel pour hier (settlement des matchs finissant après minuit)
-    try:
-        sync_yesterday = sync_fixtures_for_day(yesterday)
-    except ApiFootballError as exc:
-        logger.warning("Sync hier échoué: %s", exc)
-        sync_yesterday = {"error": str(exc)}
+
+    sync_yesterday = {"skipped": True}
+    # Matchs qui finissent après minuit : resync hier uniquement le matin
+    if now.hour < 8:
+        try:
+            sync_yesterday = sync_fixtures_for_day(yesterday)
+        except ApiFootballError as exc:
+            logger.warning("Sync hier échoué: %s", exc)
+            sync_yesterday = {"error": str(exc)}
 
     preds = generate_predictions_for_day(today)
     settled_today = settle_finished_for_day(today)

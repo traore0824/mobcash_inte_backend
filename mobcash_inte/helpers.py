@@ -445,3 +445,8 @@ def user_has_recent_accepted_transaction(user, days: int = 7) -> bool:
         status="accept",
         created_at__gte=since,
     ).exists()
+
+
+def user_has_recent_deposit_or_withdrawal(user, days: int = 7) -> bool:
+    """Alias de user_has_recent_accepted_transaction."""
+    return user_has_recent_accepted_transaction(user, days=days)

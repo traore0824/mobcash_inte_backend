@@ -243,7 +243,11 @@ NETWORK_CHOICES = [
     ("mpesa", "Mpsesa"),
     ("afrimoney", "Afrimoney"),
 ]
-API_CHOICES = [("connect", "Blaffa Connect"), ("feexpay", "feexpay")]
+API_CHOICES = [
+    ("connect", "Blaffa Connect"),
+    ("feexpay", "feexpay"),
+    ("autopayer", "AutoPayer"),
+]
 
 
 class Network(models.Model):
@@ -263,6 +267,12 @@ class Network(models.Model):
     )
     withdrawal_api = models.CharField(
         max_length=100, choices=API_CHOICES, default="connect"
+    )
+    autopayer_network_uid = models.CharField(
+        max_length=64,
+        blank=True,
+        null=True,
+        help_text="UUID réseau AutoPayer (GET /api/aggregator/networks/). Prioritaire sur le mapping par nom.",
     )
     payment_by_link = models.BooleanField(default=False)
     payment_by_ussd_code = models.BooleanField(default=False)

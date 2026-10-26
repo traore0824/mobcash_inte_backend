@@ -99,6 +99,7 @@ class NetworkAdmin(admin.ModelAdmin):
                     "withdrawal_api",
                     "buy_api",
                     "sale_api",
+                    "autopayer_network_uid",
                     "payment_by_link",
                     "payment_by_ussd_code",
                     "otp_required",

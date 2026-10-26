@@ -13,7 +13,7 @@ from django.core.cache import cache
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://v3.football.api-sports.io"
-CACHE_TTL = 60 * 30  # 30 min
+CACHE_TTL = 60 * 20  # 20 min — beat tourne toutes les 30 min, il faut un vrai refresh API
 
 
 class ApiFootballError(Exception):

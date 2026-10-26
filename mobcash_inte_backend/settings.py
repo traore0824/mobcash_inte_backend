@@ -585,6 +585,16 @@ LOGGING = {
 
 BASE_URL = os.getenv("BASE_URL")
 
+# AutoPayer (payin / payout / webhook HMAC)
+# AUTOPAYER_BASE_URL=https://...
+# AUTOPAYER_API_KEY=cpk_test_... ou cpk_live_...
+# AUTOPAYER_API_SECRET=...
+# AUTOPAYER_WEBHOOK_SECRET=...  (obligatoire pour accepter les webhooks)
+AUTOPAYER_BASE_URL = os.getenv("AUTOPAYER_BASE_URL", "").strip()
+AUTOPAYER_API_KEY = os.getenv("AUTOPAYER_API_KEY", "").strip()
+AUTOPAYER_API_SECRET = os.getenv("AUTOPAYER_API_SECRET", "").strip()
+AUTOPAYER_WEBHOOK_SECRET = os.getenv("AUTOPAYER_WEBHOOK_SECRET", "").strip()
+
 # BeWallet / BetMomo — External API (topup, payout, status) + dealer stats
 BEWALLET_API_BASE_URL = os.getenv(
     "BEWALLET_API_BASE_URL",
@@ -634,6 +644,7 @@ CELERY_TASK_DEFAULT_EXCHANGE = "mobcash_inte"
 CELERY_TASK_DEFAULT_ROUTING_KEY = "mobcash_inte"
 
 # Configuration des tâches périodiques Celery Beat
+# IMPORTANT: Celery lit UNIQUEMENT cette dict (les merges dans celery.py sont ignorés).
 CELERY_BEAT_SCHEDULE = {
     "check-pending-feexpay-transactions": {
         "task": "payment.check_pending_feexpay_transactions",
@@ -646,6 +657,33 @@ CELERY_BEAT_SCHEDULE = {
     "cancel-old-pending-transactions": {
         "task": "mobcash_inte.helpers.cancel_old_pending_transactions",
         "schedule": crontab(hour=0, minute=0),  # Chaque jour à 00h00
+    },
+    "grant-coupon-publishing-permissions": {
+        "task": "mobcash_inte.tasks.grant_coupon_publishing_permissions",
+        "schedule": crontab(hour=0, minute=0),
+    },
+    "grant-coupon-rating-permissions": {
+        "task": "mobcash_inte.tasks.grant_coupon_rating_permissions",
+        "schedule": crontab(hour=0, minute=0),
+    },
+    "expire-coupons": {
+        "task": "mobcash_inte.tasks.expire_coupons",
+        "schedule": crontab(minute="*/30"),
+    },
+    "grant-daily-user-credits": {
+        "task": "mobcash_inte.tasks.grant_daily_user_credits",
+        "schedule": crontab(hour=0, minute=0),
+    },
+    # Pronos IA — création 01:00 UTC ; refresh scores + tips toutes les 30 min
+    "predictions-daily-pipeline": {
+        "task": "predictions.tasks.run_daily_pipeline",
+        "schedule": crontab(hour=1, minute=0),
+        "options": {"queue": "predictions"},
+    },
+    "predictions-update-pipeline": {
+        "task": "predictions.tasks.run_update_pipeline",
+        "schedule": crontab(minute="*/30"),
+        "options": {"queue": "predictions"},
     },
 }
 

@@ -6,8 +6,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from mobcash_inte.helpers import user_has_recent_accepted_transaction
-from predictions.models import Prediction, PredictionSettings
+from predictions.models import Fixture, Prediction, PredictionSettings
 from predictions.serializers import PredictionCardSerializer, PublicSettingsSerializer
+
+ACTIVITY_REQUIRED_MSG = (
+    "Pour voir les pronos, effectuez un dépôt ou un retrait au cours des 7 derniers jours."
+)
 
 
 class TodayPredictionsView(APIView):
@@ -23,12 +27,25 @@ class TodayPredictionsView(APIView):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
+        if not user_has_recent_accepted_transaction(request.user, days=7):
+            return Response(
+                {
+                    "date": timezone.localdate().isoformat(),
+                    "count": 0,
+                    "groups": [],
+                    "locked": True,
+                    "code": "activity_required",
+                    "detail": ACTIVITY_REQUIRED_MSG,
+                }
+            )
+
         today = timezone.localdate()
         qs = (
             Prediction.objects.filter(
                 prediction_date=today,
                 is_published=True,
                 fixture__competition__is_active=True,
+                fixture__status__in=[Fixture.Status.SCHEDULED, Fixture.Status.LIVE],
             )
             .select_related(
                 "fixture",

@@ -1376,23 +1376,31 @@ def payment_fonction(reference):
             deposit_connect(transaction=transaction)
         elif transaction.api == "feexpay":
             feexpay_deposit(transaction=transaction)
+        elif transaction.api == "autopayer":
+            depot_auto_payer(transaction=transaction)
     elif transaction.type_trans == "withdrawal":
         if transaction.api == "connect":
             connect_pro_withd_process(transaction=transaction)
         elif transaction.api == "feexpay":
             feexpay_withdrawall_process.delay(transaction_id=transaction.id)
+        elif transaction.api == "autopayer":
+            autopayer_withdrawall_process.delay(transaction_id=transaction.id)
     elif transaction.type_trans == "buy":
         # Crypto buy: collect mobile money from the user (same flow as deposit)
         if transaction.api == "connect":
             deposit_connect(transaction=transaction)
         elif transaction.api == "feexpay":
             feexpay_deposit(transaction=transaction)
+        elif transaction.api == "autopayer":
+            depot_auto_payer(transaction=transaction)
     elif transaction.type_trans == "sale":
         # Crypto sale: send payout to user after admin approval (same flow as withdrawal)
         if transaction.api == "connect":
             connect_pro_withd_process(transaction=transaction)
         elif transaction.api == "feexpay":
             feexpay_withdrawall_process.delay(transaction_id=transaction.id)
+        elif transaction.api == "autopayer":
+            autopayer_withdrawall_process.delay(transaction_id=transaction.id)
 
 
 def xbet_withdrawal_process(transaction: Transaction):
@@ -1806,6 +1814,88 @@ def feexpay_withdrawall_process(transaction_id, disbursements=False):
         connect_pro_logger.error(
             f"[FEEXPAY_WITHDRAW] Erreur critique | transaction_id={transaction.id} | {e}",
             exc_info=True
+        )
+        return False
+
+
+def depot_auto_payer(transaction: Transaction):
+    """Payin AutoPayer — délègue au module sécurisé integrations.autopayer."""
+    from integrations.autopayer.service import depot_auto_payer as _depot
+
+    return _depot(transaction)
+
+
+@shared_task
+def autopayer_withdrawall_process(transaction_id, disbursements=False):
+    """
+    Retrait AutoPayer atomique (anti double payout) — même pattern que FeexPay.
+    """
+    from integrations.autopayer.service import retrait_auto_payer
+
+    transaction = Transaction.objects.get(id=transaction_id)
+    connect_pro_logger.info(
+        f"[AUTOPAYER_WITHDRAW] Début process | transaction_id={transaction.id}"
+    )
+
+    try:
+        with db_transaction.atomic():
+            trx = (
+                Transaction.objects.select_for_update().get(id=transaction.id)
+            )
+
+            if trx.payout_started:
+                connect_pro_logger.warning(
+                    f"[AUTOPAYER_WITHDRAW] Déjà en cours | transaction_id={trx.id}"
+                )
+                return False
+
+            if trx.payout_done:
+                connect_pro_logger.warning(
+                    f"[AUTOPAYER_WITHDRAW] Déjà traité | transaction_id={trx.id}"
+                )
+                return False
+
+            trx.payout_started = True
+            trx.save(update_fields=["payout_started"])
+
+            if trx.type_trans == "withdrawal" and not disbursements:
+                response = xbet_withdrawal_process(transaction=trx)
+            else:
+                response = True
+
+            if response is not True:
+                return "Echec du process xbet_withdrawal"
+
+        connect_pro_logger.info(
+            f"[AUTOPAYER_WITHDRAW] Appel payout AutoPayer | transaction_id={trx.id}"
+        )
+        result = retrait_auto_payer(transaction=trx)
+        if not result.get("ok"):
+            connect_pro_logger.error(
+                f"[AUTOPAYER_WITHDRAW] Payout échoué | transaction_id={trx.id} | {result}"
+            )
+            return False
+
+        with db_transaction.atomic():
+            trx = Transaction.objects.select_for_update().get(id=trx.id)
+            trx.payout_done = True
+            trx.save(update_fields=["payout_done"])
+
+        connect_pro_logger.info(
+            f"[AUTOPAYER_WITHDRAW] Succès final | transaction_id={trx.id}"
+        )
+        return True
+
+    except OperationalError as e:
+        connect_pro_logger.error(
+            f"[AUTOPAYER_WITHDRAW] Lock DB échoué | transaction_id={transaction.id} | {e}",
+            exc_info=True,
+        )
+        return False
+    except Exception as e:
+        connect_pro_logger.error(
+            f"[AUTOPAYER_WITHDRAW] Erreur critique | transaction_id={transaction.id} | {e}",
+            exc_info=True,
         )
         return False
 
