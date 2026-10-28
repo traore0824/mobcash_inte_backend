@@ -1,6 +1,7 @@
 from django.urls import path, include
 from . import views
 from .my_solde import MySoldeView
+from predictions.admin_views import PredictionAdminListView
 from .chatbot_webhook import ChatbotHumanMessagesView, ChatbotWebhookView
 from .support_lookup import (
     PublicTransactionLookupView,
@@ -111,6 +112,7 @@ urlpatterns = [
     path("ann/<str:pk>", views.DetailsAdvertisementViews.as_view()),
     path("statistics", views.StatisticsView.as_view()),
     path("my-solde", MySoldeView.as_view(), name="my-solde"),
+    path("predictions", PredictionAdminListView.as_view(), name="admin-predictions"),
     path("balance", views.APIBalanceView.as_view()),
     path("mobcash-balance", views.MobCashBalance.as_view()),
     path("show-transaction-status", views.TransactionStatus.as_view()),

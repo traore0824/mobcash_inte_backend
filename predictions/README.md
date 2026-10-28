@@ -44,6 +44,21 @@ celery -A mobcash_inte_backend beat -l info
 
 - `GET /api/v1/predictions/today/` (JWT) — cartes du **jour uniquement**, groupées par championnat
 - `GET /api/v1/predictions/settings/`
+- `GET /mobcash/predictions/` (staff) — consultation admin, sans verrou dépôt/retrait :
+  `?date=YYYY-MM-DD&outcome=won|lost|pending|void&search=...&page=1&page_size=20`
+  (retourne aussi un `summary` : total, gagnés, perdus, en attente, taux de réussite)
+
+## Admin web
+
+La page « Pronostics » du dashboard (`mobcash-master-admin`) est masquée par défaut.
+Pour l'activer, ajouter dans le `.env` du dashboard :
+
+```
+NEXT_PUBLIC_ENABLE_PREDICTIONS="true"
+```
+
+Puis relancer le build / redémarrer le front. Le flag ne concerne que l'affichage
+admin : le pipeline Celery et l'API mobile continuent de fonctionner normalement.
 
 ## Championnats
 

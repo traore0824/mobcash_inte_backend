@@ -86,6 +86,31 @@ class PredictionCardSerializer(serializers.ModelSerializer):
         }
 
 
+class PredictionAdminSerializer(PredictionCardSerializer):
+    """Carte prono enrichie pour la consultation depuis l'admin."""
+
+    fixture_id = serializers.IntegerField(source="fixture.id", read_only=True)
+    round_name = serializers.CharField(source="fixture.round_name", read_only=True)
+    published_at = serializers.DateTimeField(read_only=True)
+    settled_at = serializers.DateTimeField(read_only=True)
+    locked_at = serializers.DateTimeField(read_only=True)
+    model_version = serializers.SerializerMethodField()
+
+    class Meta(PredictionCardSerializer.Meta):
+        fields = PredictionCardSerializer.Meta.fields + (
+            "fixture_id",
+            "round_name",
+            "is_published",
+            "published_at",
+            "locked_at",
+            "settled_at",
+            "model_version",
+        )
+
+    def get_model_version(self, obj):
+        return obj.model_version.name if obj.model_version_id else None
+
+
 class PublicSettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = PredictionSettings
