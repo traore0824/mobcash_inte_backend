@@ -50,6 +50,8 @@ class TodayPredictionsView(APIView):
                     Fixture.Status.SCHEDULED,
                     Fixture.Status.LIVE,
                     Fixture.Status.FINISHED,
+                    Fixture.Status.POSTPONED,
+                    Fixture.Status.CANCELLED,
                 ],
             )
             .select_related(

@@ -68,6 +68,10 @@ class PredictionCardSerializer(serializers.ModelSerializer):
             return "FT"
         if fx.status == Fixture.Status.LIVE:
             return f"{fx.minute}'" if fx.minute else "LIVE"
+        if fx.status == Fixture.Status.POSTPONED:
+            return "Reporté"
+        if fx.status == Fixture.Status.CANCELLED:
+            return "Annulé"
         return "NS"
 
     def get_outcome_label(self, obj):
