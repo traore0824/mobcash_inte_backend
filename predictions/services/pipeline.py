@@ -183,9 +183,12 @@ def generate_predictions_for_day(day: date | None = None) -> dict:
             "confidence_level": pick.confidence,
             "markets": pick.markets,
             "prediction_date": day,
-            "is_published": True,
-            "published_at": timezone.now(),
         }
+
+        # Ne pas écraser un masquage / une publication décidée par l'admin.
+        if existing is None:
+            defaults["is_published"] = True
+            defaults["published_at"] = timezone.now()
 
         # Verrouiller au coup d'envoi / live / finished
         if fixture.status in {Fixture.Status.LIVE, Fixture.Status.FINISHED}:
