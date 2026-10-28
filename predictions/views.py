@@ -46,7 +46,11 @@ class TodayPredictionsView(APIView):
                 is_published=True,
                 is_deleted=False,
                 fixture__competition__is_active=True,
-                fixture__status__in=[Fixture.Status.SCHEDULED, Fixture.Status.LIVE],
+                fixture__status__in=[
+                    Fixture.Status.SCHEDULED,
+                    Fixture.Status.LIVE,
+                    Fixture.Status.FINISHED,
+                ],
             )
             .select_related(
                 "fixture",
