@@ -55,6 +55,9 @@ class PredictionAdmin(admin.ModelAdmin):
     search_fields = ("fixture__home__name", "fixture__away__name", "best_market_label")
     readonly_fields = ("published_at", "locked_at", "settled_at")
 
+    def get_queryset(self, request):
+        return super().get_queryset(request).filter(is_deleted=False)
+
 
 @admin.register(ModelVersion)
 class ModelVersionAdmin(admin.ModelAdmin):

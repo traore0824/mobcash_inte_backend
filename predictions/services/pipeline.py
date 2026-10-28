@@ -162,6 +162,9 @@ def generate_predictions_for_day(day: date | None = None) -> dict:
     updated = 0
     for fixture in fixtures:
         existing = Prediction.objects.filter(fixture=fixture).first()
+        # Un prono supprimé par l'admin ne doit jamais être recréé.
+        if existing and existing.is_deleted:
+            continue
         # Regénérer tant que non figé (y compris anciens heuristiques)
         if existing and existing.is_locked:
             continue
@@ -230,6 +233,7 @@ def settle_finished_for_day(day: date | None = None) -> int:
     qs = Prediction.objects.filter(
         prediction_date=day,
         outcome=Prediction.Outcome.PENDING,
+        is_deleted=False,
         fixture__status=Fixture.Status.FINISHED,
     ).select_related("fixture")
     count = 0

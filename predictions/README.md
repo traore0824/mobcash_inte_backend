@@ -47,6 +47,12 @@ celery -A mobcash_inte_backend beat -l info
 - `GET /mobcash/predictions/` (staff) — consultation admin, sans verrou dépôt/retrait :
   `?date=YYYY-MM-DD&outcome=won|lost|pending|void&search=...&page=1&page_size=20`
   (retourne aussi un `summary` : total, gagnés, perdus, en attente, taux de réussite)
+- `PATCH /mobcash/predictions/<id>` (staff) — corriger pari, probabilité, confiance, résultat, publication
+- `DELETE /mobcash/predictions/<id>` (staff) — suppression logique : le prono disparaît côté users
+  et le pipeline ne le recrée pas
+
+> Handicap +1 : un match perdu par exactement 1 but est un **push** (remboursé) → `void`,
+> pas une perte. Utiliser `python manage.py fix_prediction_pushes` pour corriger l'historique.
 
 ## Admin web
 

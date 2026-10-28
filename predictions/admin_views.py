@@ -12,8 +12,9 @@ from datetime import datetime
 from typing import Optional
 
 from django.db.models import Count, Q
-from rest_framework import permissions
-from rest_framework.generics import ListAPIView
+from django.utils import timezone
+from rest_framework import permissions, status
+from rest_framework.generics import ListAPIView, RetrieveUpdateDestroyAPIView
 from rest_framework.response import Response
 
 from accounts.helpers import CustomPagination
@@ -50,7 +51,8 @@ class PredictionAdminListView(ListAPIView):
 
     def get_queryset(self):
         qs = (
-            Prediction.objects.select_related(
+            Prediction.objects.filter(is_deleted=False)
+            .select_related(
                 "fixture",
                 "fixture__home",
                 "fixture__away",
@@ -124,3 +126,40 @@ class PredictionAdminListView(ListAPIView):
 
         serializer = self.get_serializer(queryset, many=True)
         return Response({"results": serializer.data, "summary": summary})
+
+
+class PredictionAdminDetailView(RetrieveUpdateDestroyAPIView):
+    """
+    PATCH /mobcash/predictions/<id> — corriger un prono (pari, proba, résultat, publication)
+    DELETE /mobcash/predictions/<id> — supprimer le prono (il n'apparaît plus côté users)
+    """
+
+    permission_classes = [permissions.IsAdminUser]
+    serializer_class = PredictionAdminSerializer
+
+    def get_queryset(self):
+        return Prediction.objects.filter(is_deleted=False).select_related(
+            "fixture",
+            "fixture__home",
+            "fixture__away",
+            "fixture__competition",
+            "model_version",
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        """Suppression logique : le prono disparaît côté users et n'est pas recréé."""
+        prediction = self.get_object()
+        prediction.is_deleted = True
+        prediction.is_published = False
+        prediction.save(update_fields=["is_deleted", "is_published"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def perform_update(self, serializer):
+        prediction = serializer.save()
+        if "outcome" in serializer.validated_data:
+            if prediction.outcome == Prediction.Outcome.PENDING:
+                prediction.settled_at = None
+            else:
+                prediction.settled_at = timezone.now()
+            prediction.save(update_fields=["settled_at"])
+

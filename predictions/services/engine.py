@@ -430,8 +430,14 @@ def settle_market(market: str, score_home: int, score_away: int) -> bool | None:
     if market == "under_25":
         return total < 3
     if market == "ah_home_plus_1":
+        # Handicap +1 : push (remboursé) si le domicile perd par exactement 1 but
+        if score_home + 1 == score_away:
+            return None
         return (score_home + 1) > score_away
     if market == "ah_away_plus_1":
+        # Handicap +1 : push (remboursé) si l'extérieur perd par exactement 1 but
+        if score_away + 1 == score_home:
+            return None
         return (score_away + 1) > score_home
     if market == "home_minus_15":
         return (score_home - score_away) >= 2

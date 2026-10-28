@@ -130,6 +130,11 @@ class Prediction(models.Model):
     )
     settled_at = models.DateTimeField(null=True, blank=True)
     is_published = models.BooleanField(default=True)
+    is_deleted = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="Masqué côté users et ignoré par le pipeline (suppression admin)",
+    )
 
     class Meta:
         ordering = ["fixture__competition__priority", "fixture__kickoff_at"]

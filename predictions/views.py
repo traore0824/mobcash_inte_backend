@@ -44,6 +44,7 @@ class TodayPredictionsView(APIView):
             Prediction.objects.filter(
                 prediction_date=today,
                 is_published=True,
+                is_deleted=False,
                 fixture__competition__is_active=True,
                 fixture__status__in=[Fixture.Status.SCHEDULED, Fixture.Status.LIVE],
             )
