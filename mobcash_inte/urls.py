@@ -163,6 +163,11 @@ urlpatterns = [
         name="partner-transaction-status",
     ),
 
+    path(
+        "retry-withdrawal",
+        views.RetryWithdrawalView.as_view(),
+        name="retry-withdrawal",
+    ),
     # ============================================================
     # Coupon System V2 Routes
     # ============================================================

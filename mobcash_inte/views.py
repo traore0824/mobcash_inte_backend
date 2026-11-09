@@ -2726,6 +2726,109 @@ class UpdateCaisseBalanceView(decorators.APIView):
             )
 
 
+class RetryWithdrawalView(decorators.APIView):
+    """
+    Relance le payout d'un retrait non encore confirmé.
+    Similaire au retry_partner_withdraw de onebridge :
+      - Refuse si la transaction n'est pas un retrait
+      - Refuse si déjà accepté (accept)
+      - Reset payout_started / payout_done pour autoriser un nouvel envoi
+      - Remet le statut à pending et appelle la bonne API selon transaction.api
+    Permission: Admin uniquement
+    """
+
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, *args, **kwargs):
+        reference = (request.data.get("reference") or "").strip()
+        if not reference:
+            return Response(
+                {"error": "Le paramètre 'reference' est requis."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        transaction = Transaction.objects.filter(reference=reference).first()
+        if not transaction:
+            return Response(
+                {"error": "Transaction non trouvée."}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Uniquement pour les retraits
+        if transaction.type_trans != "withdrawal":
+            return Response(
+                {"error": "La relance est réservée aux retraits."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Refus si déjà accepté/annulé
+        if transaction.status in ("accept", "annuler"):
+            return Response(
+                {"error": f"Ce retrait est déjà '{transaction.status}', relance impossible."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        api = (transaction.api or "").lower()
+        if api not in ("connect", "feexpay", "autopayer"):
+            return Response(
+                {"error": f"API de retrait non supportée pour la relance : {api}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            with db_transaction.atomic():
+                locked = Transaction.objects.select_for_update().get(pk=transaction.pk)
+
+                # Double-vérification sous lock
+                if locked.status in ("accept", "annuler"):
+                    return Response(
+                        {"error": f"Ce retrait est déjà '{locked.status}', relance impossible."},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+
+                # Reset des flags anti double-payout pour autoriser un nouvel envoi
+                locked.payout_started = False
+                locked.payout_done = False
+                locked.save(update_fields=["payout_started", "payout_done"])
+
+                locked.change_status(
+                    new_status="pending",
+                    source="ADMIN",
+                    message=f"Retrait relancé manuellement par admin (id={request.user.id})",
+                )
+
+            # Appel de la bonne API en dehors du lock
+            transaction.refresh_from_db()
+            if api == "connect":
+                connect_pro_withd_process(transaction=transaction)
+            elif api == "feexpay":
+                feexpay_withdrawall_process.delay(transaction_id=transaction.id)
+            elif api == "autopayer":
+                autopayer_withdrawall_process.delay(transaction_id=transaction.id)
+
+            transaction.refresh_from_db()
+            connect_pro_logger.info(
+                "[RETRY_WITHDRAWAL] ref=%s api=%s new_status=%s admin=%s",
+                transaction.reference,
+                api,
+                transaction.status,
+                request.user.id,
+            )
+            return Response(
+                TransactionDetailsSerializer(transaction).data,
+                status=status.HTTP_200_OK,
+            )
+
+        except Exception as e:
+            connect_pro_logger.error(
+                f"[RETRY_WITHDRAWAL] Erreur relance retrait {reference}: {e}",
+                exc_info=True,
+            )
+            return Response(
+                {"error": f"Erreur lors de la relance : {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
 class ProcessTransactionView(decorators.APIView):
     """
     API 1: Traiter une transaction (dépôt ou retrait)
