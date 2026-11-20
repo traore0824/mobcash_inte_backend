@@ -29,7 +29,8 @@ COOLDOWN_PREFIX = "phone_otp_cd:"
 
 PURPOSE_REGISTRATION = "registration"
 PURPOSE_SMS_PHONE = "sms_phone"
-VALID_PURPOSES = {PURPOSE_REGISTRATION, PURPOSE_SMS_PHONE}
+PURPOSE_USER_PHONE = "user_phone"
+VALID_PURPOSES = {PURPOSE_REGISTRATION, PURPOSE_SMS_PHONE, PURPOSE_USER_PHONE}
 
 
 def build_full_phone(phone: str, phone_indicative: str | None = None) -> str:

@@ -1408,6 +1408,52 @@ class UserPhoneViewSet(viewsets.ModelViewSet):
         context["telegram_user"] = getattr(self.request, "telegram_user", None)
         return context
 
+    def _require_phone_otp_if_enabled(self, phone: str):
+        """Quand SMS est actif, exige un OTP vérifié pour ce numéro."""
+        from accounts.phone_otp import (
+            PURPOSE_USER_PHONE,
+            consume_phone_verification_token,
+        )
+        from mobcash_inte.sms_service import is_sms_enabled
+
+        if not is_sms_enabled():
+            return None
+        token = self.request.data.get("phone_verification_token")
+        if consume_phone_verification_token(token, phone or "", PURPOSE_USER_PHONE):
+            return None
+        return Response(
+            {
+                "success": False,
+                "error": "PHONE_NOT_VERIFIED",
+                "details": "Veuillez vérifier ce numéro par SMS (OTP) avant de l'enregistrer.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    def create(self, request, *args, **kwargs):
+        blocked = self._require_phone_otp_if_enabled(request.data.get("phone") or "")
+        if blocked is not None:
+            return blocked
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        new_phone = request.data.get("phone", instance.phone)
+        if str(new_phone or "") != str(instance.phone or ""):
+            blocked = self._require_phone_otp_if_enabled(new_phone or "")
+            if blocked is not None:
+                return blocked
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        new_phone = request.data.get("phone", instance.phone)
+        if "phone" in request.data and str(new_phone or "") != str(instance.phone or ""):
+            blocked = self._require_phone_otp_if_enabled(new_phone or "")
+            if blocked is not None:
+                return blocked
+        return super().partial_update(request, *args, **kwargs)
+
     def perform_create(self, serializer):
         if self.request.user.is_authenticated:
             serializer.save(user=self.request.user)

@@ -52,6 +52,7 @@ from mobcash_inte.models import Setting
 from .phone_otp import (
     PURPOSE_REGISTRATION,
     PURPOSE_SMS_PHONE,
+    PURPOSE_USER_PHONE,
     build_full_phone,
     consume_phone_verification_token,
     send_phone_otp,
@@ -141,10 +142,10 @@ def registration(request):
 def send_phone_otp_view(request):
     """
     POST /auth/phone-otp/send
-    body: { phone, phone_indicative?, purpose: registration|sms_phone }
+    body: { phone, phone_indicative?, purpose: registration|sms_phone|user_phone }
     """
     purpose = (request.data.get("purpose") or PURPOSE_REGISTRATION).strip().lower()
-    if purpose == PURPOSE_SMS_PHONE and not request.user.is_authenticated:
+    if purpose in {PURPOSE_SMS_PHONE, PURPOSE_USER_PHONE} and not request.user.is_authenticated:
         return Response(
             {"success": False, "details": "Authentification requise"},
             status=status.HTTP_401_UNAUTHORIZED,
@@ -183,7 +184,7 @@ def verify_phone_otp_view(request):
     → phone_verification_token
     """
     purpose = (request.data.get("purpose") or PURPOSE_REGISTRATION).strip().lower()
-    if purpose == PURPOSE_SMS_PHONE and not request.user.is_authenticated:
+    if purpose in {PURPOSE_SMS_PHONE, PURPOSE_USER_PHONE} and not request.user.is_authenticated:
         return Response(
             {"success": False, "details": "Authentification requise"},
             status=status.HTTP_401_UNAUTHORIZED,
