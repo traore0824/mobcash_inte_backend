@@ -49,6 +49,14 @@ from mobcash_inte.telegram_service import (
 )
 from mobcash_inte.sms_service import is_sms_enabled, send_sms_message, _get_user_sms_phone
 from mobcash_inte.models import Setting
+from .phone_otp import (
+    PURPOSE_REGISTRATION,
+    PURPOSE_SMS_PHONE,
+    build_full_phone,
+    consume_phone_verification_token,
+    send_phone_otp,
+    verify_phone_otp,
+)
 
 from django.contrib.gis.geoip2 import GeoIP2
 from rest_framework_simplejwt.token_blacklist.models import (
@@ -98,12 +106,105 @@ def registration(request):
             },
             status=status.HTTP_403_FORBIDDEN,
         )
+
+    phone = request.data.get("phone") or ""
+    phone_indicative = request.data.get("phone_indicative")
+    token = request.data.get("phone_verification_token")
+
+    if is_sms_enabled():
+        if not consume_phone_verification_token(
+            token, phone, PURPOSE_REGISTRATION, phone_indicative
+        ):
+            return Response(
+                {
+                    "success": False,
+                    "error": "PHONE_NOT_VERIFIED",
+                    "details": "Veuillez vérifier votre numéro de téléphone par SMS avant de vous inscrire.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
     serializer = UserRegistrationSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     user = serializer.save()
+    if is_sms_enabled():
+        user.phone = build_full_phone(phone, phone_indicative) or user.phone
+        user.sms_verified = True
+        user.save(update_fields=["phone", "sms_verified"])
     return Response(
         UserRegistrationSerializer(user).data, status=status.HTTP_201_CREATED
     )
+
+
+@api_view(["POST"])
+@permission_classes([permissions.AllowAny])
+def send_phone_otp_view(request):
+    """
+    POST /auth/phone-otp/send
+    body: { phone, phone_indicative?, purpose: registration|sms_phone }
+    """
+    purpose = (request.data.get("purpose") or PURPOSE_REGISTRATION).strip().lower()
+    if purpose == PURPOSE_SMS_PHONE and not request.user.is_authenticated:
+        return Response(
+            {"success": False, "details": "Authentification requise"},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    result = send_phone_otp(
+        phone=request.data.get("phone") or "",
+        purpose=purpose,
+        phone_indicative=request.data.get("phone_indicative"),
+        brand=(request.data.get("brand") or "MobCash"),
+    )
+    if not result.get("success"):
+        err = result.get("error")
+        status_code = status.HTTP_400_BAD_REQUEST
+        if err == "sms_disabled":
+            status_code = status.HTTP_400_BAD_REQUEST
+        elif err == "sms_send_failed":
+            status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+        return Response(
+            {
+                "success": False,
+                "error": err,
+                "details": result.get("details") or "Échec envoi OTP",
+            },
+            status=status_code,
+        )
+    return Response(result, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([permissions.AllowAny])
+def verify_phone_otp_view(request):
+    """
+    POST /auth/phone-otp/verify
+    body: { phone, phone_indicative?, code, purpose }
+    → phone_verification_token
+    """
+    purpose = (request.data.get("purpose") or PURPOSE_REGISTRATION).strip().lower()
+    if purpose == PURPOSE_SMS_PHONE and not request.user.is_authenticated:
+        return Response(
+            {"success": False, "details": "Authentification requise"},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    result = verify_phone_otp(
+        phone=request.data.get("phone") or "",
+        code=request.data.get("code") or request.data.get("otp") or "",
+        purpose=purpose,
+        phone_indicative=request.data.get("phone_indicative"),
+    )
+    if not result.get("success"):
+        return Response(
+            {
+                "success": False,
+                "error": result.get("error"),
+                "details": result.get("details") or "Code invalide",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return Response(result, status=status.HTTP_200_OK)
 
 
 
@@ -386,6 +487,8 @@ def update_whatsapp_phone(request):
 def update_sms_phone(request):
     user = request.user
     phone = request.data.get("phone")
+    phone_indicative = request.data.get("phone_indicative")
+    token = request.data.get("phone_verification_token")
 
     if phone in (None, ""):
         user.sms_verified = False
@@ -394,32 +497,32 @@ def update_sms_phone(request):
 
     if not is_sms_enabled():
         return Response(
-            {"success": False, "details": "SMS non activé"},
+            {"success": False, "error": "SMS_DISABLED", "details": "SMS non activé"},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    user.phone = phone
-    user.save()
-
-    to_phone = _get_user_sms_phone(user)
-    if not to_phone:
+    full_phone = build_full_phone(phone, phone_indicative)
+    if not full_phone:
         return Response(
             {"success": False, "details": "Numéro invalide"},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    result = send_sms_message(
-        to_phone,
-        "Votre numéro BLAFFA est confirmé. Vous recevrez vos alertes par SMS.",
-    )
-    if not result.get("success"):
+    if not consume_phone_verification_token(
+        token, phone, PURPOSE_SMS_PHONE, phone_indicative
+    ):
         return Response(
-            {"success": False, "details": "Échec envoi SMS"},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            {
+                "success": False,
+                "error": "PHONE_NOT_VERIFIED",
+                "details": "Veuillez vérifier ce numéro par SMS (OTP) avant de l'enregistrer.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
         )
 
+    user.phone = full_phone
     user.sms_verified = True
-    user.save()
+    user.save(update_fields=["phone", "sms_verified"])
     return Response(
         {
             "success": True,

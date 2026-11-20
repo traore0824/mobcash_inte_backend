@@ -635,6 +635,33 @@ SIMPLE_JWT = {
 # (évite qu'un autre worker Redis /0 / queue "celery" vole les tâches)
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/2")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://127.0.0.1:6379/2")
+
+# Cache OTP téléphone (Redis DB 3 ; fallback mémoire si Redis indispo)
+_DJANGO_CACHE_URL = os.getenv("DJANGO_CACHE_URL", "redis://127.0.0.1:6379/3")
+try:
+    import redis as _redis_mod
+
+    _redis_mod.Redis.from_url(_DJANGO_CACHE_URL).ping()
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": _DJANGO_CACHE_URL,
+            "KEY_PREFIX": "mobcash_inte",
+            "TIMEOUT": 600,
+        }
+    }
+except Exception:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "mobcash_inte_phone_otp",
+        }
+    }
+PHONE_OTP_TEST_MODE = os.getenv("PHONE_OTP_TEST_MODE", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"

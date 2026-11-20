@@ -10,6 +10,8 @@ urlpatterns = [
     path("change_password", views.change_password),
     path("send_otp", views.send_otp),
     path("send_otp_whatsapp", views.send_otp_whatsapp),
+    path("phone-otp/send", views.send_phone_otp_view),
+    path("phone-otp/verify", views.verify_phone_otp_view),
     path("check-whatsapp-phone", views.check_whatsapp_phone),
     path("reset_password", views.reset_password),
     path("whatsapp-phone", views.update_whatsapp_phone),
