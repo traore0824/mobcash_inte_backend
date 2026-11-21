@@ -12,7 +12,6 @@ from django.utils.html import strip_tags
 from logger import LoggerService
 from mobcash_inte.whatsapp_service import send_whatsapp_to_user
 from mobcash_inte.telegram_service import send_telegram_to_user
-from mobcash_inte.sms_service import send_sms_to_user
 from mobcash_inte.mobcash_service import BetApp
 from mobcash_inte.models import BotMessage, Notification, Transaction
 from mobcash_inte.serializers import NotificationSerializer
@@ -174,13 +173,7 @@ def send_notification(
                     f"Erreur send_telegram_to_user pour utilisateur {user.id}: {str(e)}",
                     exc_info=True,
                 )
-            try:
-                send_sms_to_user(user=user, title=title, content=content)
-            except Exception as e:
-                connect_pro_logger.error(
-                    f"Erreur send_sms_to_user pour utilisateur {user.id}: {str(e)}",
-                    exc_info=True,
-                )
+            # SMS réservé à l'OTP (inscription / ajout numéro), pas aux notifs transaction.
         else:
             connect_pro_logger.warning(
                 f"send_notification: utilisateur inconnu ou non valide ({user})"
