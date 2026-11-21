@@ -135,6 +135,7 @@ from payment import (
     check_solde,
     process_transaction_notifications_and_bonus,
 )
+from django.core.cache import cache
 from django.db.models import Sum, Count, Q, Avg
 from django.db.models.functions import TruncDate, TruncWeek, TruncMonth, TruncYear
 
@@ -2038,263 +2039,239 @@ class DetailsAdvertisementViews(generics.RetrieveUpdateDestroyAPIView):
 
 class StatisticsView(decorators.APIView):
     permission_classes = [permissions.IsAdminUser]
+    CACHE_TTL = 90  # secondes
+    DEFAULT_CHART_DAYS = 30
 
-    def get(self, request, *args, **kwargs):
-        """
-        Retourne les statistiques importantes :
-        - Volume des transactions
-        - Croissance utilisateurs
-        - Système de parrainage
-        """
-        # Paramètres de période (optionnels)
-        start_date = request.GET.get("start_date")
-        end_date = request.GET.get("end_date")
+    @staticmethod
+    def _serialize_evolution_rows(rows, date_key):
+        out = []
+        for row in rows:
+            item = dict(row)
+            value = item.get(date_key)
+            if hasattr(value, "isoformat"):
+                item[date_key] = value.isoformat()
+            if item.get("total_amount") is not None:
+                item["total_amount"] = float(item["total_amount"])
+            out.append(item)
+        return out
 
-        # Filtre de base pour les dates
-        date_filter = Q()
+    def _build_statistics(self, start_date, end_date):
+        now = timezone.now()
+        explicit_period = bool(start_date or end_date)
+
+        # Séries chronologiques : 30 jours par défaut (évite de scanner tout l'historique)
+        chart_start = start_date or (now - timedelta(days=self.DEFAULT_CHART_DAYS)).isoformat()
+        chart_end = end_date
+
+        chart_tx_filter = Q(created_at__gte=chart_start)
+        if chart_end:
+            chart_tx_filter &= Q(created_at__lte=chart_end)
+
+        # Totaux volume : période explicite, sinon tout l'historique (cartes dashboard)
+        volume_tx_filter = Q()
         if start_date:
-            date_filter &= Q(created_at__gte=start_date)
+            volume_tx_filter &= Q(created_at__gte=start_date)
         if end_date:
-            date_filter &= Q(created_at__lte=end_date)
+            volume_tx_filter &= Q(created_at__lte=end_date)
 
-        # ========== VOLUME DES TRANSACTIONS ==========
-        transactions = Transaction.objects.filter(date_filter)
+        volume_transactions = Transaction.objects.filter(volume_tx_filter)
+        chart_transactions = Transaction.objects.filter(chart_tx_filter)
 
-        # Total des dépôts
-        deposits = transactions.filter(type_trans="deposit", status="accept")
-        total_deposits_amount = deposits.aggregate(total=Sum("amount"))["total"] or 0
-        total_deposits_count = deposits.count()
-
-        # Total des retraits
-        withdrawals = transactions.filter(type_trans="withdrawal", status="accept")
-        total_withdrawals_amount = (
-            withdrawals.aggregate(total=Sum("amount"))["total"] or 0
+        volume_agg = volume_transactions.filter(
+            type_trans__in=["deposit", "withdrawal"], status="accept"
+        ).values("type_trans").annotate(
+            total_amount=Sum("amount"),
+            total_count=Count("id"),
         )
-        total_withdrawals_count = withdrawals.count()
+        volume_by_type = {row["type_trans"]: row for row in volume_agg}
+        deposit_row = volume_by_type.get("deposit", {})
+        withdrawal_row = volume_by_type.get("withdrawal", {})
+        total_deposits_amount = deposit_row.get("total_amount") or 0
+        total_deposits_count = deposit_row.get("total_count") or 0
+        total_withdrawals_amount = withdrawal_row.get("total_amount") or 0
+        total_withdrawals_count = withdrawal_row.get("total_count") or 0
 
-        # Volume net
-        connect_pro_logger.info("[STATISTICS] Début calcul net_volume")
-
-        apps = AppName.objects.all()
-        connect_pro_logger.info("[STATISTICS] Nombre d'apps: %s", apps.count())
-
-        has_app_with_hash = apps.filter(_hash__isnull=False).exclude(_hash="").exists()
-        connect_pro_logger.info("[STATISTICS] has_app_with_hash=%s", has_app_with_hash)
-
-        net_volume = 0
+        apps = list(AppName.objects.all())
+        has_app_with_hash = any(getattr(app, "_hash", None) for app in apps)
+        net_volume = 0.0
         if has_app_with_hash:
-            # Au moins une app a un hash → somme des soldes via Caisse
-            caisses = Caisse.objects.select_related("bet_app").all()
-            net_volume = sum(float(caisse.solde) for caisse in caisses)
-            connect_pro_logger.info(
-                "[STATISTICS] [SOURCE=CAISSE] net_volume=%s", net_volume
+            net_volume = float(
+                Caisse.objects.aggregate(total=Sum("solde"))["total"]
+                or 0
             )
-        elif apps.exists():
-            # Des apps existent mais aucune n'a de hash → get_wallet_balance
-            connect_pro_logger.info(
-                "[STATISTICS] [SOURCE=GET_WALLET_BALANCE] Appel get_wallet_balance()"
-            )
+        elif apps:
             try:
-                net_volume = MobCashExternalService().get_wallet_balance()
+                net_volume = float(MobCashExternalService().get_wallet_balance() or 0)
             except Exception as e:
                 connect_pro_logger.error(
-                    "[STATISTICS] [GET_WALLET_BALANCE] Erreur: %s", e, exc_info=True
-                )
-                net_volume = None
-            if net_volume is not None:
-                connect_pro_logger.info(
-                    "[STATISTICS] [GET_WALLET_BALANCE_RESULT] Valeur retournée: %s",
-                    net_volume,
-                )
-            else:
-                connect_pro_logger.warning(
-                    "[STATISTICS] [GET_WALLET_BALANCE_RESULT] get_wallet_balance() a retourné None"
+                    "[STATISTICS] get_wallet_balance error: %s", e, exc_info=True
                 )
                 net_volume = 0.0
-        else:
-            connect_pro_logger.warning("[STATISTICS] Aucune app trouvée, net_volume=0")
-            net_volume = 0.0
 
-        connect_pro_logger.info("[STATISTICS] net_volume final=%s", net_volume)
-
-        # Évolution par période
-        evolution_daily = (
-            transactions.filter(
-                type_trans__in=["deposit", "withdrawal"], status="accept"
-            )
-            .annotate(date=TruncDate("created_at"))
+        accepted_chart = chart_transactions.filter(
+            type_trans__in=["deposit", "withdrawal"], status="accept"
+        )
+        evolution_daily = self._serialize_evolution_rows(
+            accepted_chart.annotate(date=TruncDate("created_at"))
             .values("date", "type_trans")
             .annotate(total_amount=Sum("amount"), count=Count("id"))
-            .order_by("date")
+            .order_by("date"),
+            "date",
         )
-
-        evolution_weekly = (
-            transactions.filter(
-                type_trans__in=["deposit", "withdrawal"], status="accept"
-            )
-            .annotate(week=TruncWeek("created_at"))
+        evolution_weekly = self._serialize_evolution_rows(
+            accepted_chart.annotate(week=TruncWeek("created_at"))
             .values("week", "type_trans")
             .annotate(total_amount=Sum("amount"), count=Count("id"))
-            .order_by("week")
+            .order_by("week"),
+            "week",
         )
-
-        evolution_monthly = (
-            transactions.filter(
-                type_trans__in=["deposit", "withdrawal"], status="accept"
-            )
-            .annotate(month=TruncMonth("created_at"))
+        evolution_monthly = self._serialize_evolution_rows(
+            accepted_chart.annotate(month=TruncMonth("created_at"))
             .values("month", "type_trans")
             .annotate(total_amount=Sum("amount"), count=Count("id"))
-            .order_by("month")
+            .order_by("month"),
+            "month",
         )
-
-        evolution_yearly = (
-            transactions.filter(
-                type_trans__in=["deposit", "withdrawal"], status="accept"
-            )
-            .annotate(year=TruncYear("created_at"))
+        evolution_yearly = self._serialize_evolution_rows(
+            accepted_chart.annotate(year=TruncYear("created_at"))
             .values("year", "type_trans")
             .annotate(total_amount=Sum("amount"), count=Count("id"))
-            .order_by("year")
+            .order_by("year"),
+            "year",
         )
 
-        # ========== CROISSANCE UTILISATEURS ==========
-        users_date_filter = Q()
+        users_date_filter = Q(is_delete=False)
         if start_date:
             users_date_filter &= Q(date_joined__gte=start_date)
         if end_date:
             users_date_filter &= Q(date_joined__lte=end_date)
+        # Croissance users : même fenêtre que les charts si pas de période explicite
+        if not explicit_period:
+            users_date_filter &= Q(date_joined__gte=chart_start)
 
-        all_users = User.objects.filter(users_date_filter, is_delete=False)
-
-        # Nouveaux utilisateurs par période
-        new_users_daily = (
-            all_users.annotate(date=TruncDate("date_joined"))
+        period_users = User.objects.filter(users_date_filter)
+        new_users_daily = self._serialize_evolution_rows(
+            period_users.annotate(date=TruncDate("date_joined"))
             .values("date")
             .annotate(count=Count("id"))
-            .order_by("date")
+            .order_by("date"),
+            "date",
         )
-
-        new_users_weekly = (
-            all_users.annotate(week=TruncWeek("date_joined"))
+        new_users_weekly = self._serialize_evolution_rows(
+            period_users.annotate(week=TruncWeek("date_joined"))
             .values("week")
             .annotate(count=Count("id"))
-            .order_by("week")
+            .order_by("week"),
+            "week",
         )
-
-        new_users_monthly = (
-            all_users.annotate(month=TruncMonth("date_joined"))
+        new_users_monthly = self._serialize_evolution_rows(
+            period_users.annotate(month=TruncMonth("date_joined"))
             .values("month")
             .annotate(count=Count("id"))
-            .order_by("month")
+            .order_by("month"),
+            "month",
         )
 
-        # Utilisateurs actifs (qui ont fait au moins une transaction)
-        # Compte les User normaux avec transactions
-        user_transactions_filter = Q(transaction__isnull=False)
-        if start_date:
-            user_transactions_filter &= Q(transaction__created_at__gte=start_date)
+        active_since = start_date or chart_start
+        active_tx_qs = Transaction.objects.all()
+        if active_since:
+            active_tx_qs = active_tx_qs.filter(created_at__gte=active_since)
         if end_date:
-            user_transactions_filter &= Q(transaction__created_at__lte=end_date)
-
-        active_users = User.objects.filter(user_transactions_filter).distinct().count()
-
-        # Compte les TelegramUser avec transactions
-        telegram_transactions_filter = Q(transaction__isnull=False)
-        if start_date:
-            telegram_transactions_filter &= Q(transaction__created_at__gte=start_date)
-        if end_date:
-            telegram_transactions_filter &= Q(transaction__created_at__lte=end_date)
-
+            active_tx_qs = active_tx_qs.filter(created_at__lte=end_date)
+        # Count distinct FKs (évite DISTINCT sur toute la table User ~2s+)
+        active_users = (
+            active_tx_qs.exclude(user_id=None).values("user_id").distinct().count()
+        )
         active_telegram_users = (
-            TelegramUser.objects.filter(telegram_transactions_filter).distinct().count()
+            active_tx_qs.exclude(telegram_user_id=None)
+            .values("telegram_user_id")
+            .distinct()
+            .count()
         )
-
         active_users_count = active_users + active_telegram_users
 
-        # Utilisateurs par source
+        source_scope = chart_transactions if not explicit_period else volume_transactions
         users_by_source = []
         for source in ["mobile", "web", "bot"]:
-            source_transactions = transactions.filter(source=source)
-            unique_users = (
-                source_transactions.exclude(user__isnull=True)
-                .values("user")
-                .distinct()
-                .count()
-            )
-            unique_telegram_users = (
-                source_transactions.exclude(telegram_user__isnull=True)
-                .values("telegram_user")
-                .distinct()
-                .count()
-            )
+            source_qs = source_scope.filter(source=source)
             users_by_source.append(
-                {"source": source, "count": unique_users + unique_telegram_users}
+                {
+                    "source": source,
+                    "count": (
+                        source_qs.exclude(user_id=None)
+                        .values("user_id")
+                        .distinct()
+                        .count()
+                        + source_qs.exclude(telegram_user_id=None)
+                        .values("telegram_user_id")
+                        .distinct()
+                        .count()
+                    ),
+                }
             )
 
-        # Utilisateurs bloqués vs actifs
-        blocked_users = User.objects.filter(is_block=True, is_delete=False).count()
-        active_status_users = User.objects.filter(
-            is_active=True, is_block=False, is_delete=False
-        ).count()
-        inactive_status_users = User.objects.filter(
-            is_active=False, is_delete=False
-        ).count()
+        user_status = User.objects.filter(is_delete=False).aggregate(
+            blocked=Count("id", filter=Q(is_block=True)),
+            active=Count("id", filter=Q(is_active=True, is_block=False)),
+            inactive=Count("id", filter=Q(is_active=False)),
+            total=Count("id"),
+        )
+        blocked_users = user_status["blocked"] or 0
+        active_status_users = user_status["active"] or 0
+        inactive_status_users = user_status["inactive"] or 0
+        total_users = user_status["total"] or 0
 
-        # ========== SYSTÈME DE PARRAINAGE ==========
-        # Nombre de parrainages effectués (utilisateurs avec referrer_code)
-        parrainages_count = User.objects.filter(
+        parrainages_qs = User.objects.filter(
             referrer_code__isnull=False, referrer_code__gt="", is_delete=False
-        ).count()
+        )
+        if start_date:
+            parrainages_qs = parrainages_qs.filter(date_joined__gte=start_date)
+        if end_date:
+            parrainages_qs = parrainages_qs.filter(date_joined__lte=end_date)
+        parrainages_count = parrainages_qs.count()
 
-        if start_date or end_date:
-            parrainages_count = User.objects.filter(
-                referrer_code__isnull=False,
-                referrer_code__gt="",
-                is_delete=False,
-                date_joined__gte=start_date if start_date else timezone.datetime.min,
-                date_joined__lte=end_date if end_date else timezone.now(),
-            ).count()
-
-        # Montant total des bonus de parrainage distribués
         referral_bonuses = Bonus.objects.filter(reason_bonus__icontains="parrainage")
         if start_date:
             referral_bonuses = referral_bonuses.filter(created_at__gte=start_date)
         if end_date:
             referral_bonuses = referral_bonuses.filter(created_at__lte=end_date)
-
         total_referral_bonus = (
-            referral_bonuses.aggregate(total=Sum("amount"))["total"] or 0
+            referral_bonuses.aggregate(total=Sum("amount"))["total"]
+            or 0
         )
 
-        # Top utilisateurs par nombre de filleuls
+        top_codes = list(
+            User.objects.filter(
+                referrer_code__isnull=False, referrer_code__gt="", is_delete=False
+            )
+            .values("referrer_code")
+            .annotate(filleuls_count=Count("id"))
+            .order_by("-filleuls_count")[:10]
+        )
+        referrer_by_code = {
+            u.referral_code: u
+            for u in User.objects.filter(
+                referral_code__in=[r["referrer_code"] for r in top_codes]
+            ).only("id", "username", "email", "referral_code")
+        }
         top_referrers_list = []
-        for user in User.objects.filter(
-            referral_code__isnull=False, referral_code__gt=""
-        ):
-            filleuls = User.objects.filter(
-                referrer_code=user.referral_code, is_delete=False
-            ).count()
-            if filleuls > 0:
-                top_referrers_list.append(
-                    {
-                        "id": str(user.id),
-                        "username": user.username,
-                        "email": user.email,
-                        "referral_code": user.referral_code,
-                        "filleuls_count": filleuls,
-                    }
-                )
+        for row in top_codes:
+            user = referrer_by_code.get(row["referrer_code"])
+            if not user:
+                continue
+            top_referrers_list.append(
+                {
+                    "id": str(user.id),
+                    "username": user.username,
+                    "email": user.email,
+                    "referral_code": user.referral_code,
+                    "filleuls_count": row["filleuls_count"],
+                }
+            )
 
-        top_referrers_list = sorted(
-            top_referrers_list, key=lambda x: x["filleuls_count"], reverse=True
-        )[:10]
-
-        # Taux d'activation des codes de parrainage
         total_referral_codes = User.objects.filter(
             referral_code__isnull=False, referral_code__gt="", is_delete=False
         ).count()
-
         activated_referral_codes = (
             User.objects.filter(
                 referrer_code__isnull=False, referrer_code__gt="", is_delete=False
@@ -2303,193 +2280,192 @@ class StatisticsView(decorators.APIView):
             .distinct()
             .count()
         )
-
         activation_rate = (
             (activated_referral_codes / total_referral_codes * 100)
             if total_referral_codes > 0
             else 0
         )
 
-        # ========== STATISTIQUES DASHBOARD ==========
-        # Total Utilisateurs
-        total_users = User.objects.filter(is_delete=False).count()
-
-        # Utilisateurs Actifs/Inactifs
-        active_users_total = User.objects.filter(
-            is_active=True, is_block=False, is_delete=False
-        ).count()
-        inactive_users_total = User.objects.filter(
-            is_active=False, is_delete=False
-        ).count()
-
-        # Total Bonus
         total_bonus = (
-            Bonus.objects.filter(bonus_delete=False).aggregate(total=Sum("amount"))[
-                "total"
-            ]
+            Bonus.objects.filter(bonus_delete=False).aggregate(
+                total=Sum("amount")
+            )["total"]
             or 0
         )
 
-        # Statistiques Bot
-        bot_transactions = transactions.filter(source="bot")
-        total_transactions_bot = bot_transactions.count()
-        total_deposit_bot = bot_transactions.filter(
-            type_trans="deposit", status="accept"
-        ).count()
-        total_withdrawal_bot = bot_transactions.filter(
-            type_trans="withdrawal", status="accept"
-        ).count()
+        bot_scope = volume_transactions.filter(source="bot")
+        bot_agg = bot_scope.aggregate(
+            total=Count("id"),
+            deposits=Count("id", filter=Q(type_trans="deposit", status="accept")),
+            withdrawals=Count(
+                "id", filter=Q(type_trans="withdrawal", status="accept")
+            ),
+        )
+        telegram_users_qs = TelegramUser.objects.all()
+        if start_date:
+            telegram_users_qs = telegram_users_qs.filter(created_at__gte=start_date)
+        if end_date:
+            telegram_users_qs = telegram_users_qs.filter(created_at__lte=end_date)
+        telegram_users_count = telegram_users_qs.count()
 
-        # Utilisateurs Bot (TelegramUser)
-        telegram_users_count = TelegramUser.objects.count()
-        if start_date or end_date:
-            telegram_users_filter = Q()
-            if start_date:
-                telegram_users_filter &= Q(created_at__gte=start_date)
-            if end_date:
-                telegram_users_filter &= Q(created_at__lte=end_date)
-            telegram_users_count = TelegramUser.objects.filter(
-                telegram_users_filter
-            ).count()
+        # Carte "Total Transactions" : lifetime sauf période explicite
+        total_transactions = (
+            volume_transactions.count()
+            if explicit_period
+            else Transaction.objects.count()
+        )
 
-        # Total Transactions
-        total_transactions = transactions.count()
+        app_name_by_id = {app.id: app.name for app in apps}
+        transactions_by_app = {
+            name: {
+                type_key: {"count": 0, "total_amount": 0.0} for type_key, _ in TYPE_TRANS
+            }
+            for name in app_name_by_id.values()
+        }
+        app_agg = (
+            volume_transactions.filter(status="accept", app_id__isnull=False)
+            .values("app_id", "type_trans")
+            .annotate(
+                count=Count("id"), total_amount=Sum("amount")
+            )
+        )
+        for row in app_agg:
+            app_name = app_name_by_id.get(row["app_id"])
+            type_key = row["type_trans"]
+            if not app_name or type_key not in transactions_by_app.get(app_name, {}):
+                continue
+            transactions_by_app[app_name][type_key] = {
+                "count": row["count"],
+                "total_amount": float(row["total_amount"] or 0),
+            }
 
-        # Transactions par application
-        transactions_by_app = {}
-        apps = AppName.objects.all()
+        total_balance_bizao = (
+            Caisse.objects.aggregate(total=Sum("solde"))["total"]
+            or 0
+        )
 
-        for app in apps:
-            transactions_by_app[app.name] = {}
-
-            for type_key, _ in TYPE_TRANS:
-                app_transactions = transactions.filter(
-                    app=app, status="accept", type_trans=type_key
-                )
-
-                transactions_by_app[app.name][type_key] = {
-                    "count": app_transactions.count(),
-                    "total_amount": float(
-                        app_transactions.aggregate(total=Sum("amount"))["total"] or 0
-                    ),
-                }
-
-        # Balance Bizao (Solde de caisse total)
-        total_balance_bizao = Caisse.objects.aggregate(total=Sum("solde"))["total"] or 0
-
-        # Dépôts et Retraits Bizao (depuis le modèle Deposit)
         deposits_bizao = Deposit.objects.all()
         if start_date:
             deposits_bizao = deposits_bizao.filter(created_at__gte=start_date)
         if end_date:
             deposits_bizao = deposits_bizao.filter(created_at__lte=end_date)
-
-        total_deposits_bizao_count = deposits_bizao.count()
-        total_deposits_bizao_amount = (
-            deposits_bizao.aggregate(total=Sum("amount"))["total"] or 0
+        deposits_bizao_agg = deposits_bizao.aggregate(
+            count=Count("id"), amount=Sum("amount")
         )
 
-        # Retraits Bizao (depuis Caisse - calculé différemment)
-        # On utilise les retraits acceptés des transactions
-        withdrawals_bizao = withdrawals
-        total_withdrawals_bizao_count = withdrawals_bizao.count()
-        total_withdrawals_bizao_amount = float(total_withdrawals_amount)
-
-        # Récompenses (Rewards)
-        total_rewards = Reward.objects.aggregate(total=Sum("amount"))["total"] or 0
-
-        # Remboursements (Disbursements)
-        disbursements = transactions.filter(type_trans="disbursements")
-        total_disbursements = disbursements.count()
-        total_disbursements_amount = (
-            disbursements.aggregate(total=Sum("amount"))["total"] or 0
+        disbursements_agg = volume_transactions.filter(
+            type_trans="disbursements"
+        ).aggregate(
+            count=Count("id"), amount=Sum("amount")
         )
 
-        # Publicités (Advertisements)
-        total_advertisements = Advertisement.objects.count()
-        active_advertisements = Advertisement.objects.filter(enable=True).count()
-
-        # Coupons
+        total_rewards = (
+            Reward.objects.aggregate(total=Sum("amount"))["total"]
+            or 0
+        )
+        ads_agg = Advertisement.objects.aggregate(
+            total=Count("id"), active=Count("id", filter=Q(enable=True))
+        )
         total_coupons = Coupon.objects.count()
-        # Coupons en cours (moins de 24h)
-        now = timezone.now()
-        last_24h = now - timedelta(hours=24)
-        active_coupons = Coupon.objects.filter(created_at__gte=last_24h).count()
+        active_coupons = Coupon.objects.filter(
+            created_at__gte=now - timedelta(hours=24)
+        ).count()
 
-        return Response(
-            {
-                "dashboard_stats": {
-                    "total_users": total_users,
-                    "active_users": active_users_total,
-                    "inactive_users": inactive_users_total,
-                    "total_bonus": float(total_bonus),
-                    "bot_stats": {
-                        "total_transactions": total_transactions_bot,
-                        "total_deposits": total_deposit_bot,
-                        "total_withdrawals": total_withdrawal_bot,
-                        "total_users": telegram_users_count,
-                    },
-                    "total_transactions": total_transactions,
-                    "transactions_by_app": transactions_by_app,
-                    "balance_bizao": float(total_balance_bizao),
-                    "deposits_bizao": {
-                        "count": total_deposits_bizao_count,
-                        "amount": float(total_deposits_bizao_amount),
-                    },
-                    "withdrawals_bizao": {
-                        "count": total_withdrawals_bizao_count,
-                        "amount": total_withdrawals_bizao_amount,
-                    },
-                    "rewards": {"total": float(total_rewards)},
-                    "disbursements": {
-                        "count": total_disbursements,
-                        "amount": float(total_disbursements_amount),
-                    },
-                    "advertisements": {
-                        "total": total_advertisements,
-                        "active": active_advertisements,
-                    },
-                    "coupons": {"total": total_coupons, "active": active_coupons},
+        return {
+            "dashboard_stats": {
+                "total_users": total_users,
+                "active_users": active_status_users,
+                "inactive_users": inactive_status_users,
+                "total_bonus": float(total_bonus),
+                "bot_stats": {
+                    "total_transactions": bot_agg["total"] or 0,
+                    "total_deposits": bot_agg["deposits"] or 0,
+                    "total_withdrawals": bot_agg["withdrawals"] or 0,
+                    "total_users": telegram_users_count,
                 },
-                "volume_transactions": {
-                    "deposits": {
-                        "total_amount": float(total_deposits_amount),
-                        "total_count": total_deposits_count,
-                    },
-                    "withdrawals": {
-                        "total_amount": float(total_withdrawals_amount),
-                        "total_count": total_withdrawals_count,
-                    },
-                    "net_volume": float(net_volume),
-                    "evolution": {
-                        "daily": list(evolution_daily),
-                        "weekly": list(evolution_weekly),
-                        "monthly": list(evolution_monthly),
-                        "yearly": list(evolution_yearly),
-                    },
+                "total_transactions": total_transactions,
+                "transactions_by_app": transactions_by_app,
+                "balance_bizao": float(total_balance_bizao),
+                "deposits_bizao": {
+                    "count": deposits_bizao_agg["count"] or 0,
+                    "amount": float(deposits_bizao_agg["amount"] or 0),
                 },
-                "user_growth": {
-                    "new_users": {
-                        "daily": list(new_users_daily),
-                        "weekly": list(new_users_weekly),
-                        "monthly": list(new_users_monthly),
-                    },
-                    "active_users_count": active_users_count,
-                    "users_by_source": list(users_by_source),
-                    "status": {
-                        "blocked": blocked_users,
-                        "active": active_status_users,
-                        "inactive": inactive_status_users,
-                    },
+                "withdrawals_bizao": {
+                    "count": total_withdrawals_count,
+                    "amount": float(total_withdrawals_amount),
                 },
-                "referral_system": {
-                    "parrainages_count": parrainages_count,
-                    "total_referral_bonus": float(total_referral_bonus),
-                    "top_referrers": top_referrers_list,
-                    "activation_rate": round(activation_rate, 2),
+                "rewards": {"total": float(total_rewards)},
+                "disbursements": {
+                    "count": disbursements_agg["count"] or 0,
+                    "amount": float(disbursements_agg["amount"] or 0),
                 },
-            }
-        )
+                "advertisements": {
+                    "total": ads_agg["total"] or 0,
+                    "active": ads_agg["active"] or 0,
+                },
+                "coupons": {"total": total_coupons, "active": active_coupons},
+            },
+            "volume_transactions": {
+                "deposits": {
+                    "total_amount": float(total_deposits_amount),
+                    "total_count": total_deposits_count,
+                },
+                "withdrawals": {
+                    "total_amount": float(total_withdrawals_amount),
+                    "total_count": total_withdrawals_count,
+                },
+                "net_volume": float(net_volume),
+                "evolution": {
+                    "daily": evolution_daily,
+                    "weekly": evolution_weekly,
+                    "monthly": evolution_monthly,
+                    "yearly": evolution_yearly,
+                },
+                "period": {
+                    "start": chart_start if not explicit_period else start_date,
+                    "end": chart_end,
+                    "default_days": self.DEFAULT_CHART_DAYS,
+                },
+            },
+            "user_growth": {
+                "new_users": {
+                    "daily": new_users_daily,
+                    "weekly": new_users_weekly,
+                    "monthly": new_users_monthly,
+                },
+                "active_users_count": active_users_count,
+                "users_by_source": users_by_source,
+                "status": {
+                    "blocked": blocked_users,
+                    "active": active_status_users,
+                    "inactive": inactive_status_users,
+                },
+            },
+            "referral_system": {
+                "parrainages_count": parrainages_count,
+                "total_referral_bonus": float(total_referral_bonus),
+                "top_referrers": top_referrers_list,
+                "activation_rate": round(activation_rate, 2),
+            },
+        }
+
+    def get(self, request, *args, **kwargs):
+        """
+        Stats admin dashboard.
+        - Cache 90s
+        - Séries chronologiques limitées à 30 jours par défaut
+        - Agrégations SQL (plus de boucles N+1)
+        """
+        start_date = request.GET.get("start_date") or None
+        end_date = request.GET.get("end_date") or None
+        cache_key = f"mobcash:statistics:v2:{start_date or '-'}:{end_date or '-'}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
+        data = self._build_statistics(start_date, end_date)
+        cache.set(cache_key, data, timeout=self.CACHE_TTL)
+        return Response(data)
 
 
 class APIBalanceView(decorators.APIView):
