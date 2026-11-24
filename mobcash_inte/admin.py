@@ -926,3 +926,56 @@ class CancellationDebtEventAdmin(admin.ModelAdmin):
     list_filter = ("event_type",)
     search_fields = ("reference", "message")
     readonly_fields = ("created_at",)
+
+
+# ---------------------------------------------------------------------------
+# Annulation paris (app Mobcash Cancel) : suivi + trace des étapes du téléphone
+# ---------------------------------------------------------------------------
+from django.utils.html import format_html  # noqa: E402
+
+from .models import BettingCancelJob  # noqa: E402
+
+
+@admin.register(BettingCancelJob)
+class BettingCancelJobAdmin(admin.ModelAdmin):
+    list_display = (
+        "reference",
+        "user_bet_id",
+        "amount",
+        "status",
+        "par_admin",
+        "short_result",
+        "created_at",
+        "claimed_at",
+        "finished_at",
+    )
+    list_filter = ("status", "created_at")
+    search_fields = ("reference", "user_bet_id", "connect_transaction_uid", "id")
+    date_hierarchy = "created_at"
+    readonly_fields = [f.name for f in BettingCancelJob._meta.fields] + ["trace_telephone"]
+    exclude = ()
+
+    @admin.display(description="Admin")
+    def par_admin(self, obj):
+        rr = obj.raw_result if isinstance(obj.raw_result, dict) else {}
+        actor = rr.get("finished_by") or rr.get("claimed_by") or {}
+        return actor.get("admin_email") or actor.get("admin_id") or "—"
+
+    @admin.display(description="Résultat")
+    def short_result(self, obj):
+        return (obj.result_message or "")[:80]
+
+    @admin.display(description="Trace téléphone (étapes)")
+    def trace_telephone(self, obj):
+        rr = obj.raw_result if isinstance(obj.raw_result, dict) else {}
+        lines = rr.get("trace") or []
+        if not lines:
+            return "—"
+        head = f"{rr.get('device', '')} · app {rr.get('app_version', '')}\n\n"
+        return format_html(
+            '<pre style="white-space:pre-wrap;max-height:480px;overflow:auto">{}</pre>',
+            head + "\n".join(str(l) for l in lines),
+        )
+
+    def has_add_permission(self, request):
+        return False
