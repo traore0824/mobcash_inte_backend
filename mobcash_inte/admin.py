@@ -551,54 +551,21 @@ class TransactionAdmin(admin.ModelAdmin):
         Action Django admin : relance le payout des retraits sélectionnés
         (uniquement ceux qui ne sont pas encore acceptés/annulés).
         """
-        from django.db import transaction as db_transaction
-        from payment import (
-            connect_pro_withd_process,
-            feexpay_withdrawall_process,
-            autopayer_withdrawall_process,
-        )
+        from payment import relaunch_withdrawal
 
         skipped = []
         launched = []
 
         for tx in queryset:
-            if tx.type_trans != "withdrawal":
-                skipped.append(f"#{tx.id} (pas un retrait)")
-                continue
-            if tx.status in ("accept", "annuler"):
-                skipped.append(f"#{tx.id} ref={tx.reference} (déjà {tx.status})")
-                continue
-            api = (tx.api or "").lower()
-            if api not in ("connect", "feexpay", "autopayer"):
-                skipped.append(f"#{tx.id} ref={tx.reference} (API non supportée : {api})")
-                continue
-
             try:
-                with db_transaction.atomic():
-                    locked = Transaction.objects.select_for_update().get(pk=tx.pk)
-                    if locked.status in ("accept", "annuler"):
-                        skipped.append(f"#{locked.id} (déjà {locked.status})")
-                        continue
-                    locked.payout_started = False
-                    locked.payout_done = False
-                    locked.save(update_fields=["payout_started", "payout_done"])
-                    locked.change_status(
-                        new_status="pending",
-                        source="ADMIN",
-                        message=f"Retrait relancé via action admin par {request.user}",
-                    )
-
-                tx.refresh_from_db()
-                if api == "connect":
-                    connect_pro_withd_process(transaction=tx)
-                elif api == "feexpay":
-                    feexpay_withdrawall_process.delay(transaction_id=tx.id)
-                elif api == "autopayer":
-                    autopayer_withdrawall_process.delay(transaction_id=tx.id)
-
-                launched.append(f"#{tx.id} ref={tx.reference}")
+                result = relaunch_withdrawal(tx.id, actor=f"admin Django {request.user}")
             except Exception as e:
                 skipped.append(f"#{tx.id} ref={tx.reference} (erreur: {e})")
+                continue
+            if result["ok"]:
+                launched.append(f"#{tx.id} ref={tx.reference} ({result['message']})")
+            else:
+                skipped.append(f"#{tx.id} ref={tx.reference} ({result['message']})")
 
         if launched:
             self.message_user(

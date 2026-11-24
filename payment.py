@@ -2352,3 +2352,175 @@ def connect_pro_retry_deposit(
     except Exception as e:
         connect_pro_logger.critical(f"[CONNECT_RETRY_DEPOSIT] erreur: {e}")
         return {"ok": False, "error": f"Erreur appel Connect Pro: {e}", "code": "request_error"}
+
+
+# ---------------------------------------------------------------------------
+# Relance d'un retrait (admin) — même logique que BankTransfert
+# (onebridge retry_partner_withdraw) : jamais de second paiement.
+# ---------------------------------------------------------------------------
+
+CONNECT_PAID_STATUSES = {"success", "confirmed"}
+CONNECT_FAILED_STATUSES = {"failed", "cancelled", "timeout", "error", "expired"}
+
+
+def relaunch_withdrawal(transaction_id: int, actor: str = "admin") -> dict:
+    """
+    Relance le payout d'un retrait.
+
+    - Plateforme (1xbet/BetMomo) pas encore débitée (validated_at vide)
+      → flux complet comme à la création.
+    - Plateforme déjà débitée → on ne refait QUE le payout (disbursements=True).
+      Connect : on lit d'abord l'envoi précédent
+        * payé → on valide le retrait, aucun second envoi
+        * encore en cours → relance refusée
+        * échoué / expiré / illisible-absent → nouvel envoi Connect
+
+    Retourne {"ok": bool, "message": str, "http_status": int}.
+    """
+    from django.db import transaction as db_tx
+
+    tx = Transaction.objects.filter(pk=transaction_id).first()
+    if not tx:
+        return {"ok": False, "message": "Transaction non trouvée.", "http_status": 404}
+    if tx.type_trans != "withdrawal":
+        return {"ok": False, "message": "La relance est réservée aux retraits.", "http_status": 400}
+    if tx.status in ("accept", "annuler"):
+        return {
+            "ok": False,
+            "message": f"Ce retrait est déjà '{tx.status}', relance impossible.",
+            "http_status": 409,
+        }
+    api = (tx.api or "").lower()
+    if api not in ("connect", "feexpay", "autopayer"):
+        return {
+            "ok": False,
+            "message": f"API de retrait non supportée pour la relance : {api}",
+            "http_status": 400,
+        }
+
+    platform_done = bool(tx.validated_at)
+
+    # Liste noire dette : jamais de payout (règle "à vie" de cancellation_debt).
+    if platform_done:
+        try:
+            from mobcash_inte.cancellation_debt import should_block_for_debt
+
+            if should_block_for_debt(tx):
+                return {
+                    "ok": False,
+                    "message": "Client en liste noire (dette d'annulation) : aucun payout possible.",
+                    "http_status": 409,
+                }
+        except Exception as e:
+            connect_pro_logger.error(f"[RETRY_WITHDRAWAL] blacklist check error {e}")
+            return {
+                "ok": False,
+                "message": "Vérification liste noire impossible. Relance bloquée.",
+                "http_status": 500,
+            }
+
+    # Connect : vérifier l'envoi précédent avant tout nouvel envoi.
+    if api == "connect" and platform_done and tx.public_id:
+        remote = connect_pro_status(reference=tx.public_id)
+        remote_status = ""
+        if isinstance(remote, dict):
+            remote_status = str(
+                remote.get("status")
+                or (remote.get("data") or {}).get("status")
+                or ""
+            ).lower()
+        if not remote_status:
+            connect_pro_logger.warning(
+                "[RETRY_WITHDRAWAL] ref=%s Connect illisible uid=%s — relance bloquée",
+                tx.reference,
+                tx.public_id,
+            )
+            return {
+                "ok": False,
+                "message": "Impossible de vérifier l'envoi Connect précédent. Relance bloquée.",
+                "http_status": 502,
+            }
+        if remote_status in CONNECT_PAID_STATUSES:
+            webhook_transaction_success(transaction=tx, setting=Setting.objects.first())
+            tx.refresh_from_db()
+            connect_pro_logger.info(
+                "[RETRY_WITHDRAWAL] ref=%s déjà payé par Connect uid=%s → %s",
+                tx.reference,
+                tx.public_id,
+                tx.status,
+            )
+            return {
+                "ok": True,
+                "message": "Connect a déjà payé ce retrait. Retrait validé, aucun second envoi.",
+                "http_status": 200,
+            }
+        if remote_status not in CONNECT_FAILED_STATUSES:
+            return {
+                "ok": False,
+                "message": (
+                    f"Connect a déjà cet envoi en cours (statut {remote_status}). "
+                    "Pas de second paiement."
+                ),
+                "http_status": 409,
+            }
+
+    previous_uid = tx.public_id or ""
+    with db_tx.atomic():
+        locked = Transaction.objects.select_for_update().get(pk=tx.pk)
+        if locked.status in ("accept", "annuler"):
+            return {
+                "ok": False,
+                "message": f"Ce retrait est déjà '{locked.status}', relance impossible.",
+                "http_status": 409,
+            }
+        locked.payout_started = False
+        locked.payout_done = False
+        locked.save(update_fields=["payout_started", "payout_done"])
+        locked.change_status(
+            # Plateforme déjà débitée → paiement en cours (comme le 1er envoi).
+            new_status="init_payment" if platform_done else "pending",
+            source="ADMIN",
+            message=(
+                f"Retrait relancé par {actor}"
+                + (f" (envoi précédent {previous_uid})" if previous_uid else "")
+            ),
+        )
+
+    tx.refresh_from_db()
+    if api == "connect":
+        connect_pro_withd_process(transaction=tx, disbursements=platform_done)
+        tx.refresh_from_db()
+        if platform_done and (not tx.public_id or tx.public_id == previous_uid):
+            if tx.network and tx.network.manual_processing:
+                msg = "Réseau en traitement manuel : demande envoyée sur Telegram."
+                return {"ok": True, "message": msg, "http_status": 200}
+            connect_pro_logger.error(
+                "[RETRY_WITHDRAWAL] ref=%s nouvel envoi Connect non créé | resp=%s",
+                tx.reference,
+                str(tx.connect_pro_response)[:300],
+            )
+            return {
+                "ok": False,
+                "message": (
+                    "Connect n'a pas créé le nouvel envoi : "
+                    f"{str(tx.connect_pro_response or '')[:200]}"
+                ),
+                "http_status": 502,
+            }
+    elif api == "feexpay":
+        feexpay_withdrawall_process.delay(transaction_id=tx.id, disbursements=platform_done)
+    elif api == "autopayer":
+        autopayer_withdrawall_process.delay(transaction_id=tx.id, disbursements=platform_done)
+
+    tx.refresh_from_db()
+    connect_pro_logger.info(
+        "[RETRY_WITHDRAWAL] ref=%s api=%s platform_done=%s prev_uid=%s new_uid=%s status=%s by=%s",
+        tx.reference,
+        api,
+        platform_done,
+        previous_uid,
+        tx.public_id,
+        tx.status,
+        actor,
+    )
+    return {"ok": True, "message": "Retrait relancé.", "http_status": 200}

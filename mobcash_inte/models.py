@@ -1118,3 +1118,50 @@ class ChatbotHumanMessage(models.Model):
 
     def __str__(self):
         return f"{self.conversation_id} · {self.content[:40]}"
+
+
+
+# ---------------------------------------------------------------------------
+# Annulation paris (Connect → Mobcash → app Mobcash Cancel)
+# ---------------------------------------------------------------------------
+
+BETTING_CANCEL_JOB_STATUS = [
+    ("pending", "En attente"),
+    ("processing", "En cours"),
+    ("success", "Succès"),
+    ("failed", "Échec"),
+]
+
+
+class BettingCancelJob(models.Model):
+    """Job d'annulation 1x/my Mobcash demandé par Connect, exécuté par l'app device."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user_bet_id = models.CharField(max_length=64, db_index=True)
+    reference = models.CharField(max_length=128, db_index=True)
+    connect_transaction_uid = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    platform = models.CharField(max_length=128, blank=True, default="")
+    amount = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
+    transaction_type = models.CharField(max_length=32, blank=True, default="DEPOSIT")
+    reason = models.TextField(blank=True, default="")
+    status = models.CharField(max_length=20, choices=BETTING_CANCEL_JOB_STATUS, default="pending", db_index=True)
+    result_message = models.TextField(blank=True, default="")
+    callback_url = models.URLField(max_length=500, blank=True, default="")
+    raw_request = models.JSONField(default=dict, blank=True)
+    raw_result = models.JSONField(default=dict, blank=True)
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Job annulation paris"
+        verbose_name_plural = "Jobs annulation paris"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["status", "created_at"]),
+            models.Index(fields=["reference"]),
+        ]
+
+    def __str__(self):
+        return f"{self.reference} · {self.user_bet_id} · {self.status}"

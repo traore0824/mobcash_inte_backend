@@ -12,6 +12,11 @@ from .support_lookup import (
     PublicTransactionExpireView,
 )
 from .services_availability import PublicServicesAvailabilityView
+from .betting_cancel_views import (
+    ConnectBettingCancelView,
+    DeviceCancelJobNextView,
+    DeviceCancelJobResultView,
+)
 from rest_framework.routers import DefaultRouter
 from fcm_django.api.rest_framework import FCMDeviceAuthorizedViewSet
 
@@ -144,6 +149,22 @@ urlpatterns = [
         "cancel-transaction",
         views.CancelTransactionView.as_view(),
         name="cancel-transaction",
+    ),
+    # Alias sous /mobcash/… (même vues que /api/v1/…)
+    path(
+        "connect/betting-cancel/",
+        ConnectBettingCancelView.as_view(),
+        name="connect-betting-cancel",
+    ),
+    path(
+        "device/cancel-jobs/next/",
+        DeviceCancelJobNextView.as_view(),
+        name="device-cancel-job-next",
+    ),
+    path(
+        "device/cancel-jobs/<uuid:uid>/result/",
+        DeviceCancelJobResultView.as_view(),
+        name="device-cancel-job-result",
     ),
     path(
         "finalize-transaction-user",
