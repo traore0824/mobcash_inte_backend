@@ -317,9 +317,18 @@ class CreateBonusSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 
+class PublicNetworkSerializer(serializers.ModelSerializer):
+    """Infos réseau publiques (affichage côté app) : sans config API ni frais."""
+
+    class Meta:
+        model = Network
+        fields = ["id", "name", "public_name", "image", "country_code", "indication"]
+
+
 class TransactionDetailsSerializer(serializers.ModelSerializer):
     user = SmallUserSerializer()
     app_details = serializers.SerializerMethodField()
+    network_details = serializers.SerializerMethodField()
     crypto = serializers.SerializerMethodField()
     wave_business = serializers.SerializerMethodField()
     wave_personnel_numero = serializers.SerializerMethodField()
@@ -330,6 +339,10 @@ class TransactionDetailsSerializer(serializers.ModelSerializer):
 
     def get_app_details(self, obj):
         return ReadAppNameSerializer(obj.app).data
+
+    def get_network_details(self, obj):
+        network = getattr(obj, "network", None)
+        return PublicNetworkSerializer(network).data if network else None
 
     def get_wave_business(self, obj):
         network = getattr(obj, "network", None)

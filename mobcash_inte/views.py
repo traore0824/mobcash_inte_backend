@@ -1751,11 +1751,13 @@ class HistoryTransactionViews(generics.ListAPIView):
     ]
 
     def get_queryset(self):
+        # select_related : évite une requête SQL par transaction (app, réseau, utilisateur)
+        base = Transaction.objects.select_related("app", "network", "user")
         if self.request.user.is_authenticated and self.request.user.is_staff:
-            return Transaction.objects.all()
+            return base.all()
         if self.request.user.is_authenticated:
-            return Transaction.objects.filter(user=self.request.user)
-        return Transaction.objects.filter(telegram_user=self.request.telegram_user)
+            return base.filter(user=self.request.user)
+        return base.filter(telegram_user=self.request.telegram_user)
 
 
 class TransactionDetailView(decorators.APIView):
